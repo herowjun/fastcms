@@ -6,13 +6,13 @@ import connect from "./imgPlugin/connect";
 // import ClassicEditor from '@ckeditor/ckeditor5-editor-classic/src/classiceditor';
 import DecoupledEditor from '@ckeditor/ckeditor5-editor-decoupled/src/decouplededitor';
 import Essentials from '@ckeditor/ckeditor5-essentials/src/essentials';
-import UploadAdapter from '@ckeditor/ckeditor5-adapter-ckfinder/src/uploadadapter';
+// import UploadAdapter from '@ckeditor/ckeditor5-adapter-ckfinder/src/uploadadapter';
 import Autoformat from '@ckeditor/ckeditor5-autoformat/src/autoformat';
 import Bold from '@ckeditor/ckeditor5-basic-styles/src/bold';
 import Code from '@ckeditor/ckeditor5-basic-styles/src/code';
 import Italic from '@ckeditor/ckeditor5-basic-styles/src/italic';
 import BlockQuote from '@ckeditor/ckeditor5-block-quote/src/blockquote';
-import CKFinder from '@ckeditor/ckeditor5-ckfinder/src/ckfinder';
+// import CKFinder from '@ckeditor/ckeditor5-ckfinder/src/ckfinder';
 import EasyImage from '@ckeditor/ckeditor5-easy-image/src/easyimage';
 import Heading from '@ckeditor/ckeditor5-heading/src/heading';
 import Image from '@ckeditor/ckeditor5-image/src/image';
@@ -63,19 +63,21 @@ const state = reactive({
   isClient: props.isClient || false
 })
 const editorConfig = reactive({
+    // licenseKey: 'eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjE3Mzg1NDA3OTksImp0aSI6IjFhNGMzMWEyLTQyMDItNDM5My04NGU0LTc3MzU4M2M3YWY5OCIsInVzYWdlRW5kcG9pbnQiOiJodHRwczovL3Byb3h5LWV2ZW50LmNrZWRpdG9yLmNvbSIsImRpc3RyaWJ1dGlvbkNoYW5uZWwiOlsiY2xvdWQiLCJkcnVwYWwiLCJzaCJdLCJ3aGl0ZUxhYmVsIjp0cnVlLCJsaWNlbnNlVHlwZSI6InRyaWFsIiwiZmVhdHVyZXMiOlsiKiJdLCJ2YyI6ImI1YzcxY2IyIn0.xU_zGSy0grHiFTN3CvP3xiY6RmCQYsRr4zfnf-c_nvvxk84WXNirdQt94t56Z8dUx7BJx7YDjnGIwkQfVXvnuQ',
+    licenseKey: 'GPL',
     language: {
         ui: 'zh-cn'
     },
     plugins: [
         SourceEditing,
         Essentials,
-        UploadAdapter,
+        // UploadAdapter,
         Autoformat,
         Bold,
         Code,
         Italic,
         BlockQuote,
-        CKFinder,
+        // CKFinder,
         CloudServices,
         EasyImage,
         Heading,
