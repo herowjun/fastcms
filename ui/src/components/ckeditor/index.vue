@@ -3,8 +3,8 @@ import {onMounted, ref, watch, reactive} from "vue";
 
 import connect from "./imgPlugin/connect";
 
-// import ClassicEditor from '@ckeditor/ckeditor5-editor-classic/src/classiceditor';
-import DecoupledEditor from '@ckeditor/ckeditor5-editor-decoupled/src/decouplededitor';
+import ClassicEditor from '@ckeditor/ckeditor5-editor-classic/src/classiceditor';
+// import DecoupledEditor from '@ckeditor/ckeditor5-editor-decoupled/src/decouplededitor';
 import Essentials from '@ckeditor/ckeditor5-essentials/src/essentials';
 // import UploadAdapter from '@ckeditor/ckeditor5-adapter-ckfinder/src/uploadadapter';
 import Autoformat from '@ckeditor/ckeditor5-autoformat/src/autoformat';
@@ -63,7 +63,6 @@ const state = reactive({
   isClient: props.isClient || false
 })
 const editorConfig = reactive({
-    // licenseKey: 'eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjE3Mzg1NDA3OTksImp0aSI6IjFhNGMzMWEyLTQyMDItNDM5My04NGU0LTc3MzU4M2M3YWY5OCIsInVzYWdlRW5kcG9pbnQiOiJodHRwczovL3Byb3h5LWV2ZW50LmNrZWRpdG9yLmNvbSIsImRpc3RyaWJ1dGlvbkNoYW5uZWwiOlsiY2xvdWQiLCJkcnVwYWwiLCJzaCJdLCJ3aGl0ZUxhYmVsIjp0cnVlLCJsaWNlbnNlVHlwZSI6InRyaWFsIiwiZmVhdHVyZXMiOlsiKiJdLCJ2YyI6ImI1YzcxY2IyIn0.xU_zGSy0grHiFTN3CvP3xiY6RmCQYsRr4zfnf-c_nvvxk84WXNirdQt94t56Z8dUx7BJx7YDjnGIwkQfVXvnuQ',
     licenseKey: 'GPL',
     language: {
         ui: 'zh-cn'
@@ -102,6 +101,8 @@ const editorConfig = reactive({
         ImgCustom
     ],
     toolbar: [
+        'undo',
+        'redo',
         'sourceEditing',
         '|',
         'heading',
@@ -120,8 +121,6 @@ const editorConfig = reactive({
         'blockQuote',
         'insertTable',
         'mediaEmbed',
-        'undo',
-        'redo',
     ],
     image: {
       styles: ["alignLeft", "alignCenter", "alignRight"],
@@ -172,11 +171,13 @@ const editorConfig = reactive({
 onMounted(() => {
   connect.dialogObj = attachDialog.value;
   const ckeditorDiv = ckeditorDom.value;
-  DecoupledEditor.create(ckeditorDiv.querySelector('.CKEditorContent'), editorConfig)
+  ClassicEditor.create(ckeditorDiv.querySelector('.CKEditorContent'), editorConfig)
   .then((editor: any) => {
     const toolbar = ckeditorDiv.querySelector(".CKEditorToolbar");
-    toolbar && (toolbar.innerHTML = "");
-    setTimeout(() => toolbar.appendChild( editor.ui.view.toolbar.element ), 0);
+    if (toolbar) {
+        toolbar.innerHTML = "";  // 清空现有工具栏内容
+        toolbar.appendChild(editor.ui.view.toolbar.element);  // 将编辑器工具栏附加到 DOM
+    }
     editorExample = editor;
     editor.setData(props.modelValue);
     editor.model.document.on("change", function() {
