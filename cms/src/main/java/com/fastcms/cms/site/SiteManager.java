@@ -17,16 +17,12 @@
 package com.fastcms.cms.site;
 
 
-<<<<<<< HEAD:core/src/main/java/com/fastcms/core/site/SiteManager.java
 import jakarta.servlet.http.HttpServletRequest;
-=======
 import com.fastcms.cms.entity.Article;
 import com.fastcms.cms.entity.ArticleCategory;
 import com.fastcms.cms.entity.Menu;
 import com.fastcms.core.site.Site;
 
-import javax.servlet.http.HttpServletRequest;
->>>>>>> 689dcfd6a1a4f13bc83ecbf17479a2650a988f86:cms/src/main/java/com/fastcms/cms/site/SiteManager.java
 import java.util.List;
 
 /**

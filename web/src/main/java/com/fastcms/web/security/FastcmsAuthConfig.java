@@ -33,6 +33,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -78,19 +79,10 @@ public class FastcmsAuthConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE + 1)
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-<<<<<<< HEAD
-
-        http.formLogin().loginPage("/fastcms.html");
-        http.authorizeRequests((authorizeRequests) -> {
-            authorizeRequests.requestMatchers("/fastcms/**").authenticated();
-        });
-=======
-        http.formLogin().loginPage("/fastcms.html").loginProcessingUrl("/login").successHandler(fastcmsAuthenticationSuccessHandler());
-        http.authorizeRequests().antMatchers("/fastcms/**").authenticated();
->>>>>>> 51c0b03b65513682047c3f609292980dbb3eb943
-        http.csrf().disable().cors()
-                .and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                .and().authorizeRequests().requestMatchers(CorsUtils::isPreFlightRequest).permitAll();
+        http.formLogin(formLoginConfigurer -> formLoginConfigurer.loginPage("/fastcms.html").loginProcessingUrl("/login").successHandler(fastcmsAuthenticationSuccessHandler()));
+        http.authorizeHttpRequests((authorizeRequests) -> authorizeRequests.requestMatchers("/fastcms/**").authenticated().requestMatchers(CorsUtils::isPreFlightRequest).permitAll());
+        http.csrf(AbstractHttpConfigurer::disable).cors(withDefaults())
+                .sessionManagement(sessionManagementConfigurer -> sessionManagementConfigurer.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.oauth2Login(oAuth2LoginConfigurer
                 -> oAuth2LoginConfigurer.authorizationEndpoint(
                 authorizationEndpointConfig -> authorizationEndpointConfig.authorizationRequestResolver(
