@@ -72,15 +72,17 @@ public class FastcmsAuthConfig {
 
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
-        return (web) -> web.ignoring().requestMatchers(authConfigs.getIgnoreUrls().toArray(new String[] {}))
-                .and().ignoring().requestMatchers(RequestUtils.getIgnoreUrls().toArray(new String[] {}));
+        return (web) -> {
+            web.ignoring().requestMatchers(authConfigs.getIgnoreUrls().toArray(new String[] {}));
+            web.ignoring().requestMatchers(RequestUtils.getIgnoreUrls().toArray(new String[] {}));
+        };
     }
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE + 1)
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.formLogin(formLoginConfigurer -> formLoginConfigurer.loginPage("/fastcms.html").loginProcessingUrl("/login").successHandler(fastcmsAuthenticationSuccessHandler()));
-        http.authorizeHttpRequests((authorizeRequests) -> authorizeRequests.requestMatchers("/fastcms/**").authenticated().requestMatchers(CorsUtils::isPreFlightRequest).permitAll());
+        http.authorizeHttpRequests((authorizeRequests) -> authorizeRequests.requestMatchers("/fastcms/**").authenticated().requestMatchers(CorsUtils::isPreFlightRequest).permitAll().anyRequest().permitAll());
         http.csrf(AbstractHttpConfigurer::disable).cors(withDefaults())
                 .sessionManagement(sessionManagementConfigurer -> sessionManagementConfigurer.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.oauth2Login(oAuth2LoginConfigurer

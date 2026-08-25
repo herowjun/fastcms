@@ -30,7 +30,7 @@ import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
 import org.springframework.security.web.util.UrlUtils;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -72,7 +72,7 @@ public class FastcmsOAuth2AuthorizationRequestResolver implements OAuth2Authoriz
 
     private final ClientRegistrationRepository clientRegistrationRepository;
 
-    private final AntPathRequestMatcher authorizationRequestMatcher;
+    private final PathPatternRequestMatcher authorizationRequestMatcher;
 
     private Consumer<OAuth2AuthorizationRequest.Builder> authorizationRequestCustomizer = (customizer) -> {
     };
@@ -89,7 +89,7 @@ public class FastcmsOAuth2AuthorizationRequestResolver implements OAuth2Authoriz
         Assert.notNull(clientRegistrationRepository, "clientRegistrationRepository cannot be null");
         Assert.hasText(authorizationRequestBaseUri, "authorizationRequestBaseUri cannot be empty");
         this.clientRegistrationRepository = clientRegistrationRepository;
-        this.authorizationRequestMatcher = new AntPathRequestMatcher(
+        this.authorizationRequestMatcher = PathPatternRequestMatcher.pathPattern(
                 authorizationRequestBaseUri + "/{" + REGISTRATION_ID_URI_VARIABLE_NAME + "}");
     }
 
@@ -224,7 +224,7 @@ public class FastcmsOAuth2AuthorizationRequestResolver implements OAuth2Authoriz
         Map<String, String> uriVariables = new HashMap<>();
         uriVariables.put("registrationId", clientRegistration.getRegistrationId());
         // @formatter:off
-        UriComponents uriComponents = UriComponentsBuilder.fromHttpUrl(UrlUtils.buildFullRequestUrl(request))
+        UriComponents uriComponents = UriComponentsBuilder.fromUriString(UrlUtils.buildFullRequestUrl(request))
                 .replacePath(request.getContextPath())
                 .replaceQuery(null)
                 .fragment(null)

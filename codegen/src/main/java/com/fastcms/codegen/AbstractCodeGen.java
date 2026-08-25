@@ -50,7 +50,7 @@ public abstract class AbstractCodeGen {
                 .packageConfig(builder -> {
                     builder.parent("com.fastcms") // 设置父包名
                             .moduleName(getModelName())
-                            .pathInfo(Collections.singletonMap(OutputFile.mapperXml, System.getProperty("user.dir") + getOutputDir() + "/src/main/resources/mapper/")); // 设置mapperXml生成路径
+                            .pathInfo(Collections.singletonMap(OutputFile.xml, System.getProperty("user.dir") + getOutputDir() + "/src/main/resources/mapper/")); // 设置mapperXml生成路径
                 })
                 .templateConfig(builder -> builder.disable(TemplateType.CONTROLLER))
                 .strategyConfig(builder -> {

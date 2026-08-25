@@ -18,7 +18,7 @@ package com.fastcms.core.config;
 
 import com.fastcms.utils.ConfigUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.mail.MailProperties;
+import org.springframework.boot.mail.autoconfigure.MailProperties;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.mail.javamail.JavaMailSenderImpl;

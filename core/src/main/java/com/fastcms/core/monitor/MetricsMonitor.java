@@ -33,4 +33,8 @@ public class MetricsMonitor {
         return Metrics.counter("fastcms_exception", "name", "unhealth");
     }
 
+    public static Counter getRuntimeException() {
+        return Metrics.counter("fastcms_exception", "name", "runtime exception");
+    }
+
 }

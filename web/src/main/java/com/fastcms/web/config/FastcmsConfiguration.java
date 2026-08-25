@@ -36,8 +36,9 @@ import com.fastcms.utils.ApplicationUtils;
 import com.fastcms.utils.ConfigUtils;
 import com.fastcms.utils.RequestUtils;
 import com.fastcms.web.filter.AuthInterceptor;
-import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
-import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
+import tools.jackson.databind.ext.javatime.deser.LocalDateTimeDeserializer;
+import tools.jackson.databind.ext.javatime.ser.LocalDateTimeSerializer;
+import tools.jackson.databind.module.SimpleModule;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -45,9 +46,9 @@ import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.BeanFactoryUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
+import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
-import org.springframework.boot.web.context.WebServerInitializedEvent;
+import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.MessageSource;
@@ -76,10 +77,12 @@ import org.tuckey.web.filters.urlrewrite.Conf;
 import org.tuckey.web.filters.urlrewrite.UrlRewriteFilter;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.TimeZone;
 
 import static com.fastcms.common.constants.FastcmsConstants.WECHAT_MINIAPP_APP_ID;
 
@@ -130,9 +133,7 @@ public class FastcmsConfiguration implements WebMvcConfigurer, WebSocketConfigur
 
     @Bean
     public CookieLocaleResolver localeResolver() {
-        CookieLocaleResolver cookieLocaleResolver = new CookieLocaleResolver();
-        cookieLocaleResolver.setCookieName("fastcms.lang.LOCALE");
-        return cookieLocaleResolver;
+        return new CookieLocaleResolver("fastcms.lang.LOCALE");
     }
 
     @Bean
@@ -179,12 +180,14 @@ public class FastcmsConfiguration implements WebMvcConfigurer, WebSocketConfigur
     }
 
     @Bean
-    public Jackson2ObjectMapperBuilderCustomizer jacksonObjectMapperCustomization() {
+    public JsonMapperBuilderCustomizer jacksonObjectMapperCustomization() {
         return jacksonObjectMapperBuilder -> {
-            jacksonObjectMapperBuilder.timeZone(ZoneId.systemDefault().toString());
-            jacksonObjectMapperBuilder.serializerByType(LocalDateTime.class, localDateTimeSerializer());
-            jacksonObjectMapperBuilder.deserializerByType(LocalDateTime.class,localDateTimeDeserializer());
-            jacksonObjectMapperBuilder.simpleDateFormat(pattern);
+            jacksonObjectMapperBuilder.defaultTimeZone(TimeZone.getTimeZone(ZoneId.systemDefault()));
+            SimpleModule module = new SimpleModule();
+            module.addSerializer(LocalDateTime.class, localDateTimeSerializer());
+            module.addDeserializer(LocalDateTime.class, localDateTimeDeserializer());
+            jacksonObjectMapperBuilder.addModule(module);
+            jacksonObjectMapperBuilder.defaultDateFormat(new SimpleDateFormat(pattern));
         };
     }
 

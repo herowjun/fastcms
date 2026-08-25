@@ -14,13 +14,12 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
-import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
-import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -45,26 +44,24 @@ public class FastcmsAuthServerConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http, FastcmsJwtTokenCustomizer jwtTokenCustomizer) throws Exception {
-        OAuth2AuthorizationServerConfigurer authorizationServerConfigurer = new OAuth2AuthorizationServerConfigurer();
-        authorizationServerConfigurer.oidc(Customizer.withDefaults());
-        authorizationServerConfigurer.authorizationEndpoint(authorizationEndpoint ->
-                authorizationEndpoint
-                        .authorizationRequestConverter(new FastcmsOAuth2AuthorizationCodeRequestAuthenticationConverter(tokenManager))
-                        .consentPage("/consent")
-        );
+        http.securityMatcher("/oauth2/**", "/.well-known/**", "/userinfo");
 
-        RequestMatcher endpointsMatcher = authorizationServerConfigurer.getEndpointsMatcher();
+        http.oauth2AuthorizationServer(server ->
+                server.authorizationEndpoint(authorizationEndpoint ->
+                        authorizationEndpoint
+                                .authorizationRequestConverter(new FastcmsOAuth2AuthorizationCodeRequestAuthenticationConverter(tokenManager))
+                                .consentPage("/consent")
+                )
+                .oidc(Customizer.withDefaults())
+        );
 
         http.setSharedObject(OAuth2TokenCustomizer.class, jwtTokenCustomizer);
 
-        http
-                .securityMatcher(endpointsMatcher)
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .csrf(csrf -> csrf.ignoringRequestMatchers(endpointsMatcher))
-                .exceptionHandling(exceptions ->
-                        exceptions.authenticationEntryPoint(new LoginUrlAuthenticationEntryPoint("/fastcms.html#/login"))
-                )
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
+        // 其他安全配置（不需要显式设置 securityMatcher）
+        http.exceptionHandling(exceptions ->
+                exceptions.authenticationEntryPoint(new LoginUrlAuthenticationEntryPoint("/fastcms.html#/login"))
+        );
+        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
 
         return http.build();
     }

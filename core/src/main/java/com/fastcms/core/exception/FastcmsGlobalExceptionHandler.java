@@ -72,8 +72,21 @@ public class FastcmsGlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public Object handleDataAccessException(Exception e) {
+    public Object handleException(Exception e) {
         MetricsMonitor.getDbException().increment();
+        log.error("rootFile", e);
+
+        boolean ajaxRequest = RequestUtils.isAjaxRequest(RequestUtils.getRequest());
+        if (ajaxRequest) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Fastcms Server error");
+        } else {
+            return UrlBasedViewResolver.FORWARD_URL_PREFIX.concat("/error/500.html");
+        }
+    }
+
+    @ExceptionHandler(RuntimeException.class)
+    public Object handleRuntimeException(RuntimeException e) {
+        MetricsMonitor.getRuntimeException().increment();
         log.error("rootFile", e);
 
         boolean ajaxRequest = RequestUtils.isAjaxRequest(RequestUtils.getRequest());

@@ -64,7 +64,7 @@ public class OAuth2AuthorizationGrantRequestEntityUtils {
 
     private static HttpHeaders getDefaultTokenRequestHeaders() {
         HttpHeaders headers = new HttpHeaders();
-        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON_UTF8));
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
         final MediaType contentType = MediaType.valueOf(MediaType.APPLICATION_FORM_URLENCODED_VALUE + ";charset=UTF-8");
         headers.setContentType(contentType);
         return headers;

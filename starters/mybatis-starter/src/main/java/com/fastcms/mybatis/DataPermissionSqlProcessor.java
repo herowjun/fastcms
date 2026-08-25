@@ -62,10 +62,10 @@ public class DataPermissionSqlProcessor extends StatementVisitorAdapter implemen
 
         if (select.getWithItemsList() != null) {
             for (WithItem withItem : select.getWithItemsList()) {
-                withItem.accept(this);
+                withItem.accept((SelectVisitor) this);
             }
         }
-        select.getSelectBody().accept(this);
+        select.getSelectBody().accept((SelectVisitor) this);
 
     }
 
@@ -74,24 +74,14 @@ public class DataPermissionSqlProcessor extends StatementVisitorAdapter implemen
     }
 
     @Override
-    public void visit(SubSelect subSelect) {
-        if (subSelect != null) {
-            subSelect.getSelectBody().accept(this);
+    public void visit(ParenthesedSelect parenthesedSelect) {
+        if (parenthesedSelect != null && parenthesedSelect.getSelect() != null) {
+            parenthesedSelect.getSelect().accept((SelectVisitor) this);
         }
     }
 
     @Override
-    public void visit(SubJoin subjoin) {
-
-    }
-
-    @Override
     public void visit(LateralSubSelect lateralSubSelect) {
-
-    }
-
-    @Override
-    public void visit(ValuesList valuesList) {
 
     }
 
@@ -101,7 +91,7 @@ public class DataPermissionSqlProcessor extends StatementVisitorAdapter implemen
     }
 
     @Override
-    public void visit(ParenthesisFromItem aThis) {
+    public void visit(ParenthesedFromItem aThis) {
 
     }
 
@@ -137,13 +127,25 @@ public class DataPermissionSqlProcessor extends StatementVisitorAdapter implemen
 
     @Override
     public void visit(SetOperationList setOpList) {
-        for (SelectBody plainSelect : setOpList.getSelects()) {
-            plainSelect.accept(this);
+        for (Select plainSelect : setOpList.getSelects()) {
+            plainSelect.accept((SelectVisitor) this);
         }
     }
 
     @Override
     public void visit(WithItem withItem) {
+        if (withItem != null && withItem.getSelect() != null) {
+            withItem.getSelect().accept((SelectVisitor) this);
+        }
+    }
+
+    @Override
+    public void visit(Values values) {
+
+    }
+
+    @Override
+    public void visit(TableStatement tableStatement) {
 
     }
 

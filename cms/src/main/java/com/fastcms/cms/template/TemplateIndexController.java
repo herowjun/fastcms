@@ -95,7 +95,7 @@ public class TemplateIndexController extends TemplateBaseController {
         return getTemplatePath().concat(INDEX);
     }
 
-    @RequestMapping("p/{path}")
+    @RequestMapping("page/{path}")
     public String path(@PathVariable("path") String path, Model model) {
 
         /**
@@ -124,7 +124,7 @@ public class TemplateIndexController extends TemplateBaseController {
         return view;
     }
 
-    @RequestMapping("a/{id}")
+    @RequestMapping("article/{id}")
     public String article(@PathVariable("id") Long id, Model model) {
         IArticleService.ArticleInfoVo article = articleService.getArticleDetail(id);
 
@@ -142,7 +142,7 @@ public class TemplateIndexController extends TemplateBaseController {
         return view;
     }
 
-    @RequestMapping("a/c/{id}")
+    @RequestMapping("article/category/{id}")
     public String category(@PathVariable("id") String id,
                            @RequestParam(name = "page", required = false, defaultValue = "1") int pageNo,
                            @RequestParam(name = "pageSize", required = false, defaultValue = "15") int pageSize,
@@ -173,7 +173,7 @@ public class TemplateIndexController extends TemplateBaseController {
         return view;
     }
 
-    @RequestMapping("a/t/{id}")
+    @RequestMapping("article/tag/{id}")
     public String tag(@PathVariable("id") String id,
                            @RequestParam(name = "page", required = false, defaultValue = "1") int pageNo,
                            @RequestParam(name = "pageSize", required = false, defaultValue = "15") int pageSize,

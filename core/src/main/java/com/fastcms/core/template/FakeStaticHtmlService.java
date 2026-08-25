@@ -34,22 +34,22 @@ public class FakeStaticHtmlService implements FastcmsStaticHtmlService {
     /**
      * 文章访问路径
      */
-    String ARTICLE_PATH = "/a/";
+    String ARTICLE_PATH = "/article/";
 
     /**
      * 页面访问路径
      */
-    String PAGE_PATH = "/p/";
+    String PAGE_PATH = "/page/";
 
     /**
      * 分类访问路径
      */
-    String CATEGORY_PATH = "/a/c/";
+    String CATEGORY_PATH = "/article/category/";
 
     /**
      * 标签访问路径
      */
-    String TAG_PATH = "/a/t/";
+    String TAG_PATH = "/article/tag/";
 
     @Override
     public boolean isEnable() {

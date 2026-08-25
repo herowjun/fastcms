@@ -1,0 +1,2 @@
+com.fastcms.wechat.autoconfigure.WechatMiniAppAutoConfiguration
+com.fastcms.wechat.autoconfigure.WechatMpAutoConfiguration

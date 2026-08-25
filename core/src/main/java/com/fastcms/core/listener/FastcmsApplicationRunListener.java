@@ -6,7 +6,7 @@ import com.fastcms.common.utils.VersionUtils;
 import com.fastcms.core.utils.AttachUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ConfigurableBootstrapContext;
+import org.springframework.boot.bootstrap.ConfigurableBootstrapContext;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringApplicationRunListener;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -120,15 +120,29 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
     String getTemplateDir() {
         if (isDev) {
             String osName = System.getProperty("os.name");
-            if (osName.contains("Windows")) {
-                String substring = workDir.getAbsolutePath().replace("\\target\\classes", "").replace("\\target\\test-classes", "");
-                substring = substring.substring(0, substring.lastIndexOf("\\"));
-                return substring.concat("\\templates\\target\\classes\\");
+            String sep = osName.contains("Windows") ? "\\" : "/";
+            String targetClasses = sep + "target" + sep + "classes";
+            String targetTestClasses = sep + "target" + sep + "test-classes";
+
+            String substring = workDir.getAbsolutePath()
+                    .replace(targetClasses, "")
+                    .replace(targetTestClasses, "");
+            int lastSep = substring.lastIndexOf(sep);
+            if (lastSep > 0) {
+                substring = substring.substring(0, lastSep);
             }
-            if (osName.contains("Mac")) {
-                String substring = workDir.getAbsolutePath().replace("/target/classes", "").replace("/target/test-classes", "");
-                substring = substring.substring(0, substring.lastIndexOf("/"));
-                return substring.concat("/templates/target/classes/");
+            String templatePath = substring + sep + "templates" + sep + "target" + sep + "classes" + sep;
+            if (new File(templatePath).exists()) {
+                return templatePath;
+            }
+
+            String userDir = System.getProperty("user.dir");
+            File parent = new File(userDir).getParentFile();
+            if (parent != null) {
+                String altPath = parent.getAbsolutePath() + sep + "templates" + sep + "target" + sep + "classes" + sep;
+                if (new File(altPath).exists()) {
+                    return altPath;
+                }
             }
         }
         return workDir.getAbsolutePath() + File.separator + dirNames[2] + File.separator;

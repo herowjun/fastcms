@@ -11,10 +11,10 @@
 # SpringBoot2与Vue2已在2023年底停止维护，Fastcms已完成SpringBoot3+Vue3+Jdk17的技术框架升级!!!
 
 ### 文档
-- [文档地址](http://doc.xjd2020.com)
+- [文档地址](http://doc.xiaojudeng.net.cn)
 
 ### 官网
-- [官网地址](https://www.xjd2020.com)
+- [官网地址](https://www.xiaojudeng.net.cn)
 
 ### 安装部署
 - [视频教程](https://www.bilibili.com/video/BV12G4y167vi/)

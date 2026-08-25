@@ -95,6 +95,14 @@
             <appender-ref ref="CONSOLE"/>
             <level value="DEBUG"/>
         </logger>
+        <logger name="org.springframework.security">
+            <appender-ref ref="CONSOLE"/>
+            <level value="DEBUG"/>
+        </logger>
+        <logger name="org.springframework.security.oauth2">
+            <appender-ref ref="CONSOLE"/>
+            <level value="DEBUG"/>
+        </logger>
     </springProfile>
 
     <springProfile name="prod">

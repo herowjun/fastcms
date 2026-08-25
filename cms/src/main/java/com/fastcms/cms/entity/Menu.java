@@ -36,7 +36,7 @@ public class Menu implements Serializable, StaticPathHelper, Language {
     /**
      * 上级id
      */
-    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private Long parentId;
 
     /**
