@@ -20,6 +20,7 @@ import com.fastcms.oauth2.authentication.FastcmsSavedRequestAwareAuthenticationS
 import com.fastcms.oauth2.endpoint.FastcmsAuthorizationCodeTokenResponseClient;
 import com.fastcms.oauth2.endpoint.FastcmsOAuth2AuthorizationRequestResolver;
 import com.fastcms.oauth2.userinfo.FastcmsOAuth2UserService;
+import com.fastcms.plugin.PluginPermitAllManager;
 import com.fastcms.utils.RequestUtils;
 import com.fastcms.web.filter.JwtAuthTokenFilter;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +66,9 @@ public class FastcmsAuthConfig {
     @Autowired
     private AuthConfigs authConfigs;
 
+    @Autowired
+    private PluginPermitAllManager pluginPermitAllManager;
+
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
@@ -75,6 +79,8 @@ public class FastcmsAuthConfig {
         return (web) -> {
             web.ignoring().requestMatchers(authConfigs.getIgnoreUrls().toArray(new String[] {}));
             web.ignoring().requestMatchers(RequestUtils.getIgnoreUrls().toArray(new String[] {}));
+            // 插件@PassFastcms端点动态放行：matcher每次请求实时求值，插件注册/卸载后即时生效
+            web.ignoring().requestMatchers(pluginPermitAllManager.asRequestMatcher());
         };
     }
 

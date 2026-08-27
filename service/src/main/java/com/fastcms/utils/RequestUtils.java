@@ -45,8 +45,22 @@ import java.util.regex.Pattern;
 public abstract class RequestUtils {
 
 	public static boolean isAjaxRequest(HttpServletRequest request) {
+		// 传统 jQuery 风格的 ajax 请求
 		String header = request.getHeader("X-Requested-With");
-		return "XMLHttpRequest".equalsIgnoreCase(header);
+		if ("XMLHttpRequest".equalsIgnoreCase(header)) {
+			return true;
+		}
+		// axios/fetch 等现代前端通常不设置 X-Requested-With，但会发送 application/json
+		String contentType = request.getContentType();
+		if (contentType != null && contentType.toLowerCase().contains("application/json")) {
+			return true;
+		}
+		// 通过 Accept header 判断
+		String accept = request.getHeader("Accept");
+		if (accept != null && accept.toLowerCase().contains("application/json")) {
+			return true;
+		}
+		return false;
 	}
 
 	public static boolean isMultipartRequest(HttpServletRequest request) {

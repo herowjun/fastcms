@@ -16,9 +16,9 @@
  */
 package com.fastcms.plugin.view;
 
+import com.fastcms.freemarker.ext.servlet.*;
 import freemarker.core.ParseException;
 import freemarker.ext.jsp.TaglibFactory;
-import freemarker.ext.servlet.*;
 import freemarker.template.*;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -246,7 +246,7 @@ public class PluginFreeMarkerView extends AbstractTemplateView {
      * @see RequestContextUtils#getLocale
      * @see #getTemplate(Locale)
      * @see #processTemplate
-     * @see freemarker.ext.servlet.FreemarkerServlet
+     * @see com.fastcms.freemarker.ext.servlet.FreemarkerServlet
      */
     protected void doRender(Map<String, Object> model, HttpServletRequest request,
                             HttpServletResponse response) throws Exception {

@@ -88,6 +88,22 @@ public interface IResourceService extends IService<Resource> {
 		String RESOURCE_NAME_PLUGIN_UNINSTALL = "fastcms.resource.name.plugin.uninstall";
 		String RESOURCE_NAME_PLUGIN_CONFIG = "fastcms.resource.name.plugin.config";
 
+		String RESOURCE_NAME_AI_MODEL_LIST = "fastcms.resource.name.ai.model.list";
+		String RESOURCE_NAME_AI_MODEL_SAVE = "fastcms.resource.name.ai.model.save";
+		String RESOURCE_NAME_AI_MODEL_GET = "fastcms.resource.name.ai.model.get";
+		String RESOURCE_NAME_AI_MODEL_DELETE = "fastcms.resource.name.ai.model.delete";
+		String RESOURCE_NAME_AI_MODEL_ACTIVATE = "fastcms.resource.name.ai.model.activate";
+		String RESOURCE_NAME_AI_MODEL_TEST = "fastcms.resource.name.ai.model.test";
+
+		// AI 模板生成器
+		String RESOURCE_NAME_AI_TEMPLATE_LIST = "fastcms.resource.name.ai.template.list";
+		String RESOURCE_NAME_AI_TEMPLATE_CREATE = "fastcms.resource.name.ai.template.create";
+		String RESOURCE_NAME_AI_TEMPLATE_CHAT = "fastcms.resource.name.ai.template.chat";
+		String RESOURCE_NAME_AI_TEMPLATE_FILES = "fastcms.resource.name.ai.template.files";
+		String RESOURCE_NAME_AI_TEMPLATE_APPLY = "fastcms.resource.name.ai.template.apply";
+		String RESOURCE_NAME_AI_TEMPLATE_DELETE = "fastcms.resource.name.ai.template.delete";
+		String RESOURCE_NAME_AI_TEMPLATE_ROLLBACK = "fastcms.resource.name.ai.template.rollback";
+
 		String RESOURCE_NAME_RESOURCE_LIST = "fastcms.resource.name.resource.list";
 		String RESOURCE_NAME_RESOURCE_SYNC = "fastcms.resource.name.resource.sync";
 

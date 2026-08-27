@@ -18,6 +18,7 @@ package com.fastcms.plugin.autoconfigure;
 
 import com.fastcms.common.constants.FastcmsConstants;
 import com.fastcms.plugin.FastcmsPluginManager;
+import com.fastcms.plugin.PluginPermitAllManager;
 import org.pf4j.AbstractPluginManager;
 import org.pf4j.DefaultPluginManager;
 import org.pf4j.RuntimeMode;
@@ -64,6 +65,12 @@ public class PluginAutoConfiguration {
         Path pluginPath = Paths.get(properties.getPath());
         FastcmsPluginManager fastcmsPluginManager = new FastcmsPluginManager(pluginPath);
         return fastcmsPluginManager;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(PluginPermitAllManager.class)
+    public PluginPermitAllManager pluginPermitAllManager() {
+        return new PluginPermitAllManager();
     }
 
     String getProfile() {

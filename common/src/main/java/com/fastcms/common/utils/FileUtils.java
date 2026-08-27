@@ -21,8 +21,9 @@ import org.zeroturnaround.zip.ZipUtil;
 
 import java.io.Closeable;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
@@ -113,16 +114,13 @@ public abstract class FileUtils {
         return StringUtils.isBlank(content) ? content : StringUtils.replaceEach(content, escapeChars, htmlChars);
     }
 
-    public static void writeString(File file, String string) {
-        FileOutputStream fos = null;
-        try {
-            fos = new FileOutputStream(file, false);
-            fos.write(string.getBytes("UTF-8"));
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            close(fos);
-        }
+    /**
+     * 以 UTF-8 编码覆写文件内容
+     *
+     * @throws IOException 磁盘满、权限不足等写入失败时抛出，由调用方处理
+     */
+    public static void writeString(File file, String string) throws IOException {
+        Files.writeString(file.toPath(), string, StandardCharsets.UTF_8);
     }
 
     public static void close(Closeable... closeable) {

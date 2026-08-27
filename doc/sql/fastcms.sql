@@ -758,7 +758,7 @@ INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title
 INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('37', '0', 'user', '/user', 'layout/routerView/parent', 'message.router.user', 'ele-Avatar', '0', '0', '0', '0', '0', '0', '', '2022-04-27 11:02:31', '2023-05-28 21:31:34');
 INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('38', '37', 'userManager', '/user/index', 'user/index', 'message.router.userManager', 'ele-User', '0', '0', '0', '0', '0', '0', '', '2022-04-27 11:13:00', '2023-05-28 21:31:55');
 INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('39', '2', 'systemRes', '/system/res', 'system/res/index', 'message.router.systemRes', 'iconfont icon-zidingyibuju', '0', '0', '0', '0', '0', '0', '', '2022-05-02 18:15:51', '2023-05-16 00:07:32');
-INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('40', '27', 'systemSet', '/setting/system', 'setting/system', 'message.router.systemSet', 'ele-Promotion', '0', '0', '0', '0', '0', '0', '', '2022-08-06 12:48:45', '2023-05-28 21:34:38');
+INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('40', '27', 'systemSet', '/setting/system', 'setting/system', 'message.router.systemSet', 'ele-Promotion', '0', '0', '0', '0', '0', '2', '', '2022-08-06 12:48:45', '2023-05-28 21:34:38');
 INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('41', '11', 'articleTag', '/article/tag', 'article/tag', 'message.router.articleTag', 'ele-PriceTag', '0', '0', '0', '0', '0', '0', '', '2022-11-25 16:05:46', '2023-05-28 21:16:59');
 -- ----------------------------
 -- 0.1.5 表结构变更记录结束
@@ -778,4 +778,97 @@ CREATE TABLE `user_server_openid` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 -- ----------------------------
 -- 1.0.0 表结构变更记录结束
+-- ----------------------------
+
+-- ----------------------------
+-- 0.2.0 表结构变更记录开始
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_model_config`;
+CREATE TABLE `ai_model_config` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(64) NOT NULL COMMENT '配置名称',
+  `provider` varchar(32) DEFAULT NULL COMMENT '供应商: deepseek/qwen/zhipu/moonshot/openai/ollama/custom',
+  `base_url` varchar(255) NOT NULL COMMENT 'OpenAI 兼容 API 端点',
+  `api_key` varchar(255) DEFAULT NULL COMMENT 'API Key（Ollama 等本地调用可为空）',
+  `model` varchar(64) NOT NULL COMMENT '模型名称',
+  `temperature` double DEFAULT NULL COMMENT '温度参数',
+  `max_tokens` int DEFAULT NULL COMMENT '最大 tokens',
+  `is_active` tinyint(1) DEFAULT '0' COMMENT '是否激活（同一时刻仅一个为 true）',
+  `sort_num` int DEFAULT '0' COMMENT '排序',
+  `remark` varchar(255) DEFAULT NULL COMMENT '备注',
+  `extra_headers` text DEFAULT NULL COMMENT '自定义请求头 JSON，如 {"X-Tenant":"abc"}（私有部署/企业网关用）',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模型配置表';
+
+-- 设置菜单：模型管理（原 AI 菜单；AI 模板生成器已整合进模板编辑页，独立菜单下线）
+INSERT INTO `permission` (`id`, `parent_id`, `name`, `path`, `component`, `title`, `icon`, `is_link`, `is_hide`, `is_keep_alive`, `is_affix`, `is_iframe`, `sort_num`, `category`, `created`, `updated`) VALUES ('43', '27', 'aiModel', '/setting/model', 'ai/model/index', 'message.router.aiModel', 'ele-Connection', '0', '0', '0', '0', '0', '1', '', NOW(), NULL);
+
+-- AI 模板生成会话表
+DROP TABLE IF EXISTS `ai_template_session`;
+CREATE TABLE `ai_template_session` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `session_id` varchar(64) NOT NULL COMMENT '会话唯一ID（UUID）',
+  `template_name` varchar(64) NOT NULL COMMENT '模板目录名（英文，作为 pathName）',
+  `title` varchar(255) DEFAULT NULL COMMENT '会话标题',
+  `requirement` text DEFAULT NULL COMMENT '用户初始需求描述',
+  `status` varchar(16) DEFAULT 'active' COMMENT '会话状态: active/applied/closed',
+  `user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
+  `work_dir` varchar(512) DEFAULT NULL COMMENT '会话工作目录绝对路径',
+  `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_session_id` (`session_id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板生成会话表';
+
+-- AI 模板生成对话消息表
+DROP TABLE IF EXISTS `ai_template_message`;
+CREATE TABLE `ai_template_message` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `session_id` varchar(64) NOT NULL COMMENT '会话ID',
+  `role` varchar(16) NOT NULL COMMENT '角色: user/assistant/system',
+  `content` mediumtext NOT NULL COMMENT '消息内容',
+  `reasoning` mediumtext DEFAULT NULL COMMENT '推理模型思考过程',
+  `created` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_session_id` (`session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板生成对话消息表';
+
+-- AI 模板生成文件表（持久化会话生成的所有文件，便于跨重启恢复）
+DROP TABLE IF EXISTS `ai_template_file`;
+CREATE TABLE `ai_template_file` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `session_id` varchar(64) NOT NULL COMMENT '会话ID',
+  `file_path` varchar(255) NOT NULL COMMENT '相对路径，如 index.html、static/css/base.css',
+  `content` longtext NOT NULL COMMENT '文件内容',
+  `action` varchar(16) DEFAULT 'create' COMMENT '操作类型: create/modify/delete',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_session_file` (`session_id`, `file_path`),
+  KEY `idx_session_id` (`session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板生成文件表';
+
+-- AI 模板文件修改前备份表（调整型会话：AI 修改正式模板文件前留存旧版本，支持按轮次回滚）
+DROP TABLE IF EXISTS `ai_template_file_backup`;
+CREATE TABLE `ai_template_file_backup` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `session_id` varchar(64) NOT NULL COMMENT '会话ID',
+  `message_id` bigint NOT NULL COMMENT '触发本次变更的AI消息ID（回滚粒度）',
+  `file_path` varchar(255) NOT NULL COMMENT '相对路径',
+  `content` longtext COMMENT '修改前内容（修改前文件不存在时为 NULL）',
+  `existed` tinyint DEFAULT '1' COMMENT '修改前文件是否存在（AI 新建的文件为 0）',
+  `created` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_session_id` (`session_id`),
+  KEY `idx_message_id` (`message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板文件修改前备份表';
+
+-- ----------------------------
+-- 0.2.0 表结构变更记录结束
 -- ----------------------------

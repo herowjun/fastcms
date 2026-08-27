@@ -1,0 +1,26 @@
+<#import '_layout.html' as layout>
+<#assign pageTitle=(singlePage!{}).title!'关于我们'>
+<@layout.header "${pageTitle} - 公司简介">
+</@layout.header>
+<@layout.body>
+<main class='container page-main' id='main'>
+ <section class='page-hero'>
+ <h1>${pageTitle}</h1>
+ <p>简洁呈现企业理念、服务方向与合作价值</p>
+ </section>
+ <section class='page-content' aria-label='公司简介'>
+ <#if singlePage?? && singlePage.contentHtml??>
+ ${singlePage.contentHtml}
+ <#else>
+ <p>我们是一家专注于数字化产品与技术服务的企业，围绕客户需求提供咨询、设计、开发与运营支持。团队坚持简洁、可靠、可持续的产品理念，帮助客户提升效率并创造长期价值。</p>
+ <h2>我们的方向</h2>
+ <ul>
+ <li>企业官网与品牌数字化建设</li>
+ <li>内容管理与信息展示系统</li>
+ <li>轻量级技术服务与持续优化</li>
+ </ul>
+ </#if>
+ </section>
+</main>
+</@layout.body>
+<@layout.script/>

@@ -9,7 +9,7 @@
 	<name>fastcms-${project.version}</name>
 	<description>fastcms project for Spring Boot</description>
 	<properties>
-		<revision>0.1.6-SNAPSHOT</revision>
+		<revision>1.0.0-SNAPSHOT</revision>
 		<!-- Compiler settings properties -->
 		<java.version>21</java.version>
 		<maven.compiler.source>21</maven.compiler.source>
@@ -25,6 +25,7 @@
 		<maven-flatten-version>1.1.0</maven-flatten-version>
 		<maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
 		<spring-boot-dependencies.version>4.1.0</spring-boot-dependencies.version>
+		<spring-ai.version>2.0.1</spring-ai.version>
 		<docker.plugin.version>0.45.1</docker.plugin.version>
 	</properties>
 
@@ -75,6 +76,13 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-dependencies</artifactId>
 				<version>${spring-boot-dependencies.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-bom</artifactId>
+				<version>${spring-ai.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -156,6 +164,11 @@
 			<dependency>
 				<groupId>com.fastcms</groupId>
 				<artifactId>fastcms-oauth2-starter</artifactId>
+				<version>${revision}</version>
+			</dependency>
+			<dependency>
+				<groupId>com.fastcms</groupId>
+				<artifactId>fastcms-ai-starter</artifactId>
 				<version>${revision}</version>
 			</dependency>
 

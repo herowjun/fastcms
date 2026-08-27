@@ -44,7 +44,9 @@ export default {
 		connectionSet: '通信',
 		systemSet: '系统',
 		loginSet: '登录注册',
-		searchSet: '搜索'
+		searchSet: '搜索',
+		ai: 'AI',
+		aiModel: '模型'
 	},
 	staticRoutes: {
 		signIn: '登录',

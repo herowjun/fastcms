@@ -26,6 +26,8 @@ export default {
 		templateManager: 'templateManager',
 		templateMenu: 'templateMenu',
 		templateSet: 'setting',
+		ai: 'AI',
+		aiModel: 'Model'
 	},
 	staticRoutes: {
 		signIn: 'signIn',

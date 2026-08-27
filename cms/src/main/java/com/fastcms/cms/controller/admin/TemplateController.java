@@ -33,15 +33,14 @@ import com.fastcms.utils.ApplicationUtils;
 import com.fastcms.utils.I18nUtils;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.util.FileCopyUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -75,6 +74,11 @@ public class TemplateController {
 
     @Autowired
     private IMenuService menuService;
+
+    /**
+     * 允许在线编辑的文件后缀（读取与保存共用同一白名单，防止保存接口绕过后缀限制覆写任意文件）
+     */
+    private static final List<String> EDITABLE_SUFFIX = Arrays.asList(".html", ".js", ".css", ".txt");
 
     /**
      * 模板列表
@@ -151,18 +155,19 @@ public class TemplateController {
 
     /**
      * 获取模板文件树
+     * @param templateId  模板id（可选，缺省为当前激活模板，用于编辑非激活模板）
      * @return
      */
     @GetMapping("files/tree/list")
     @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_LIST, resource = "templates:files/tree/list", action = ActionTypes.READ)
-	public Object treeList() {
-        Template currTemplate = templateService.getCurrTemplate();
-        if(currTemplate == null) {
+	public Object treeList(@RequestParam(value = "templateId", required = false) String templateId) {
+        Template template = resolveTemplate(templateId);
+        if(template == null) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
 
         try {
-            return RestResultUtils.success(templateService.getTemplateTreeFiles());
+            return RestResultUtils.success(templateService.getTemplateTreeFiles(template));
         } catch (Exception e) {
             return RestResultUtils.failed(e.getMessage());
         }
@@ -170,34 +175,39 @@ public class TemplateController {
 
     /**
      * 获取文件内容
-     * @param filePath
+     * @param filePath    文件路径
+     * @param templateId  模板id（可选，缺省为当前激活模板）
      * @return
      */
     @GetMapping("files/get")
     @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_INFO, resource = "templates:files/get", action = ActionTypes.READ)
-	public Object getFileContent(@RequestParam("filePath") String filePath) {
+	public Object getFileContent(@RequestParam("filePath") String filePath,
+                                 @RequestParam(value = "templateId", required = false) String templateId) {
 
         if (StringUtils.isBlank(filePath) || filePath.contains("..")) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_EXIST));
         }
 
-        Template currTemplate = templateService.getCurrTemplate();
-        if (currTemplate == null) {
-            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_DEFAULT_NOT_EXIST));
+        Template template = resolveTemplate(templateId);
+        if (template == null) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
 
-        String suffix = filePath.substring(filePath.lastIndexOf("."));
-        if (StringUtils.isBlank(suffix)) {
+        // 目录节点（如仅剩 .properties 被过滤后显示为空的 i18n 目录）不允许读取内容
+        Path file = getFilePath(template, filePath);
+        if (file == null || Files.isDirectory(file)) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SURE_ONE));
+        }
+
+        // 先判断后缀分隔符是否存在：无点号的路径（目录名等）lastIndexOf 返回 -1，直接 substring 会越界
+        int suffixIdx = filePath.lastIndexOf(".");
+        if (suffixIdx < 0) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SUFFIX_NOT_NULL));
         }
 
-        if (!Arrays.asList(".html", ".js", ".css", ".txt").contains(suffix)) {
+        String suffix = filePath.substring(suffixIdx);
+        if (!EDITABLE_SUFFIX.contains(suffix)) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_SUPPORT_EDIT));
-        }
-
-        Path file = getFilePath(filePath);
-        if (Files.isDirectory(file)) {
-            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SURE_ONE));
         }
 
         if (!Files.exists(file)) {
@@ -205,9 +215,9 @@ public class TemplateController {
         }
 
         try {
-            return RestResultUtils.success(FileCopyUtils.copyToString(new FileReader(file.toFile())));
+            // 显式 UTF-8 读取，与保存编码一致，避免依赖平台默认编码导致乱码
+            return RestResultUtils.success(Files.readString(file, StandardCharsets.UTF_8));
         } catch (Exception e) {
-            e.printStackTrace();
             return RestResultUtils.failed(e.getMessage());
         }
     }
@@ -228,12 +238,15 @@ public class TemplateController {
      * 保存模板
      * @param filePath          文件
      * @param fileContent       文件内容
+     * @param templateId        模板id（可选，缺省为当前激活模板）
      * @return
      * @throws IOException
      */
     @PostMapping("file/save")
     @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_SAVE, resource = "templates:file/save", action = ActionTypes.WRITE)
-	public Object save(@RequestParam("filePath") String filePath, @RequestParam("fileContent") String fileContent) {
+	public Object save(@RequestParam("filePath") String filePath,
+                       @RequestParam("fileContent") String fileContent,
+                       @RequestParam(value = "templateId", required = false) String templateId) {
         if(StringUtils.isBlank(filePath) || filePath.contains("..")) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
@@ -242,12 +255,23 @@ public class TemplateController {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_CONTENT_NOT_NULL));
         }
 
-        Template currTemplate = templateService.getCurrTemplate();
-        if(currTemplate == null) {
+        // 与读取接口共用后缀白名单，防止通过保存接口在模板目录内创建/覆写任意类型文件
+        // 无点号的路径（目录名等）lastIndexOf 返回 -1，直接 substring 会越界
+        int suffixIdx = filePath.lastIndexOf(".");
+        if(suffixIdx < 0) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SUFFIX_NOT_NULL));
+        }
+        String suffix = filePath.substring(suffixIdx);
+        if(!EDITABLE_SUFFIX.contains(suffix)) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_SUPPORT_EDIT));
+        }
+
+        Template template = resolveTemplate(templateId);
+        if(template == null) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
 
-        Path currFile = getFilePath(filePath);
+        Path currFile = getFilePath(template, filePath);
 
         if(currFile == null) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_EXIST));
@@ -258,28 +282,35 @@ public class TemplateController {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_WRITE_AUTH));
         }
 
-        FileUtils.writeString(file, fileContent);
+        try {
+            FileUtils.writeString(file, fileContent);
+        } catch (Exception e) {
+            // 写入失败（磁盘满、权限不足等）必须显式返回失败，避免用户误以为已保存成功
+            return RestResultUtils.failed(I18nUtils.getMessage(FASTCMS_SYSTEM_ERROR).concat(e.getMessage() == null ? "" : ": " + e.getMessage()));
+        }
 
         return RestResultUtils.success();
     }
 
     /**
      * 上传模板文件
-     * @param dirName
-     * @param files
+     * @param dirName     目标目录
+     * @param files       上传文件列表
+     * @param templateId  模板id（可选，缺省为当前激活模板）
      * @return
      */
     @PostMapping("files/upload")
     @ExceptionHandler(value = MultipartException.class)
     @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_UPLOAD, resource = "templates:files/upload", action = ActionTypes.WRITE)
-	public Object upload(String dirName, @RequestParam("files") MultipartFile files[]) {
+	public Object upload(String dirName, @RequestParam("files") MultipartFile files[],
+                         @RequestParam(value = "templateId", required = false) String templateId) {
 
         if(StringUtils.isBlank(dirName) || dirName.contains("..")) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_UPLOAD_DIR_NOT_NULL));
         }
 
-        Template currTemplate = templateService.getCurrTemplate();
-        if(currTemplate == null) {
+        Template template = resolveTemplate(templateId);
+        if(template == null) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
 
@@ -287,7 +318,7 @@ public class TemplateController {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_UPLOAD_EMPTY));
         }
 
-        Path templatePath = getFilePath(dirName);
+        Path templatePath = getFilePath(template, dirName).normalize();
         if(templatePath == null || !Files.exists(templatePath)) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_UPLOAD_DIR_NOT_EXIST));
         }
@@ -296,22 +327,34 @@ public class TemplateController {
 
         for(MultipartFile file : files) {
 
-            if(FileUtils.isNotAllowFile(file.getOriginalFilename())) {
+            String fileName = file.getOriginalFilename();
+
+            // 文件名消毒：禁止路径分隔符与 ..，防止恶意文件名（如 ..\..\x.jsp）路径穿越
+            if(StringUtils.isBlank(fileName) || fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
+                errorFiles.add(StringUtils.isBlank(fileName) ? "unnamed" : fileName);
                 continue;
             }
 
-            File uploadFile = new File(templatePath.toString(), file.getOriginalFilename());
+            if(FileUtils.isNotAllowFile(fileName)) {
+                continue;
+            }
+
+            // normalize 后必须仍位于模板目录内，双保险防路径穿越
+            Path uploadPath = templatePath.resolve(fileName).normalize();
+            if(!uploadPath.startsWith(templatePath)) {
+                errorFiles.add(fileName);
+                continue;
+            }
+
+            File uploadFile = uploadPath.toFile();
             try {
                 if (!uploadFile.getParentFile().exists()) {
                     uploadFile.getParentFile().mkdirs();
                 }
                 file.transferTo(uploadFile);
             } catch (IOException e) {
-                e.printStackTrace();
-                if(uploadFile != null) {
-                    uploadFile.delete();
-                }
-                errorFiles.add(file.getOriginalFilename());
+                uploadFile.delete();
+                errorFiles.add(fileName);
             }
         }
 
@@ -321,12 +364,14 @@ public class TemplateController {
 
     /**
      * 删除模板文件
-     * @param filePath
+     * @param filePath    文件路径
+     * @param templateId  模板id（可选，缺省为当前激活模板）
      * @return
      */
     @PostMapping("file/delete")
     @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_DELETE, resource = "templates:file/delete", action = ActionTypes.WRITE)
-	public Object delFile(@RequestParam("filePath") String filePath) {
+	public Object delFile(@RequestParam("filePath") String filePath,
+                          @RequestParam(value = "templateId", required = false) String templateId) {
 
         if(StringUtils.isBlank(filePath)) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_PATH_IS_EMPTY));
@@ -336,12 +381,16 @@ public class TemplateController {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_PATH_IS_ERROR));
         }
 
-        Template currTemplate = templateService.getCurrTemplate();
-        if(currTemplate == null) {
+        Template template = resolveTemplate(templateId);
+        if(template == null) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
         }
         try {
-            Path templateFilePath = getFilePath(filePath);
+            Path templateFilePath = getFilePath(template, filePath);
+
+            if(templateFilePath == null) {
+                return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_PATH_IS_ERROR));
+            }
 
             if(Files.isDirectory(templateFilePath)) {
                 return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_PATH_IS_NOT_ALLOW_DELETE));
@@ -350,7 +399,6 @@ public class TemplateController {
             templateFilePath.toFile().delete();
             return RestResultUtils.success();
         } catch (Exception e) {
-            e.printStackTrace();
             return RestResultUtils.failed(e.getMessage());
         }
     }
@@ -404,9 +452,22 @@ public class TemplateController {
         return RestResultUtils.success(menuService.removeById(menuId));
     }
 
-    Path getFilePath(String filePath) {
-        Template currTemplate = templateService.getCurrTemplate();
-        return Paths.get(currTemplate.getTemplatePath().toString().concat(filePath.substring(currTemplate.getPathName().length())));
+    /**
+     * 解析目标模板：未指定 templateId 时取当前激活模板
+     */
+    private Template resolveTemplate(String templateId) {
+        if(StringUtils.isBlank(templateId)) {
+            return templateService.getCurrTemplate();
+        }
+        return templateService.getTemplate(templateId);
+    }
+
+    Path getFilePath(Template template, String filePath) {
+        // filePath 必须以模板目录名开头（文件树生成时已保证），否则 substring 会越界或解析出模板目录外的路径
+        if (filePath == null || !filePath.startsWith(template.getPathName())) {
+            return null;
+        }
+        return Paths.get(template.getTemplatePath().toString().concat(filePath.substring(template.getPathName().length())));
     }
 
 }

@@ -45,32 +45,33 @@ export function TemplateApi() {
 
 		/**
 		 * 文件树形结构
-		 * @param params 
-		 * @returns 
+		 * @param templateId  模板id（可选，缺省为当前激活模板）
+		 * @returns
 		 */
-		getTemplateFileTree() {
+		getTemplateFileTree(templateId?: string) {
 			return request({
-				url: '/admin/template/files/tree/list',
+				url: '/admin/template/files/tree/list' + (templateId ? '?templateId=' + templateId : ''),
 				method: 'get'
 			});
 		},
 
 		/**
 		 * 获取文件内容
-		 * @param filePath 
-		 * @returns 
+		 * @param filePath
+		 * @param templateId  模板id（可选，缺省为当前激活模板）
+		 * @returns
 		 */
-		getTemplateFile(filePath: string) {
+		getTemplateFile(filePath: string, templateId?: string) {
 			return request({
-				url: '/admin/template/files/get?filePath=' + filePath,
+				url: '/admin/template/files/get?filePath=' + filePath + (templateId ? '&templateId=' + templateId : ''),
 				method: 'get'
 			});
 		},
 
 		/**
 		 * 保存模板文件
-		 * @param params 
-		 * @returns 
+		 * @param params  filePath/fileContent/templateId
+		 * @returns
 		 */
 		saveTemplateFile(params: object) {
 			return request({
@@ -83,12 +84,13 @@ export function TemplateApi() {
 
 		/**
 		 * 删除模板文件
-		 * @param filePath 
-		 * @returns 
+		 * @param filePath
+		 * @param templateId  模板id（可选，缺省为当前激活模板）
+		 * @returns
 		 */
-		delTemplateFile(filePath: string) {
+		delTemplateFile(filePath: string, templateId?: string) {
 			return request({
-				url: "/admin/template/file/delete?filePath=" + filePath,
+				url: "/admin/template/file/delete?filePath=" + filePath + (templateId ? '&templateId=' + templateId : ''),
 				method: 'post'
 			});
 		},

@@ -14,7 +14,7 @@
 - [文档地址](http://doc.xiaojudeng.net.cn)
 
 ### 官网
-- [官网地址](https://www.xiaojudeng.net.cn)
+- [官网地址](http://fastcms.xiaojudeng.net.cn)
 
 ### 安装部署
 - [视频教程](https://www.bilibili.com/video/BV12G4y167vi/)
@@ -52,9 +52,9 @@
 - 微信生态支持
 
 ### 运行环境
-1. jdk1.8+
+1. jdk21+
 2. apache maven 3.6+
-3. spring-boot 2.6.6+
+3. spring-boot 4.1+
 
 ### 鸣谢列表
 - <a href="https://gitee.com/lyt-top/vue-next-admin.git" target="_blank">vue-next-admin</a>

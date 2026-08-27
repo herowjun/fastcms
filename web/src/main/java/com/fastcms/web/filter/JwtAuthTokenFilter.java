@@ -46,6 +46,18 @@ public class JwtAuthTokenFilter extends OncePerRequestFilter {
         this.tokenManager = tokenManager;
     }
 
+    /**
+     * SSE（SseEmitter）等异步请求完成时会触发 ASYNC dispatch 重新经过过滤器链，
+     * 而 Spring Security 的 AuthorizationFilter 默认在 ASYNC dispatch 上仍会鉴权。
+     * OncePerRequestFilter 默认跳过 ASYNC dispatch，导致本过滤器不执行、
+     * SecurityContext 为空，SSE 流结束时被拒绝（Access Denied）且响应已提交，最终报 500。
+     * 因此这里让本过滤器在 ASYNC dispatch 上也执行，重新从 token 恢复认证信息。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws IOException, ServletException {

@@ -246,12 +246,15 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
 
     @Override
     public List<FileTreeNode> getTemplateTreeFiles() throws IOException {
+        return getTemplateTreeFiles(getCurrTemplate());
+    }
 
-        Template currTemplate = getCurrTemplate();
-        if(currTemplate == null) return null;
+    @Override
+    public List<FileTreeNode> getTemplateTreeFiles(Template template) throws IOException {
+        if(template == null) return null;
 
-        List<FileTreeNode> treeNodeList = Files.walk(currTemplate.getTemplatePath()).filter(item -> !item.toString().endsWith(".properties"))
-                .map(item -> new FileTreeNode(item))
+        List<FileTreeNode> treeNodeList = Files.walk(template.getTemplatePath()).filter(item -> !item.toString().endsWith(".properties"))
+                .map(item -> new FileTreeNode(item, template.getTemplatePath()))
                 .sorted(Comparator.comparing(FileTreeNode::getSortNum)).collect(Collectors.toList());
         return (List<FileTreeNode>) getTreeNodeList(treeNodeList);
     }
@@ -273,15 +276,31 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
 
     @Override
     public T convert2Node(Object object) {
-        Template currTemplate = getCurrTemplate();
         FileTreeNode fileTreeNode = (FileTreeNode) object;
-        fileTreeNode.setFilePath(fileTreeNode.getPath().substring(fileTreeNode.getPath().lastIndexOf(currTemplate.getPathName())).replaceAll("\\\\", "/"));
+        // 优先使用节点自带的模板根路径（支持构建任意模板的文件树），未携带时回退到当前激活模板（兼容旧用法）
+        String rootPath = fileTreeNode.getRootPath() != null ? fileTreeNode.getRootPath()
+                : getCurrTemplate().getTemplatePath().toString();
+        // filePath 以模板目录名开头，与 TemplateController.getFilePath 的前缀截取规则保持一致
+        fileTreeNode.setFilePath(getTemplateDirName(rootPath)
+                .concat(fileTreeNode.getPath().substring(rootPath.length()).replaceAll("\\\\", "/")));
         return (T) fileTreeNode;
     }
 
     @Override
     public boolean isParent(T node) {
-        return ((FileTreeNode) node).getPath().equals(getCurrTemplate().getTemplatePath().toString());
+        FileTreeNode fileTreeNode = (FileTreeNode) node;
+        String rootPath = fileTreeNode.getRootPath() != null ? fileTreeNode.getRootPath()
+                : getCurrTemplate().getTemplatePath().toString();
+        return fileTreeNode.getPath().equals(rootPath);
+    }
+
+    /**
+     * 取模板根路径的最后一段目录名（与 Template.getPathName 的约定一致）
+     */
+    private String getTemplateDirName(String rootPath) {
+        String normalized = rootPath.replaceAll("[\\\\/]+$", "");
+        int idx = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+        return idx < 0 ? normalized : normalized.substring(idx + 1);
     }
 
     @Override

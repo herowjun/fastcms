@@ -112,6 +112,8 @@ public class FastcmsConfiguration implements WebMvcConfigurer, WebSocketConfigur
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         StaticUtils.registerStaticResource(registry);
+        // AI 模板预览由 AiTemplatePreviewController 处理（FreeMarker 渲染 + 静态文件），
+        // 基于会话 workDir 定位文件，不再使用 user.dir 相对路径的静态映射
     }
 
     @Override

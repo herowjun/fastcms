@@ -51,105 +51,81 @@
     </appender>
 
     <springProfile name="dev">
-        <logger name="org.springframework">
+        <logger name="org.springframework" level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <level value="INFO"/>
         </logger>
-        <logger name="org.apache.catalina.startup.DigesterFactory">
+        <logger name="org.apache.catalina.startup.DigesterFactory" level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <level value="INFO"/>
         </logger>
-        <logger name="org.apache.catalina.util.LifecycleBase">
+        <logger name="org.apache.catalina.util.LifecycleBase" level="ERROR">
             <appender-ref ref="CONSOLE"/>
-            <level value="ERROR"/>
         </logger>
-        <logger name="org.apache.coyote.http11.Http11NioProtocol">
+        <logger name="org.apache.coyote.http11.Http11NioProtocol" level="WARN">
             <appender-ref ref="CONSOLE"/>
-            <level value="WARN"/>
         </logger>
-        <logger name="org.apache.tomcat.util.net.NioSelectorPool">
+        <logger name="org.apache.tomcat.util.net.NioSelectorPool" level="WARN">
             <appender-ref ref="CONSOLE"/>
-            <level value="WARN"/>
         </logger>
-        <logger name="org.apache.ibatis">
+        <logger name="org.apache.ibatis" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="com.baomidou.mybatisplus">
+        <logger name="com.baomidou.mybatisplus" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="org.mybatis.spring">
+        <logger name="org.mybatis.spring" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="org.pf4j">
+        <logger name="org.pf4j" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="com.fastcms">
+        <logger name="com.fastcms" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="freemarker.template">
+        <logger name="freemarker.template" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="org.springframework.security">
+        <logger name="org.springframework.security" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
-        <logger name="org.springframework.security.oauth2">
+        <logger name="org.springframework.security.oauth2" level="DEBUG">
             <appender-ref ref="CONSOLE"/>
-            <level value="DEBUG"/>
         </logger>
     </springProfile>
 
     <springProfile name="prod">
-        <logger name="org.springframework.boot.web.embedded.tomcat">
+        <logger name="org.springframework.boot.web.embedded.tomcat" level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <level value="INFO"/>
         </logger>
-        <logger name="com.fastcms.web.Fastcms">
+        <logger name="com.fastcms.web.Fastcms" level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <level value="INFO"/>
         </logger>
-        <logger name="org.apache.catalina.startup.DigesterFactory">
+        <logger name="org.apache.catalina.startup.DigesterFactory" level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <level value="INFO"/>
         </logger>
-        <logger name="org.apache.catalina.util.LifecycleBase">
+        <logger name="org.apache.catalina.util.LifecycleBase" level="ERROR">
             <appender-ref ref="rootFile"/>
-            <level value="ERROR"/>
         </logger>
-        <logger name="org.apache.coyote.http11.Http11NioProtocol">
+        <logger name="org.apache.coyote.http11.Http11NioProtocol" level="WARN">
             <appender-ref ref="CONSOLE"/>
-            <level value="WARN"/>
         </logger>
-        <logger name="org.apache.tomcat.util.net.NioSelectorPool">
+        <logger name="org.apache.tomcat.util.net.NioSelectorPool" level="WARN">
             <appender-ref ref="CONSOLE"/>
-            <level value="WARN"/>
         </logger>
-        <logger name="org.apache.ibatis">
+        <logger name="org.apache.ibatis" level="ERROR">
             <appender-ref ref="rootFile"/>
-            <level value="ERROR"/>
         </logger>
-        <logger name="com.baomidou.mybatisplus">
+        <logger name="com.baomidou.mybatisplus" level="ERROR">
             <appender-ref ref="rootFile"/>
-            <level value="ERROR"/>
         </logger>
-        <logger name="org.mybatis.spring">
+        <logger name="org.mybatis.spring" level="ERROR">
             <appender-ref ref="rootFile"/>
-            <level value="ERROR"/>
         </logger>
-        <logger name="com.fastcms">
+        <logger name="com.fastcms" level="ERROR">
             <appender-ref ref="rootFile"/>
-            <level value="ERROR"/>
         </logger>
     </springProfile>
 
-    <root>
-        <level value="INFO"/>
+    <root level="INFO">
         <appender-ref ref="rootFile"/>
     </root>
 

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>fastcms-starters</artifactId>
+        <groupId>com.fastcms</groupId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>fastcms-ai-starter</artifactId>
+    <name>fastcms-ai-starter-${project.version}</name>
+    <description>Fastcms AI Starter based on Spring AI 2.0.x</description>
+
+    <properties>
+        <spring-ai.version>2.0.1</spring-ai.version>
+    </properties>
+
+    <dependencies>
+        <!-- Spring AI OpenAI 模型 starter（同时兼容 Azure OpenAI、GitHub Models、各种 OpenAI 兼容端点如通义/智谱/DeepSeek） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+
+        <!-- Spring AI MCP Server（让插件能注册 Tool 暴露给 ChatClient） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+        </dependency>
+
+        <!-- Spring AI RAG（向量检索增强，后续做语义搜索用） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-rag</artifactId>
+        </dependency>
+
+        <!-- fastcms core：用到 Site / AuthUtils -->
+        <dependency>
+            <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-core</artifactId>
+        </dependency>
+
+        <!-- fastcms service：复用 Config 配置存储 -->
+        <dependency>
+            <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-service</artifactId>
+        </dependency>
+
+        <!-- plugin-starter：AiToolRegister 需要操作插件类加载器 -->
+        <dependency>
+            <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-plugin-starter</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

@@ -26,6 +26,8 @@ export default {
 		templateManager: '模板管理',
 		templateMenu: '菜單',
 		templateSet: '設置',
+		ai: 'AI',
+		aiModel: '模型'
 	},
 	staticRoutes: {
 		signIn: '登入',

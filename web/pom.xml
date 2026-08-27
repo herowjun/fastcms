@@ -55,6 +55,11 @@
 
         <dependency>
             <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-ai-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fastcms</groupId>
             <artifactId>fastcms-templates</artifactId>
         </dependency>
 

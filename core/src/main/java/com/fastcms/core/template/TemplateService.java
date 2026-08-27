@@ -78,10 +78,17 @@ public interface TemplateService {
     void unInstall(String templateId) throws Exception;
 
     /**
-     * 获取模板对应的文件目录树
+     * 获取当前使用模板对应的文件目录树
      * @return
      */
     List<FileTreeNode> getTemplateTreeFiles() throws IOException;
+
+    /**
+     * 获取指定模板对应的文件目录树
+     * @param template  指定模板（用于编辑非当前激活模板）
+     * @return
+     */
+    List<FileTreeNode> getTemplateTreeFiles(Template template) throws IOException;
 
     /**
      * 获取模板i18n加载文件
@@ -98,14 +105,26 @@ public interface TemplateService {
         private String path;
 
         /**
+         * 归属模板根目录绝对路径
+         * 节点自携带所属模板信息，构建文件树时不依赖全局当前激活模板
+         */
+        @JsonIgnore
+        private String rootPath;
+
+        /**
          * 文件相对路径，去掉盘符路径
          */
         private String filePath;
 
         public FileTreeNode(Path path) {
+            this(path, null);
+        }
+
+        public FileTreeNode(Path path, Path rootPath) {
             super(path.getFileName().toString(), Files.isDirectory(path) ? 0 : 1);
             this.parent = path.getParent().toString();
             this.path = path.toString();
+            this.rootPath = rootPath == null ? null : rootPath.toString();
         }
 
         public String getParent() {
@@ -122,6 +141,14 @@ public interface TemplateService {
 
         public void setPath(String path) {
             this.path = path;
+        }
+
+        public String getRootPath() {
+            return rootPath;
+        }
+
+        public void setRootPath(String rootPath) {
+            this.rootPath = rootPath;
         }
 
         public String getFilePath() {
