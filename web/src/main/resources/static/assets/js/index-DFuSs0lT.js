@@ -1,1 +1,0 @@
-import{_ as e}from"./_plugin-vue_export-helper-DlAUqK2U.js";import{o,c as t}from"./@vue-Cy97ZUAE.js";const n={name:"centerHome"};function r(c,s,a,p,_,m){return o(),t("div",null,"基本信息")}const d=e(n,[["render",r]]);export{d as default};

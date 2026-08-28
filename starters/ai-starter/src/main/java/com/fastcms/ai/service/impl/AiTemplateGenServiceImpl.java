@@ -16,6 +16,9 @@
  */
 package com.fastcms.ai.service.impl;
 
+import com.fastcms.ai.audit.AiQuotaChecker;
+import com.fastcms.ai.audit.AiQuotaExceededException;
+import com.fastcms.ai.audit.AiUsageRecorder;
 import com.fastcms.ai.service.IAiModelConfigService;
 import com.fastcms.ai.service.IAiTemplateBackupService;
 import com.fastcms.ai.service.IAiTemplateFileService;
@@ -27,6 +30,8 @@ import com.fastcms.ai.template.AiTemplateResponseParser;
 import com.fastcms.ai.template.AiTemplateSessionRequest;
 import com.fastcms.ai.template.IAiTemplateGenService;
 import com.fastcms.ai.template.TemplateGenPromptBuilder;
+import com.fastcms.ai.support.ReplyStreamExtractor;
+import com.fastcms.ai.tool.AiToolCallbackProvider;
 import com.fastcms.common.utils.DirUtils;
 import com.fastcms.core.template.Template;
 import com.fastcms.core.template.TemplateService;
@@ -126,6 +131,15 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
     @Autowired
     private TemplateService templateService;
+
+    @Autowired
+    private AiQuotaChecker quotaChecker;
+
+    @Autowired
+    private AiUsageRecorder usageRecorder;
+
+    @Autowired
+    private AiToolCallbackProvider toolCallbackProvider;
 
     // ==================== 会话管理 ====================
 
@@ -242,6 +256,55 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * </ol>
      */
     private void doChatStream(AiTemplateSession session, String userInput, String currentFile, SseEmitter emitter) throws Exception {
+        // 0. 配额检查（fastcms.ai.daily-token-quota，超限直接拒绝，不产生模型调用）
+        try {
+            quotaChecker.check(session.getUserId());
+        } catch (AiQuotaExceededException e) {
+            sendError(emitter, e.getMessage());
+            return;
+        }
+
+        long startTime = System.currentTimeMillis();
+        boolean[] succeeded = {false};
+        String[] errorMessage = {null};
+        // token 用量：流式响应中仅最后一个 chunk 携带 usage（累积值），取最后非空值
+        org.springframework.ai.chat.metadata.Usage[] lastUsage = {null};
+
+        try {
+            doChatStreamInternal(session, userInput, currentFile, emitter, lastUsage);
+            succeeded[0] = true;
+        } catch (Exception e) {
+            errorMessage[0] = e.getMessage() == null ? e.toString() : e.getMessage();
+            throw e;
+        } finally {
+            // 审计落库（audit-enabled=false 时静默跳过；失败不影响主流程）
+            int promptTokens = lastUsage[0] == null || lastUsage[0].getPromptTokens() == null ? 0 : lastUsage[0].getPromptTokens();
+            int completionTokens = lastUsage[0] == null || lastUsage[0].getCompletionTokens() == null ? 0 : lastUsage[0].getCompletionTokens();
+            int totalTokens = lastUsage[0] == null || lastUsage[0].getTotalTokens() == null
+                    ? promptTokens + completionTokens : lastUsage[0].getTotalTokens();
+            if (succeeded[0]) {
+                usageRecorder.record(session.getUserId(), sceneOf(session), session.getSessionId(),
+                        modelConfigService.getActiveConfig() == null ? null : modelConfigService.getActiveConfig().getModel(),
+                        promptTokens, completionTokens, totalTokens, System.currentTimeMillis() - startTime);
+            } else {
+                usageRecorder.recordError(session.getUserId(), sceneOf(session), session.getSessionId(),
+                        modelConfigService.getActiveConfig() == null ? null : modelConfigService.getActiveConfig().getModel(),
+                        System.currentTimeMillis() - startTime, errorMessage[0]);
+            }
+        }
+    }
+
+    /**
+     * 会话场景：调整型 TEMPLATE_ADJUST / 生成型 TEMPLATE_GEN
+     */
+    private String sceneOf(AiTemplateSession session) {
+        return StringUtils.hasText(session.getTemplateId())
+                ? com.fastcms.service.IAiUsageLogService.Scene.TEMPLATE_ADJUST
+                : com.fastcms.service.IAiUsageLogService.Scene.TEMPLATE_GEN;
+    }
+
+    private void doChatStreamInternal(AiTemplateSession session, String userInput, String currentFile,
+                                      SseEmitter emitter, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
         // 1. 获取激活的模型配置
         AiModelConfig modelConfig = modelConfigService.getActiveConfig();
         if (modelConfig == null) {
@@ -294,7 +357,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         //    推理模型（Qwen3/DeepSeek-R1 等）会先输出 reasoning_content 思考过程，
         //    Spring AI 将其透传到 AssistantMessage.metadata["reasoningContent"]，
         //    这里同样增量推送给前端实时展示
-        ChatClient chatClient = ChatClient.builder(chatModel).build();
+        ChatClient chatClient = ChatClient.builder(chatModel)
+                // 挂载 @AiTool 注册的工具（当前无工具时为空数组，不影响调用）
+                .defaultTools(toolCallbackProvider.getToolCallbacks())
+                .build();
         StringBuilder responseBuffer = new StringBuilder();
         ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
         // Spring AI 透传的 reasoningContent 是"累积值"（每个 chunk 带到当前为止的完整思考文本），
@@ -305,6 +371,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {
+                        // 捕获 token 用量（OpenAI 兼容流式仅在最后一个 chunk 携带 usage，持续覆盖取最后值）
+                        if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null
+                                && resp.getMetadata().getUsage().getTotalTokens() != null) {
+                            lastUsage[0] = resp.getMetadata().getUsage();
+                        }
                         if (resp.getResult() == null || resp.getResult().getOutput() == null) {
                             return;
                         }
@@ -431,145 +502,6 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return "";
         }
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "…";
-    }
-
-    /**
-     * 流式 reply 提取器：从逐步到达的 JSON 文本流中增量提取 reply 字段的自然语言内容
-     *
-     * <p>AI 的响应是 JSON 对象 {"reply":"...","files":[...]}，直接把原始 JSON 推给前端
-     * 会显示一大坨结构化文本。本提取器维护一个轻量状态机：
-     * <ol>
-     *     <li>等待出现 "reply" 键（限制扫描窗口，旧数组格式不会无限累积缓冲）</li>
-     *     <li>进入 reply 字符串后逐字符解码（处理换行、制表、引号、反斜杠及 unicode 码点转义）</li>
-     *     <li>遇到未转义的闭引号即结束</li>
-     * </ol>
-     * 每次 {@link #feed(String)} 返回本次新确定的解码文本增量，调用方通过 SSE 推送实现打字机效果。</p>
-     */
-    private static class ReplyStreamExtractor {
-
-        private final StringBuilder buf = new StringBuilder();
-        private final StringBuilder decoded = new StringBuilder();
-        /** buf 中已解码扫描到的位置 */
-        private int scanPos;
-        /** decoded 已推送（返回给调用方）的长度 */
-        private int emittedLen;
-        private boolean replyStarted;
-        private boolean finished;
-
-        /**
-         * 喂入新 chunk，返回本次新确定的 reply 文本增量（可能为空字符串）
-         */
-        String feed(String chunk) {
-            if (finished) {
-                return "";
-            }
-            buf.append(chunk);
-
-            if (!replyStarted) {
-                if (!tryLocateReply()) {
-                    return "";
-                }
-            }
-
-            // 从 scanPos 增量解码 reply 字符串
-            int n = buf.length();
-            while (scanPos < n) {
-                char c = buf.charAt(scanPos);
-                if (c == '\\') {
-                    if (scanPos + 1 >= n) {
-                        break; // 转义序列不完整，等待下一个 chunk
-                    }
-                    char next = buf.charAt(scanPos + 1);
-                    if (next == 'u') {
-                        if (scanPos + 6 > n) {
-                            break; // unicode 码点转义不完整，等待下一个 chunk
-                        }
-                        String hex = buf.substring(scanPos + 2, scanPos + 6);
-                        try {
-                            decoded.append((char) Integer.parseInt(hex, 16));
-                        } catch (NumberFormatException e) {
-                            decoded.append("\\u"); // 非法 unicode 转义，按字面处理
-                        }
-                        scanPos += 6;
-                    } else {
-                        switch (next) {
-                            case 'n' -> decoded.append('\n');
-                            case 't' -> decoded.append('\t');
-                            case 'r' -> decoded.append('\r');
-                            case 'b' -> decoded.append('\b');
-                            case 'f' -> decoded.append('\f');
-                            case '"', '\\', '/' -> decoded.append(next);
-                            default -> decoded.append('\\').append(next); // 未知转义按字面
-                        }
-                        scanPos += 2;
-                    }
-                } else if (c == '"') {
-                    // 未转义的闭引号：reply 结束
-                    finished = true;
-                    break;
-                } else {
-                    decoded.append(c);
-                    scanPos++;
-                }
-            }
-
-            String delta = decoded.substring(emittedLen);
-            emittedLen = decoded.length();
-            return delta;
-        }
-
-        /**
-         * 是否推送过 reply 增量（用于结束后判断是否需要兜底补推）
-         */
-        boolean wasEmitted() {
-            return emittedLen > 0;
-        }
-
-        /**
-         * 尝试在缓冲区中定位 "reply" 键及其字符串值起点
-         *
-         * @return true 表示已进入 reply 字符串；false 表示尚未找到（继续等待）
-         */
-        private boolean tryLocateReply() {
-            int keyIdx = buf.indexOf("\"reply\"");
-            if (keyIdx < 0) {
-                // 未找到：滚动保留尾部 8 字符（覆盖 "reply" 键名被 chunk 切断的情况），
-                // 旧数组格式等无 reply 键的响应不会造成缓冲无限增长
-                if (buf.length() > 8) {
-                    buf.delete(0, buf.length() - 8);
-                }
-                return false;
-            }
-            // 跳过键名后的空白找冒号
-            int i = keyIdx + "\"reply\"".length();
-            int n = buf.length();
-            while (i < n && Character.isWhitespace(buf.charAt(i))) {
-                i++;
-            }
-            if (i >= n) {
-                return false; // 等待冒号
-            }
-            if (buf.charAt(i) != ':') {
-                // "reply" 出现在字符串值内的巧合场景，放弃流式提取
-                finished = true;
-                return false;
-            }
-            i++;
-            while (i < n && Character.isWhitespace(buf.charAt(i))) {
-                i++;
-            }
-            if (i >= n) {
-                return false; // 等待值的开引号
-            }
-            if (buf.charAt(i) != '"') {
-                // reply 不是字符串（异常情况），放弃流式提取
-                finished = true;
-                return false;
-            }
-            scanPos = i + 1;
-            replyStarted = true;
-            return true;
-        }
     }
 
     // ==================== 应用模板 ====================

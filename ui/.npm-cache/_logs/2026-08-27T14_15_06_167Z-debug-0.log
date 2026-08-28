@@ -1,0 +1,1169 @@
+0 verbose cli C:\nvm4w\nodejs\node.exe D:\Program Files\nodejs\node_global\node_modules\npm\bin\npm-cli.js
+1 info using npm@8.19.4
+2 info using node@v22.17.0
+3 timing npm:load:whichnode Completed in 0ms
+4 timing config:load:defaults Completed in 1ms
+5 timing config:load:file:D:\Program Files\nodejs\node_global\node_modules\npm\npmrc Completed in 3ms
+6 timing config:load:builtin Completed in 3ms
+7 timing config:load:cli Completed in 2ms
+8 timing config:load:env Completed in 1ms
+9 timing config:load:file:F:\wangjun\ideaProjects\fastcms\ui\.npmrc Completed in 1ms
+10 timing config:load:project Completed in 5ms
+11 timing config:load:file:C:\Users\PC1\.npmrc Completed in 1ms
+12 timing config:load:user Completed in 1ms
+13 timing config:load:file:D:\Program Files\nodejs\node_global\etc\npmrc Completed in 0ms
+14 timing config:load:global Completed in 0ms
+15 timing config:load:validate Completed in 1ms
+16 timing config:load:credentials Completed in 1ms
+17 timing config:load:setEnvs Completed in 0ms
+18 timing config:load Completed in 16ms
+19 timing npm:load:configload Completed in 16ms
+20 timing npm:load:mkdirpcache Completed in 1ms
+21 timing npm:load:mkdirplogs Completed in 4ms
+22 verbose title npm install
+23 verbose argv "install" "--no-audit" "--no-fund"
+24 timing npm:load:setTitle Completed in 0ms
+25 timing config:load:flatten Completed in 2ms
+26 timing npm:load:display Completed in 3ms
+27 verbose logfile logs-max:10 dir:f:\wangjun\ideaProjects\fastcms\ui\.npm-cache\_logs
+28 verbose logfile f:\wangjun\ideaProjects\fastcms\ui\.npm-cache\_logs\2026-08-27T14_15_06_167Z-debug-0.log
+29 timing npm:load:logFile Completed in 5ms
+30 timing npm:load:timers Completed in 0ms
+31 timing npm:load:configScope Completed in 0ms
+32 timing npm:load Completed in 31ms
+33 timing arborist:ctor Completed in 0ms
+34 silly logfile done cleaning log files
+35 timing idealTree:init Completed in 228ms
+36 timing idealTree:userRequests Completed in 0ms
+37 silly idealTree buildDeps
+38 silly fetch manifest @ckeditor/ckeditor5-adapter-ckfinder@^44.1.0
+39 timing arborist:ctor Completed in 0ms
+40 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-adapter-ckfinder 425ms (cache miss)
+41 silly fetch manifest @ckeditor/ckeditor5-alignment@^44.1.0
+42 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-alignment 95ms (cache miss)
+43 silly fetch manifest @ckeditor/ckeditor5-autoformat@^44.1.0
+44 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-autoformat 101ms (cache miss)
+45 silly fetch manifest @ckeditor/ckeditor5-basic-styles@^44.1.0
+46 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-basic-styles 104ms (cache miss)
+47 silly fetch manifest @ckeditor/ckeditor5-block-quote@^44.1.0
+48 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-block-quote 108ms (cache miss)
+49 silly fetch manifest @ckeditor/ckeditor5-build-classic@^44.1.0
+50 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-build-classic 70ms (cache miss)
+51 silly fetch manifest @ckeditor/ckeditor5-ckfinder@^44.1.0
+52 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-ckfinder 87ms (cache miss)
+53 silly fetch manifest @ckeditor/ckeditor5-cloud-services@^44.1.0
+54 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-cloud-services 107ms (cache miss)
+55 silly fetch manifest @ckeditor/ckeditor5-core@^44.1.0
+56 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-core 102ms (cache miss)
+57 silly fetch manifest @ckeditor/ckeditor5-easy-image@^44.1.0
+58 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-easy-image 172ms (cache miss)
+59 silly fetch manifest @ckeditor/ckeditor5-editor-classic@^44.1.0
+60 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-editor-classic 93ms (cache miss)
+61 silly fetch manifest @ckeditor/ckeditor5-editor-decoupled@^44.1.0
+62 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-editor-decoupled 96ms (cache miss)
+63 silly fetch manifest @ckeditor/ckeditor5-essentials@^44.1.0
+64 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-essentials 100ms (cache miss)
+65 silly fetch manifest @ckeditor/ckeditor5-heading@^44.1.0
+66 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-heading 95ms (cache miss)
+67 silly fetch manifest @ckeditor/ckeditor5-image@^44.1.0
+68 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-image 112ms (cache miss)
+69 silly fetch manifest @ckeditor/ckeditor5-indent@^44.1.0
+70 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-indent 243ms (cache miss)
+71 silly fetch manifest @ckeditor/ckeditor5-link@^44.1.0
+72 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-link 98ms (cache miss)
+73 silly fetch manifest @ckeditor/ckeditor5-list@^44.1.0
+74 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-list 92ms (cache miss)
+75 silly fetch manifest @ckeditor/ckeditor5-markdown-gfm@^44.1.0
+76 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-markdown-gfm 120ms (cache miss)
+77 silly fetch manifest @ckeditor/ckeditor5-media-embed@^44.1.0
+78 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-media-embed 103ms (cache miss)
+79 silly fetch manifest @ckeditor/ckeditor5-paragraph@^44.1.0
+80 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-paragraph 111ms (cache miss)
+81 silly fetch manifest @ckeditor/ckeditor5-paste-from-office@^44.1.0
+82 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-paste-from-office 85ms (cache miss)
+83 silly fetch manifest @ckeditor/ckeditor5-source-editing@^44.1.0
+84 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-source-editing 117ms (cache miss)
+85 silly fetch manifest @ckeditor/ckeditor5-table@^44.1.0
+86 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-table 97ms (cache miss)
+87 silly fetch manifest @ckeditor/ckeditor5-typing@^44.1.0
+88 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-typing 86ms (cache miss)
+89 silly fetch manifest @ckeditor/ckeditor5-ui@^44.1.0
+90 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-ui 125ms (cache miss)
+91 silly fetch manifest @ckeditor/ckeditor5-utils@^44.1.0
+92 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-utils 78ms (cache miss)
+93 silly fetch manifest @ckeditor/ckeditor5-widget@^44.1.0
+94 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-widget 186ms (cache miss)
+95 silly placeDep ROOT @ckeditor/ckeditor5-adapter-ckfinder@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+96 silly placeDep ROOT @ckeditor/ckeditor5-alignment@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+97 silly placeDep ROOT @ckeditor/ckeditor5-autoformat@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+98 silly placeDep ROOT @ckeditor/ckeditor5-basic-styles@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+99 silly placeDep ROOT @ckeditor/ckeditor5-block-quote@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+100 silly placeDep ROOT @ckeditor/ckeditor5-build-classic@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+101 silly placeDep ROOT @ckeditor/ckeditor5-ckfinder@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+102 silly placeDep ROOT @ckeditor/ckeditor5-cloud-services@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+103 silly placeDep ROOT @ckeditor/ckeditor5-core@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+104 silly placeDep ROOT @ckeditor/ckeditor5-easy-image@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+105 silly placeDep ROOT @ckeditor/ckeditor5-editor-classic@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+106 silly placeDep ROOT @ckeditor/ckeditor5-editor-decoupled@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+107 silly placeDep ROOT @ckeditor/ckeditor5-essentials@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+108 silly placeDep ROOT @ckeditor/ckeditor5-heading@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+109 silly placeDep ROOT @ckeditor/ckeditor5-image@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+110 silly placeDep ROOT @ckeditor/ckeditor5-indent@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+111 silly placeDep ROOT @ckeditor/ckeditor5-link@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+112 silly placeDep ROOT @ckeditor/ckeditor5-list@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+113 silly placeDep ROOT @ckeditor/ckeditor5-markdown-gfm@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+114 silly placeDep ROOT @ckeditor/ckeditor5-media-embed@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+115 silly placeDep ROOT @ckeditor/ckeditor5-paragraph@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+116 silly placeDep ROOT @ckeditor/ckeditor5-paste-from-office@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+117 silly placeDep ROOT @ckeditor/ckeditor5-source-editing@44.3.0 REPLACE for: Fastcms@2.0.0 want: ^44.1.0
+118 silly placeDep ROOT @ckeditor/ckeditor5-table@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+119 silly placeDep ROOT @ckeditor/ckeditor5-typing@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+120 silly placeDep ROOT @ckeditor/ckeditor5-ui@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+121 silly placeDep ROOT @ckeditor/ckeditor5-utils@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+122 silly placeDep ROOT @ckeditor/ckeditor5-widget@44.3.0 OK for: Fastcms@2.0.0 want: ^44.1.0
+123 silly fetch manifest @ckeditor/ckeditor5-upload@44.3.0
+124 silly fetch manifest ckeditor5@44.3.0
+125 silly fetch manifest @ckeditor/ckeditor5-engine@44.3.0
+126 silly fetch manifest @ckeditor/ckeditor5-enter@44.3.0
+127 silly fetch manifest @ckeditor/ckeditor5-ckbox@44.3.0
+128 silly fetch manifest @ckeditor/ckeditor5-watchdog@44.3.0
+129 silly fetch manifest @ckeditor/ckeditor5-clipboard@44.3.0
+130 silly fetch manifest @ckeditor/ckeditor5-select-all@44.3.0
+131 silly fetch manifest @ckeditor/ckeditor5-undo@44.3.0
+132 silly fetch manifest @ckeditor/ckeditor5-bookmark@44.3.0
+133 silly fetch manifest @types/marked@4.3.2
+134 silly fetch manifest @types/turndown@5.0.5
+135 silly fetch manifest turndown@7.2.0
+136 silly fetch manifest @ckeditor/ckeditor5-theme-lark@44.3.0
+137 silly fetch manifest @ckeditor/ckeditor5-editor-multi-root@44.3.0
+138 silly fetch manifest @types/color-convert@2.0.4
+139 silly fetch manifest color-parse@1.4.2
+140 silly fetch manifest vanilla-colorful@0.7.2
+141 silly fetch manifest @types/lodash-es@4.17.12
+142 http fetch GET 200 https://registry.npmmirror.com/turndown 162ms (cache miss)
+143 http fetch GET 200 https://registry.npmmirror.com/@types%2fmarked 210ms (cache miss)
+144 http fetch GET 200 https://registry.npmmirror.com/color-parse 243ms (cache miss)
+145 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-upload 293ms (cache miss)
+146 http fetch GET 200 https://registry.npmmirror.com/@types%2fcolor-convert 298ms (cache miss)
+147 http fetch GET 200 https://registry.npmmirror.com/@types%2flodash-es 306ms (cache miss)
+148 http fetch GET 200 https://registry.npmmirror.com/vanilla-colorful 311ms (cache miss)
+149 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-engine 343ms (cache miss)
+150 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-enter 382ms (cache miss)
+151 http fetch GET 200 https://registry.npmmirror.com/@types%2fturndown 391ms (cache miss)
+152 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-clipboard 412ms (cache miss)
+153 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-undo 435ms (cache miss)
+154 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-bookmark 874ms (cache miss)
+155 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-theme-lark 909ms (cache miss)
+156 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-editor-multi-root 929ms (cache miss)
+157 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-select-all 953ms (cache miss)
+158 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-ckbox 969ms (cache miss)
+159 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-watchdog 984ms (cache miss)
+160 http fetch GET 200 https://registry.npmmirror.com/ckeditor5 1006ms (cache miss)
+161 timing idealTree:#root Completed in 4927ms
+162 silly placeDep ROOT @ckeditor/ckeditor5-upload@44.3.0 OK for: @ckeditor/ckeditor5-adapter-ckfinder@44.3.0 want: 44.3.0
+163 silly placeDep ROOT ckeditor5@44.3.0 OK for: @ckeditor/ckeditor5-adapter-ckfinder@44.3.0 want: 44.3.0
+164 silly fetch manifest @ckeditor/ckeditor5-autosave@44.3.0
+165 silly fetch manifest @ckeditor/ckeditor5-code-block@44.3.0
+166 silly fetch manifest @ckeditor/ckeditor5-editor-balloon@44.3.0
+167 silly fetch manifest @ckeditor/ckeditor5-editor-inline@44.3.0
+168 silly fetch manifest @ckeditor/ckeditor5-emoji@44.3.0
+169 silly fetch manifest @ckeditor/ckeditor5-find-and-replace@44.3.0
+170 silly fetch manifest @ckeditor/ckeditor5-font@44.3.0
+171 silly fetch manifest @ckeditor/ckeditor5-highlight@44.3.0
+172 silly fetch manifest @ckeditor/ckeditor5-horizontal-line@44.3.0
+173 silly fetch manifest @ckeditor/ckeditor5-html-embed@44.3.0
+174 silly fetch manifest @ckeditor/ckeditor5-html-support@44.3.0
+175 silly fetch manifest @ckeditor/ckeditor5-language@44.3.0
+176 silly fetch manifest @ckeditor/ckeditor5-mention@44.3.0
+177 silly fetch manifest @ckeditor/ckeditor5-minimap@44.3.0
+178 silly fetch manifest @ckeditor/ckeditor5-page-break@44.3.0
+179 silly fetch manifest @ckeditor/ckeditor5-remove-format@44.3.0
+180 silly fetch manifest @ckeditor/ckeditor5-restricted-editing@44.3.0
+181 silly fetch manifest @ckeditor/ckeditor5-show-blocks@44.3.0
+182 silly fetch manifest @ckeditor/ckeditor5-special-characters@44.3.0
+183 silly fetch manifest @ckeditor/ckeditor5-style@44.3.0
+184 silly fetch manifest @ckeditor/ckeditor5-word-count@44.3.0
+185 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-minimap 304ms (cache miss)
+186 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-autosave 321ms (cache miss)
+187 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-emoji 372ms (cache miss)
+188 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-language 431ms (cache miss)
+189 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-code-block 475ms (cache miss)
+190 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-editor-balloon 499ms (cache miss)
+191 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-highlight 520ms (cache miss)
+192 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-horizontal-line 538ms (cache miss)
+193 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-remove-format 578ms (cache miss)
+194 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-html-embed 592ms (cache miss)
+195 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-editor-inline 706ms (cache miss)
+196 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-font 725ms (cache miss)
+197 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-restricted-editing 753ms (cache miss)
+198 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-find-and-replace 783ms (cache miss)
+199 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-show-blocks 807ms (cache miss)
+200 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-page-break 822ms (cache miss)
+201 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-mention 854ms (cache miss)
+202 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-special-characters 888ms (cache miss)
+203 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-style 914ms (cache miss)
+204 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-html-support 939ms (cache miss)
+205 http fetch GET 200 https://registry.npmmirror.com/@ckeditor%2fckeditor5-word-count 1102ms (cache miss)
+206 timing idealTree:node_modules/@ckeditor/ckeditor5-adapter-ckfinder Completed in 1125ms
+207 timing idealTree:node_modules/@ckeditor/ckeditor5-alignment Completed in 0ms
+208 silly placeDep ROOT @ckeditor/ckeditor5-engine@44.3.0 OK for: @ckeditor/ckeditor5-autoformat@44.3.0 want: 44.3.0
+209 timing idealTree:node_modules/@ckeditor/ckeditor5-autoformat Completed in 1ms
+210 timing idealTree:node_modules/@ckeditor/ckeditor5-basic-styles Completed in 1ms
+211 silly placeDep ROOT @ckeditor/ckeditor5-enter@44.3.0 OK for: @ckeditor/ckeditor5-block-quote@44.3.0 want: 44.3.0
+212 timing idealTree:node_modules/@ckeditor/ckeditor5-block-quote Completed in 0ms
+213 silly placeDep ROOT @ckeditor/ckeditor5-ckbox@44.3.0 OK for: @ckeditor/ckeditor5-build-classic@44.3.0 want: 44.3.0
+214 silly fetch manifest blurhash@2.0.5
+215 http fetch GET 200 https://registry.npmmirror.com/blurhash 49ms (cache miss)
+216 timing idealTree:node_modules/@ckeditor/ckeditor5-build-classic Completed in 52ms
+217 silly placeDep ROOT blurhash@2.0.5 OK for: @ckeditor/ckeditor5-ckbox@44.3.0 want: 2.0.5
+218 timing idealTree:node_modules/@ckeditor/ckeditor5-ckbox Completed in 1ms
+219 timing idealTree:node_modules/@ckeditor/ckeditor5-ckfinder Completed in 0ms
+220 timing idealTree:node_modules/@ckeditor/ckeditor5-cloud-services Completed in 0ms
+221 silly placeDep ROOT @ckeditor/ckeditor5-watchdog@44.3.0 OK for: @ckeditor/ckeditor5-core@44.3.0 want: 44.3.0
+222 timing idealTree:node_modules/@ckeditor/ckeditor5-core Completed in 1ms
+223 timing idealTree:node_modules/@ckeditor/ckeditor5-easy-image Completed in 0ms
+224 timing idealTree:node_modules/@ckeditor/ckeditor5-editor-classic Completed in 0ms
+225 timing idealTree:node_modules/@ckeditor/ckeditor5-editor-decoupled Completed in 0ms
+226 timing idealTree:node_modules/@ckeditor/ckeditor5-engine Completed in 0ms
+227 timing idealTree:node_modules/@ckeditor/ckeditor5-enter Completed in 0ms
+228 silly placeDep ROOT @ckeditor/ckeditor5-clipboard@44.3.0 OK for: @ckeditor/ckeditor5-essentials@44.3.0 want: 44.3.0
+229 silly placeDep ROOT @ckeditor/ckeditor5-select-all@44.3.0 OK for: @ckeditor/ckeditor5-essentials@44.3.0 want: 44.3.0
+230 silly placeDep ROOT @ckeditor/ckeditor5-undo@44.3.0 OK for: @ckeditor/ckeditor5-essentials@44.3.0 want: 44.3.0
+231 timing idealTree:node_modules/@ckeditor/ckeditor5-essentials Completed in 3ms
+232 timing idealTree:node_modules/@ckeditor/ckeditor5-clipboard Completed in 0ms
+233 timing idealTree:node_modules/@ckeditor/ckeditor5-heading Completed in 0ms
+234 timing idealTree:node_modules/@ckeditor/ckeditor5-image Completed in 0ms
+235 timing idealTree:node_modules/@ckeditor/ckeditor5-indent Completed in 0ms
+236 silly placeDep ROOT @ckeditor/ckeditor5-bookmark@44.3.0 OK for: @ckeditor/ckeditor5-link@44.3.0 want: 44.3.0
+237 timing idealTree:node_modules/@ckeditor/ckeditor5-link Completed in 1ms
+238 timing idealTree:node_modules/@ckeditor/ckeditor5-bookmark Completed in 0ms
+239 timing idealTree:node_modules/@ckeditor/ckeditor5-list Completed in 0ms
+240 silly placeDep ROOT @types/marked@4.3.2 OK for: @ckeditor/ckeditor5-markdown-gfm@44.3.0 want: 4.3.2
+241 silly placeDep ROOT @types/turndown@5.0.5 OK for: @ckeditor/ckeditor5-markdown-gfm@44.3.0 want: 5.0.5
+242 silly placeDep ROOT turndown@7.2.0 OK for: @ckeditor/ckeditor5-markdown-gfm@44.3.0 want: 7.2.0
+243 silly fetch manifest @mixmark-io/domino@^2.2.0
+244 http fetch GET 200 https://registry.npmmirror.com/@mixmark-io%2fdomino 72ms (cache miss)
+245 timing idealTree:node_modules/@ckeditor/ckeditor5-markdown-gfm Completed in 75ms
+246 timing idealTree:node_modules/@ckeditor/ckeditor5-media-embed Completed in 0ms
+247 timing idealTree:node_modules/@ckeditor/ckeditor5-paragraph Completed in 0ms
+248 timing idealTree:node_modules/@ckeditor/ckeditor5-paste-from-office Completed in 0ms
+249 timing idealTree:node_modules/@ckeditor/ckeditor5-select-all Completed in 0ms
+250 silly placeDep ROOT @ckeditor/ckeditor5-theme-lark@44.3.0 OK for: @ckeditor/ckeditor5-source-editing@44.3.0 want: 44.3.0
+251 timing idealTree:node_modules/@ckeditor/ckeditor5-source-editing Completed in 1ms
+252 timing idealTree:node_modules/@ckeditor/ckeditor5-table Completed in 0ms
+253 timing idealTree:node_modules/@ckeditor/ckeditor5-theme-lark Completed in 0ms
+254 timing idealTree:node_modules/@ckeditor/ckeditor5-typing Completed in 0ms
+255 silly placeDep ROOT @ckeditor/ckeditor5-editor-multi-root@44.3.0 OK for: @ckeditor/ckeditor5-ui@44.3.0 want: 44.3.0
+256 silly placeDep ROOT @types/color-convert@2.0.4 OK for: @ckeditor/ckeditor5-ui@44.3.0 want: 2.0.4
+257 silly placeDep ROOT color-parse@1.4.2 OK for: @ckeditor/ckeditor5-ui@44.3.0 want: 1.4.2
+258 silly placeDep ROOT vanilla-colorful@0.7.2 OK for: @ckeditor/ckeditor5-ui@44.3.0 want: 0.7.2
+259 silly fetch manifest @types/color-name@^1.1.0
+260 http fetch GET 200 https://registry.npmmirror.com/@types%2fcolor-name 48ms (cache miss)
+261 timing idealTree:node_modules/@ckeditor/ckeditor5-ui Completed in 53ms
+262 timing idealTree:node_modules/@ckeditor/ckeditor5-editor-multi-root Completed in 0ms
+263 timing idealTree:node_modules/@ckeditor/ckeditor5-undo Completed in 0ms
+264 timing idealTree:node_modules/@ckeditor/ckeditor5-upload Completed in 0ms
+265 silly placeDep ROOT @types/lodash-es@4.17.12 REPLACE for: @ckeditor/ckeditor5-utils@44.3.0 want: 4.17.12
+266 timing idealTree:node_modules/@ckeditor/ckeditor5-utils Completed in 1ms
+267 timing idealTree:node_modules/@ckeditor/ckeditor5-watchdog Completed in 0ms
+268 timing idealTree:node_modules/@ckeditor/ckeditor5-widget Completed in 0ms
+269 silly placeDep ROOT @types/color-name@1.1.5 OK for: @types/color-convert@2.0.4 want: ^1.1.0
+270 timing idealTree:node_modules/@types/color-convert Completed in 1ms
+271 timing idealTree:node_modules/@types/color-name Completed in 0ms
+272 timing idealTree:node_modules/@types/lodash-es Completed in 0ms
+273 timing idealTree:node_modules/@types/marked Completed in 0ms
+274 timing idealTree:node_modules/@types/turndown Completed in 0ms
+275 timing idealTree:node_modules/blurhash Completed in 0ms
+276 silly placeDep ROOT @ckeditor/ckeditor5-autosave@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+277 silly placeDep ROOT @ckeditor/ckeditor5-code-block@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+278 silly placeDep ROOT @ckeditor/ckeditor5-editor-balloon@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+279 silly placeDep ROOT @ckeditor/ckeditor5-editor-inline@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+280 silly placeDep ROOT @ckeditor/ckeditor5-emoji@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+281 silly placeDep ROOT @ckeditor/ckeditor5-find-and-replace@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+282 silly placeDep ROOT @ckeditor/ckeditor5-font@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+283 silly placeDep ROOT @ckeditor/ckeditor5-highlight@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+284 silly placeDep ROOT @ckeditor/ckeditor5-horizontal-line@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+285 silly placeDep ROOT @ckeditor/ckeditor5-html-embed@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+286 silly placeDep ROOT @ckeditor/ckeditor5-html-support@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+287 silly placeDep ROOT @ckeditor/ckeditor5-language@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+288 silly placeDep ROOT @ckeditor/ckeditor5-mention@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+289 silly placeDep ROOT @ckeditor/ckeditor5-minimap@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+290 silly placeDep ROOT @ckeditor/ckeditor5-page-break@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+291 silly placeDep ROOT @ckeditor/ckeditor5-remove-format@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+292 silly placeDep ROOT @ckeditor/ckeditor5-restricted-editing@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+293 silly placeDep ROOT @ckeditor/ckeditor5-show-blocks@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+294 silly placeDep ROOT @ckeditor/ckeditor5-special-characters@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+295 silly placeDep ROOT @ckeditor/ckeditor5-style@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+296 silly placeDep ROOT @ckeditor/ckeditor5-word-count@44.3.0 OK for: ckeditor5@44.3.0 want: 44.3.0
+297 silly fetch manifest fuzzysort@3.1.0
+298 http fetch GET 200 https://registry.npmmirror.com/fuzzysort 49ms (cache miss)
+299 timing idealTree:node_modules/ckeditor5 Completed in 70ms
+300 timing idealTree:node_modules/@ckeditor/ckeditor5-autosave Completed in 0ms
+301 timing idealTree:node_modules/@ckeditor/ckeditor5-code-block Completed in 0ms
+302 timing idealTree:node_modules/@ckeditor/ckeditor5-editor-balloon Completed in 0ms
+303 timing idealTree:node_modules/@ckeditor/ckeditor5-editor-inline Completed in 0ms
+304 silly placeDep ROOT fuzzysort@3.1.0 OK for: @ckeditor/ckeditor5-emoji@44.3.0 want: 3.1.0
+305 timing idealTree:node_modules/@ckeditor/ckeditor5-emoji Completed in 0ms
+306 timing idealTree:node_modules/@ckeditor/ckeditor5-find-and-replace Completed in 0ms
+307 timing idealTree:node_modules/@ckeditor/ckeditor5-font Completed in 0ms
+308 timing idealTree:node_modules/@ckeditor/ckeditor5-highlight Completed in 0ms
+309 timing idealTree:node_modules/@ckeditor/ckeditor5-horizontal-line Completed in 0ms
+310 timing idealTree:node_modules/@ckeditor/ckeditor5-html-embed Completed in 0ms
+311 timing idealTree:node_modules/@ckeditor/ckeditor5-html-support Completed in 0ms
+312 timing idealTree:node_modules/@ckeditor/ckeditor5-language Completed in 0ms
+313 timing idealTree:node_modules/@ckeditor/ckeditor5-mention Completed in 0ms
+314 timing idealTree:node_modules/@ckeditor/ckeditor5-minimap Completed in 0ms
+315 timing idealTree:node_modules/@ckeditor/ckeditor5-page-break Completed in 0ms
+316 timing idealTree:node_modules/@ckeditor/ckeditor5-remove-format Completed in 0ms
+317 timing idealTree:node_modules/@ckeditor/ckeditor5-restricted-editing Completed in 0ms
+318 timing idealTree:node_modules/@ckeditor/ckeditor5-show-blocks Completed in 0ms
+319 timing idealTree:node_modules/@ckeditor/ckeditor5-special-characters Completed in 0ms
+320 timing idealTree:node_modules/@ckeditor/ckeditor5-style Completed in 0ms
+321 timing idealTree:node_modules/@ckeditor/ckeditor5-word-count Completed in 0ms
+322 timing idealTree:node_modules/color-parse Completed in 0ms
+323 timing idealTree:node_modules/fuzzysort Completed in 0ms
+324 silly placeDep ROOT @mixmark-io/domino@2.2.0 OK for: turndown@7.2.0 want: ^2.2.0
+325 timing idealTree:node_modules/turndown Completed in 1ms
+326 timing idealTree:node_modules/@mixmark-io/domino Completed in 0ms
+327 timing idealTree:node_modules/vanilla-colorful Completed in 0ms
+328 timing idealTree:buildDeps Completed in 6318ms
+329 timing idealTree:fixDepFlags Completed in 5ms
+330 timing idealTree Completed in 6557ms
+331 timing reify:loadTrees Completed in 6558ms
+332 timing reify:diffTrees Completed in 118ms
+333 silly reify mark retired [
+333 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-adapter-ckfinder'
+333 silly reify ]
+334 silly reify mark retired [
+334 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-alignment'
+334 silly reify ]
+335 silly reify mark retired [
+335 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-autoformat'
+335 silly reify ]
+336 silly reify mark retired [
+336 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-autosave'
+336 silly reify ]
+337 silly reify mark retired [
+337 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-basic-styles'
+337 silly reify ]
+338 silly reify mark retired [
+338 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-block-quote'
+338 silly reify ]
+339 silly reify mark retired [
+339 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-bookmark'
+339 silly reify ]
+340 silly reify mark retired [
+340 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-build-classic'
+340 silly reify ]
+341 silly reify mark retired [
+341 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ckbox'
+341 silly reify ]
+342 silly reify mark retired [
+342 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ckfinder'
+342 silly reify ]
+343 silly reify mark retired [
+343 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-clipboard'
+343 silly reify ]
+344 silly reify mark retired [
+344 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-cloud-services'
+344 silly reify ]
+345 silly reify mark retired [
+345 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-code-block'
+345 silly reify ]
+346 silly reify mark retired [
+346 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-core'
+346 silly reify ]
+347 silly reify mark retired [
+347 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-easy-image'
+347 silly reify ]
+348 silly reify mark retired [
+348 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-balloon'
+348 silly reify ]
+349 silly reify mark retired [
+349 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-classic'
+349 silly reify ]
+350 silly reify mark retired [
+350 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-decoupled'
+350 silly reify ]
+351 silly reify mark retired [
+351 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-inline'
+351 silly reify ]
+352 silly reify mark retired [
+352 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-multi-root'
+352 silly reify ]
+353 silly reify mark retired [
+353 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-engine'
+353 silly reify ]
+354 silly reify mark retired [
+354 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-enter'
+354 silly reify ]
+355 silly reify mark retired [
+355 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-essentials'
+355 silly reify ]
+356 silly reify mark retired [
+356 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-find-and-replace'
+356 silly reify ]
+357 silly reify mark retired [
+357 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-font'
+357 silly reify ]
+358 silly reify mark retired [
+358 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-heading'
+358 silly reify ]
+359 silly reify mark retired [
+359 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-highlight'
+359 silly reify ]
+360 silly reify mark retired [
+360 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-horizontal-line'
+360 silly reify ]
+361 silly reify mark retired [
+361 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-html-embed'
+361 silly reify ]
+362 silly reify mark retired [
+362 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-html-support'
+362 silly reify ]
+363 silly reify mark retired [
+363 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-image'
+363 silly reify ]
+364 silly reify mark retired [
+364 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-indent'
+364 silly reify ]
+365 silly reify mark retired [
+365 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-language'
+365 silly reify ]
+366 silly reify mark retired [
+366 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-link'
+366 silly reify ]
+367 silly reify mark retired [
+367 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-list'
+367 silly reify ]
+368 silly reify mark retired [
+368 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-markdown-gfm'
+368 silly reify ]
+369 silly reify mark retired [
+369 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-media-embed'
+369 silly reify ]
+370 silly reify mark retired [
+370 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-mention'
+370 silly reify ]
+371 silly reify mark retired [
+371 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-minimap'
+371 silly reify ]
+372 silly reify mark retired [
+372 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-page-break'
+372 silly reify ]
+373 silly reify mark retired [
+373 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-paragraph'
+373 silly reify ]
+374 silly reify mark retired [
+374 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-paste-from-office'
+374 silly reify ]
+375 silly reify mark retired [
+375 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-remove-format'
+375 silly reify ]
+376 silly reify mark retired [
+376 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-restricted-editing'
+376 silly reify ]
+377 silly reify mark retired [
+377 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-select-all'
+377 silly reify ]
+378 silly reify mark retired [
+378 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-show-blocks'
+378 silly reify ]
+379 silly reify mark retired [
+379 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-source-editing'
+379 silly reify ]
+380 silly reify mark retired [
+380 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-special-characters'
+380 silly reify ]
+381 silly reify mark retired [
+381 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-style'
+381 silly reify ]
+382 silly reify mark retired [
+382 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-table'
+382 silly reify ]
+383 silly reify mark retired [
+383 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-theme-lark'
+383 silly reify ]
+384 silly reify mark retired [
+384 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-typing'
+384 silly reify ]
+385 silly reify mark retired [
+385 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ui'
+385 silly reify ]
+386 silly reify mark retired [
+386 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-undo'
+386 silly reify ]
+387 silly reify mark retired [
+387 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-upload'
+387 silly reify ]
+388 silly reify mark retired [
+388 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-utils'
+388 silly reify ]
+389 silly reify mark retired [
+389 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-watchdog'
+389 silly reify ]
+390 silly reify mark retired [
+390 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-widget'
+390 silly reify ]
+391 silly reify mark retired [
+391 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-word-count'
+391 silly reify ]
+392 silly reify mark retired [
+392 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\commands'
+392 silly reify ]
+393 silly reify mark retired [
+393 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\language'
+393 silly reify ]
+394 silly reify mark retired [
+394 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\state'
+394 silly reify ]
+395 silly reify mark retired [
+395 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\view'
+395 silly reify ]
+396 silly reify mark retired [
+396 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\win32-x64'
+396 silly reify ]
+397 silly reify mark retired [
+397 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@lezer\\common'
+397 silly reify ]
+398 silly reify mark retired [
+398 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@marijn\\find-cluster-break'
+398 silly reify ]
+399 silly reify mark retired [
+399 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@rollup\\rollup-win32-x64-msvc'
+399 silly reify ]
+400 silly reify mark retired [
+400 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\estree'
+400 silly reify ]
+401 silly reify mark retired [
+401 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\lodash-es'
+401 silly reify ]
+402 silly reify mark retired [ 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\ckeditor5' ]
+403 silly reify mark retired [
+403 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\esbuild',
+403 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild',
+403 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild.cmd',
+403 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild.ps1'
+403 silly reify ]
+404 silly reify mark retired [
+404 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\nanoid',
+404 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid',
+404 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid.cmd',
+404 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid.ps1'
+404 silly reify ]
+405 silly reify mark retired [ 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\picocolors' ]
+406 silly reify mark retired [ 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\postcss' ]
+407 silly reify mark retired [
+407 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\rollup',
+407 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup',
+407 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup.cmd',
+407 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup.ps1'
+407 silly reify ]
+408 silly reify mark retired [
+408 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\sass',
+408 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass',
+408 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass.cmd',
+408 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass.ps1'
+408 silly reify ]
+409 silly reify mark retired [
+409 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\source-map-js'
+409 silly reify ]
+410 silly reify mark retired [ 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\style-mod' ]
+411 silly reify mark retired [
+411 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\vite',
+411 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite',
+411 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite.cmd',
+411 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite.ps1'
+411 silly reify ]
+412 silly reify moves {
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-adapter-ckfinder': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-adapter-ckfinder-B0XDsHHQ',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-alignment': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-alignment-y8dLqB18',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-autoformat': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-autoformat-89mIPnUO',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-autosave': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-autosave-5M69Hb7g',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-basic-styles': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-basic-styles-QEvEWcTf',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-block-quote': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-block-quote-JPL2edvI',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-bookmark': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-bookmark-tZKGfdre',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-build-classic': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-build-classic-Cv7shmdp',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ckbox': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-ckbox-HbXWk4l1',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ckfinder': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-ckfinder-Akb1nYr1',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-clipboard': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-clipboard-dwXmrI17',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-cloud-services': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-cloud-services-Yy3tjJCT',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-code-block': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-code-block-qlxYcSZU',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-core': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-core-xVAlcnmP',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-easy-image': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-easy-image-Jjn1Qpx3',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-balloon': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-editor-balloon-utKO23Zt',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-classic': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-editor-classic-EsdqXqYf',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-decoupled': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-editor-decoupled-ASo7k6Yo',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-inline': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-editor-inline-EsUw0dLc',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-editor-multi-root': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-editor-multi-root-2El4AIsD',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-engine': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-engine-nF5fcUBK',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-enter': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-enter-910dFwEF',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-essentials': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-essentials-Xa0SBJ2F',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-find-and-replace': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-find-and-replace-y8GweWGR',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-font': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-font-ZjRyrT0P',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-heading': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-heading-kNpYvkni',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-highlight': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-highlight-GvE8uS22',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-horizontal-line': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-horizontal-line-7OIhUfzB',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-html-embed': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-html-embed-FZJbg2gi',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-html-support': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-html-support-OPUGmN52',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-image': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-image-awadiVun',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-indent': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-indent-3kpvDcT5',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-language': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-language-foEaFM86',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-link': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-link-XcEdTlIZ',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-list': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-list-0JfE8X3b',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-markdown-gfm': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-markdown-gfm-5WRyNN02',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-media-embed': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-media-embed-JxkHs283',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-mention': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-mention-DFW0dwFu',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-minimap': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-minimap-5BLg5LR9',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-page-break': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-page-break-bIGVIPPT',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-paragraph': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-paragraph-Qen3ox5J',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-paste-from-office': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-paste-from-office-FIPEOkx1',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-remove-format': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-remove-format-y4mMtuTR',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-restricted-editing': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-restricted-editing-sEnsRie5',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-select-all': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-select-all-gGtVvWEX',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-show-blocks': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-show-blocks-HgVq4DRq',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-source-editing': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-source-editing-zHlMHJb0',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-special-characters': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-special-characters-OFL3vkUI',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-style': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-style-gA7E4JPW',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-table': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-table-IB0JxMBy',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-theme-lark': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-theme-lark-ndeAXKvC',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-typing': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-typing-5YzbHYnU',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-ui': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-ui-68OsZCd6',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-undo': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-undo-xUlZRPpf',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-upload': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-upload-1rPbaSXT',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-utils': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-utils-6OUeKEjr',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-watchdog': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-watchdog-DDg4mlcj',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-widget': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-widget-AkaUK55t',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\ckeditor5-word-count': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@ckeditor\\.ckeditor5-word-count-YNj3ujcE',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\commands': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\.commands-yKMSCwK9',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\language': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\.language-MWNOHMqk',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\state': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\.state-1UbA68RM',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\view': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@codemirror\\.view-ssDBJZ2J',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\win32-x64': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\.win32-x64-fY3eO5Ng',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@lezer\\common': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@lezer\\.common-uZPuYlv5',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@marijn\\find-cluster-break': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@marijn\\.find-cluster-break-Dz3LZeO3',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@rollup\\rollup-win32-x64-msvc': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@rollup\\.rollup-win32-x64-msvc-a0Tvm4Hy',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\estree': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\.estree-GCN910Df',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\lodash-es': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@types\\.lodash-es-8GiJRcs8',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\ckeditor5': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.ckeditor5-fIM1rMwi',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\esbuild': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.esbuild-ZvH0Go9K',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.esbuild-VLirNm4z',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild.cmd': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.esbuild.cmd-NdDbkNVA',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\esbuild.ps1': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.esbuild.ps1-QNQhVtHS',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\nanoid': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.nanoid-24LfxEpD',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.nanoid-JEKfyiCe',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid.cmd': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.nanoid.cmd-JRUNuvjT',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\nanoid.ps1': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.nanoid.ps1-2IVEDT8U',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\picocolors': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.picocolors-X9eldJ23',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\postcss': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.postcss-LqYyCO2g',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\rollup': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.rollup-wn9I4mpq',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.rollup-9lC7n0rV',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup.cmd': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.rollup.cmd-mjL2Kz5w',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\rollup.ps1': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.rollup.ps1-1Ohw2FgU',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\sass': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.sass-zckye4kB',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.sass-3j41X3Fl',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass.cmd': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.sass.cmd-8oiahipx',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\sass.ps1': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.sass.ps1-oeYJkblN',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\source-map-js': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.source-map-js-qRDpE5XJ',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\style-mod': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.style-mod-SGuEe3QA',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\vite': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.vite-XOwCo12H',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.vite-zNX0NysJ',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite.cmd': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.vite.cmd-0Cmn20sW',
+412 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\vite.ps1': 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\.bin\\.vite.ps1-lHCHVaZe'
+412 silly reify }
+413 timing reify:retireShallow Completed in 348ms
+414 timing reify:createSparse Completed in 112ms
+415 timing reify:loadBundles Completed in 0ms
+416 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\fsevents
+417 silly reify mark deleted [ 'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\fsevents' ]
+418 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\win32-ia32
+419 silly reify mark deleted [
+419 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\win32-ia32'
+419 silly reify ]
+420 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\win32-arm64
+421 silly reify mark deleted [
+421 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\win32-arm64'
+421 silly reify ]
+422 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\sunos-x64
+423 silly reify mark deleted [
+423 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\sunos-x64'
+423 silly reify ]
+424 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\openbsd-x64
+425 silly reify mark deleted [
+425 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\openbsd-x64'
+425 silly reify ]
+426 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\netbsd-x64
+427 silly reify mark deleted [
+427 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\netbsd-x64'
+427 silly reify ]
+428 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-x64
+429 silly reify mark deleted [
+429 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-x64'
+429 silly reify ]
+430 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-s390x
+431 silly reify mark deleted [
+431 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-s390x'
+431 silly reify ]
+432 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-riscv64
+433 silly reify mark deleted [
+433 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-riscv64'
+433 silly reify ]
+434 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-ppc64
+435 silly reify mark deleted [
+435 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-ppc64'
+435 silly reify ]
+436 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-mips64el
+437 silly reify mark deleted [
+437 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-mips64el'
+437 silly reify ]
+438 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-loong64
+439 silly reify mark deleted [
+439 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-loong64'
+439 silly reify ]
+440 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-ia32
+441 silly reify mark deleted [
+441 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-ia32'
+441 silly reify ]
+442 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-arm64
+443 silly reify mark deleted [
+443 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-arm64'
+443 silly reify ]
+444 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\linux-arm
+445 silly reify mark deleted [
+445 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\linux-arm'
+445 silly reify ]
+446 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\freebsd-x64
+447 silly reify mark deleted [
+447 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\freebsd-x64'
+447 silly reify ]
+448 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\freebsd-arm64
+449 silly reify mark deleted [
+449 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\freebsd-arm64'
+449 silly reify ]
+450 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\darwin-x64
+451 silly reify mark deleted [
+451 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\darwin-x64'
+451 silly reify ]
+452 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\darwin-arm64
+453 silly reify mark deleted [
+453 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\darwin-arm64'
+453 silly reify ]
+454 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\android-x64
+455 silly reify mark deleted [
+455 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\android-x64'
+455 silly reify ]
+456 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\android-arm64
+457 silly reify mark deleted [
+457 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\android-arm64'
+457 silly reify ]
+458 verbose reify failed optional dependency F:\wangjun\ideaProjects\fastcms\ui\node_modules\@esbuild\android-arm
+459 silly reify mark deleted [
+459 silly reify   'F:\\wangjun\\ideaProjects\\fastcms\\ui\\node_modules\\@esbuild\\android-arm'
+459 silly reify ]
+460 timing reifyNode:node_modules/fsevents Completed in 16ms
+461 timing reifyNode:node_modules/@esbuild/win32-ia32 Completed in 16ms
+462 timing reifyNode:node_modules/@esbuild/win32-arm64 Completed in 16ms
+463 timing reifyNode:node_modules/@esbuild/sunos-x64 Completed in 16ms
+464 timing reifyNode:node_modules/@esbuild/openbsd-x64 Completed in 15ms
+465 timing reifyNode:node_modules/@esbuild/netbsd-x64 Completed in 15ms
+466 timing reifyNode:node_modules/@esbuild/linux-x64 Completed in 15ms
+467 timing reifyNode:node_modules/@esbuild/linux-s390x Completed in 15ms
+468 timing reifyNode:node_modules/@esbuild/linux-riscv64 Completed in 15ms
+469 timing reifyNode:node_modules/@esbuild/linux-ppc64 Completed in 15ms
+470 timing reifyNode:node_modules/@esbuild/linux-mips64el Completed in 15ms
+471 timing reifyNode:node_modules/@esbuild/linux-loong64 Completed in 15ms
+472 timing reifyNode:node_modules/@esbuild/linux-ia32 Completed in 16ms
+473 timing reifyNode:node_modules/@esbuild/linux-arm64 Completed in 16ms
+474 timing reifyNode:node_modules/@esbuild/linux-arm Completed in 16ms
+475 timing reifyNode:node_modules/@esbuild/freebsd-x64 Completed in 16ms
+476 timing reifyNode:node_modules/@esbuild/freebsd-arm64 Completed in 16ms
+477 timing reifyNode:node_modules/@esbuild/darwin-x64 Completed in 16ms
+478 timing reifyNode:node_modules/@esbuild/darwin-arm64 Completed in 16ms
+479 timing reifyNode:node_modules/@esbuild/android-x64 Completed in 16ms
+480 timing reifyNode:node_modules/@esbuild/android-arm64 Completed in 16ms
+481 timing reifyNode:node_modules/@esbuild/android-arm Completed in 16ms
+482 silly tarball no local data for fuzzysort@https://registry.npmmirror.com/fuzzysort/-/fuzzysort-3.1.0.tgz. Extracting by manifest.
+483 silly tarball no local data for @ckeditor/ckeditor5-emoji@https://registry.npmmirror.com/@ckeditor/ckeditor5-emoji/-/ckeditor5-emoji-44.3.0.tgz. Extracting by manifest.
+484 silly tarball no local data for @types/color-convert@https://registry.npmmirror.com/@types/color-convert/-/color-convert-2.0.4.tgz. Extracting by manifest.
+485 silly tarball no local data for @types/color-name@https://registry.npmmirror.com/@types/color-name/-/color-name-1.1.5.tgz. Extracting by manifest.
+486 silly tarball no local data for vite@https://registry.npmmirror.com/vite/-/vite-4.3.9.tgz. Extracting by manifest.
+487 silly tarball no local data for style-mod@https://registry.npmmirror.com/style-mod/-/style-mod-4.0.3.tgz. Extracting by manifest.
+488 silly tarball no local data for @types/marked@https://registry.npmmirror.com/@types/marked/-/marked-4.3.2.tgz. Extracting by manifest.
+489 silly tarball no local data for @types/turndown@https://registry.npmmirror.com/@types/turndown/-/turndown-5.0.5.tgz. Extracting by manifest.
+490 silly tarball no local data for source-map-js@https://registry.npmmirror.com/source-map-js/-/source-map-js-1.0.2.tgz. Extracting by manifest.
+491 silly tarball no local data for rollup@https://registry.npmmirror.com/rollup/-/rollup-3.23.0.tgz. Extracting by manifest.
+492 silly tarball no local data for sass@https://registry.npmmirror.com/sass/-/sass-1.62.1.tgz. Extracting by manifest.
+493 silly tarball no local data for postcss@https://registry.npmmirror.com/postcss/-/postcss-8.4.23.tgz. Extracting by manifest.
+494 silly tarball no local data for picocolors@https://registry.npmmirror.com/picocolors/-/picocolors-1.0.0.tgz. Extracting by manifest.
+495 silly tarball no local data for nanoid@https://registry.npmmirror.com/nanoid/-/nanoid-3.3.6.tgz. Extracting by manifest.
+496 silly tarball no local data for ckeditor5@https://registry.npmmirror.com/ckeditor5/-/ckeditor5-44.3.0.tgz. Extracting by manifest.
+497 silly tarball no local data for @types/lodash-es@https://registry.npmmirror.com/@types/lodash-es/-/lodash-es-4.17.12.tgz. Extracting by manifest.
+498 silly tarball no local data for @lezer/common@https://registry.npmmirror.com/@lezer/common/-/common-1.0.3.tgz. Extracting by manifest.
+499 silly tarball no local data for esbuild@https://registry.npmmirror.com/esbuild/-/esbuild-0.17.19.tgz. Extracting by manifest.
+500 silly tarball no local data for @esbuild/win32-x64@https://registry.npmmirror.com/@esbuild/win32-x64/-/win32-x64-0.17.19.tgz. Extracting by manifest.
+501 silly tarball no local data for @types/estree@https://registry.npmmirror.com/@types/estree/-/estree-1.0.1.tgz. Extracting by manifest.
+502 silly tarball no local data for @codemirror/view@https://registry.npmmirror.com/@codemirror/view/-/view-6.13.0.tgz. Extracting by manifest.
+503 silly tarball no local data for @codemirror/state@https://registry.npmmirror.com/@codemirror/state/-/state-6.2.1.tgz. Extracting by manifest.
+504 silly tarball no local data for @codemirror/commands@https://registry.npmmirror.com/@codemirror/commands/-/commands-6.2.4.tgz. Extracting by manifest.
+505 silly tarball no local data for @ckeditor/ckeditor5-watchdog@https://registry.npmmirror.com/@ckeditor/ckeditor5-watchdog/-/ckeditor5-watchdog-44.3.0.tgz. Extracting by manifest.
+506 silly tarball no local data for @codemirror/language@https://registry.npmmirror.com/@codemirror/language/-/language-6.7.0.tgz. Extracting by manifest.
+507 silly tarball no local data for @ckeditor/ckeditor5-widget@https://registry.npmmirror.com/@ckeditor/ckeditor5-widget/-/ckeditor5-widget-44.3.0.tgz. Extracting by manifest.
+508 silly tarball no local data for @ckeditor/ckeditor5-word-count@https://registry.npmmirror.com/@ckeditor/ckeditor5-word-count/-/ckeditor5-word-count-44.3.0.tgz. Extracting by manifest.
+509 silly tarball no local data for @ckeditor/ckeditor5-ui@https://registry.npmmirror.com/@ckeditor/ckeditor5-ui/-/ckeditor5-ui-44.3.0.tgz. Extracting by manifest.
+510 silly tarball no local data for @ckeditor/ckeditor5-undo@https://registry.npmmirror.com/@ckeditor/ckeditor5-undo/-/ckeditor5-undo-44.3.0.tgz. Extracting by manifest.
+511 silly tarball no local data for @ckeditor/ckeditor5-upload@https://registry.npmmirror.com/@ckeditor/ckeditor5-upload/-/ckeditor5-upload-44.3.0.tgz. Extracting by manifest.
+512 silly tarball no local data for @ckeditor/ckeditor5-utils@https://registry.npmmirror.com/@ckeditor/ckeditor5-utils/-/ckeditor5-utils-44.3.0.tgz. Extracting by manifest.
+513 silly tarball no local data for @ckeditor/ckeditor5-typing@https://registry.npmmirror.com/@ckeditor/ckeditor5-typing/-/ckeditor5-typing-44.3.0.tgz. Extracting by manifest.
+514 silly tarball no local data for @ckeditor/ckeditor5-table@https://registry.npmmirror.com/@ckeditor/ckeditor5-table/-/ckeditor5-table-44.3.0.tgz. Extracting by manifest.
+515 silly tarball no local data for @ckeditor/ckeditor5-theme-lark@https://registry.npmmirror.com/@ckeditor/ckeditor5-theme-lark/-/ckeditor5-theme-lark-44.3.0.tgz. Extracting by manifest.
+516 silly tarball no local data for @ckeditor/ckeditor5-special-characters@https://registry.npmmirror.com/@ckeditor/ckeditor5-special-characters/-/ckeditor5-special-characters-44.3.0.tgz. Extracting by manifest.
+517 silly tarball no local data for @ckeditor/ckeditor5-source-editing@https://registry.npmmirror.com/@ckeditor/ckeditor5-source-editing/-/ckeditor5-source-editing-44.3.0.tgz. Extracting by manifest.
+518 silly tarball no local data for @ckeditor/ckeditor5-style@https://registry.npmmirror.com/@ckeditor/ckeditor5-style/-/ckeditor5-style-44.3.0.tgz. Extracting by manifest.
+519 silly tarball no local data for @ckeditor/ckeditor5-select-all@https://registry.npmmirror.com/@ckeditor/ckeditor5-select-all/-/ckeditor5-select-all-44.3.0.tgz. Extracting by manifest.
+520 silly tarball no local data for @ckeditor/ckeditor5-show-blocks@https://registry.npmmirror.com/@ckeditor/ckeditor5-show-blocks/-/ckeditor5-show-blocks-44.3.0.tgz. Extracting by manifest.
+521 silly tarball no local data for @ckeditor/ckeditor5-restricted-editing@https://registry.npmmirror.com/@ckeditor/ckeditor5-restricted-editing/-/ckeditor5-restricted-editing-44.3.0.tgz. Extracting by manifest.
+522 silly tarball no local data for @ckeditor/ckeditor5-remove-format@https://registry.npmmirror.com/@ckeditor/ckeditor5-remove-format/-/ckeditor5-remove-format-44.3.0.tgz. Extracting by manifest.
+523 silly tarball no local data for @ckeditor/ckeditor5-paste-from-office@https://registry.npmmirror.com/@ckeditor/ckeditor5-paste-from-office/-/ckeditor5-paste-from-office-44.3.0.tgz. Extracting by manifest.
+524 silly tarball no local data for @ckeditor/ckeditor5-paragraph@https://registry.npmmirror.com/@ckeditor/ckeditor5-paragraph/-/ckeditor5-paragraph-44.3.0.tgz. Extracting by manifest.
+525 silly tarball no local data for @ckeditor/ckeditor5-page-break@https://registry.npmmirror.com/@ckeditor/ckeditor5-page-break/-/ckeditor5-page-break-44.3.0.tgz. Extracting by manifest.
+526 silly tarball no local data for @ckeditor/ckeditor5-mention@https://registry.npmmirror.com/@ckeditor/ckeditor5-mention/-/ckeditor5-mention-44.3.0.tgz. Extracting by manifest.
+527 silly tarball no local data for @ckeditor/ckeditor5-minimap@https://registry.npmmirror.com/@ckeditor/ckeditor5-minimap/-/ckeditor5-minimap-44.3.0.tgz. Extracting by manifest.
+528 silly tarball no local data for @ckeditor/ckeditor5-markdown-gfm@https://registry.npmmirror.com/@ckeditor/ckeditor5-markdown-gfm/-/ckeditor5-markdown-gfm-44.3.0.tgz. Extracting by manifest.
+529 silly tarball no local data for @ckeditor/ckeditor5-media-embed@https://registry.npmmirror.com/@ckeditor/ckeditor5-media-embed/-/ckeditor5-media-embed-44.3.0.tgz. Extracting by manifest.
+530 silly tarball no local data for @ckeditor/ckeditor5-list@https://registry.npmmirror.com/@ckeditor/ckeditor5-list/-/ckeditor5-list-44.3.0.tgz. Extracting by manifest.
+531 silly tarball no local data for @ckeditor/ckeditor5-link@https://registry.npmmirror.com/@ckeditor/ckeditor5-link/-/ckeditor5-link-44.3.0.tgz. Extracting by manifest.
+532 silly tarball no local data for @ckeditor/ckeditor5-indent@https://registry.npmmirror.com/@ckeditor/ckeditor5-indent/-/ckeditor5-indent-44.3.0.tgz. Extracting by manifest.
+533 silly tarball no local data for @ckeditor/ckeditor5-language@https://registry.npmmirror.com/@ckeditor/ckeditor5-language/-/ckeditor5-language-44.3.0.tgz. Extracting by manifest.
+534 silly tarball no local data for @ckeditor/ckeditor5-image@https://registry.npmmirror.com/@ckeditor/ckeditor5-image/-/ckeditor5-image-44.3.0.tgz. Extracting by manifest.
+535 silly tarball no local data for @ckeditor/ckeditor5-html-support@https://registry.npmmirror.com/@ckeditor/ckeditor5-html-support/-/ckeditor5-html-support-44.3.0.tgz. Extracting by manifest.
+536 silly tarball no local data for @ckeditor/ckeditor5-html-embed@https://registry.npmmirror.com/@ckeditor/ckeditor5-html-embed/-/ckeditor5-html-embed-44.3.0.tgz. Extracting by manifest.
+537 silly tarball no local data for @ckeditor/ckeditor5-heading@https://registry.npmmirror.com/@ckeditor/ckeditor5-heading/-/ckeditor5-heading-44.3.0.tgz. Extracting by manifest.
+538 silly tarball no local data for @ckeditor/ckeditor5-highlight@https://registry.npmmirror.com/@ckeditor/ckeditor5-highlight/-/ckeditor5-highlight-44.3.0.tgz. Extracting by manifest.
+539 silly tarball no local data for @ckeditor/ckeditor5-horizontal-line@https://registry.npmmirror.com/@ckeditor/ckeditor5-horizontal-line/-/ckeditor5-horizontal-line-44.3.0.tgz. Extracting by manifest.
+540 silly tarball no local data for @ckeditor/ckeditor5-font@https://registry.npmmirror.com/@ckeditor/ckeditor5-font/-/ckeditor5-font-44.3.0.tgz. Extracting by manifest.
+541 silly tarball no local data for @ckeditor/ckeditor5-essentials@https://registry.npmmirror.com/@ckeditor/ckeditor5-essentials/-/ckeditor5-essentials-44.3.0.tgz. Extracting by manifest.
+542 silly tarball no local data for @ckeditor/ckeditor5-find-and-replace@https://registry.npmmirror.com/@ckeditor/ckeditor5-find-and-replace/-/ckeditor5-find-and-replace-44.3.0.tgz. Extracting by manifest.
+543 silly tarball no local data for @ckeditor/ckeditor5-engine@https://registry.npmmirror.com/@ckeditor/ckeditor5-engine/-/ckeditor5-engine-44.3.0.tgz. Extracting by manifest.
+544 silly tarball no local data for @ckeditor/ckeditor5-enter@https://registry.npmmirror.com/@ckeditor/ckeditor5-enter/-/ckeditor5-enter-44.3.0.tgz. Extracting by manifest.
+545 silly tarball no local data for @ckeditor/ckeditor5-editor-multi-root@https://registry.npmmirror.com/@ckeditor/ckeditor5-editor-multi-root/-/ckeditor5-editor-multi-root-44.3.0.tgz. Extracting by manifest.
+546 silly tarball no local data for @ckeditor/ckeditor5-editor-classic@https://registry.npmmirror.com/@ckeditor/ckeditor5-editor-classic/-/ckeditor5-editor-classic-44.3.0.tgz. Extracting by manifest.
+547 silly tarball no local data for @ckeditor/ckeditor5-editor-balloon@https://registry.npmmirror.com/@ckeditor/ckeditor5-editor-balloon/-/ckeditor5-editor-balloon-44.3.0.tgz. Extracting by manifest.
+548 silly tarball no local data for @ckeditor/ckeditor5-editor-inline@https://registry.npmmirror.com/@ckeditor/ckeditor5-editor-inline/-/ckeditor5-editor-inline-44.3.0.tgz. Extracting by manifest.
+549 silly tarball no local data for @ckeditor/ckeditor5-code-block@https://registry.npmmirror.com/@ckeditor/ckeditor5-code-block/-/ckeditor5-code-block-44.3.0.tgz. Extracting by manifest.
+550 silly tarball no local data for @ckeditor/ckeditor5-easy-image@https://registry.npmmirror.com/@ckeditor/ckeditor5-easy-image/-/ckeditor5-easy-image-44.3.0.tgz. Extracting by manifest.
+551 silly tarball no local data for @ckeditor/ckeditor5-editor-decoupled@https://registry.npmmirror.com/@ckeditor/ckeditor5-editor-decoupled/-/ckeditor5-editor-decoupled-44.3.0.tgz. Extracting by manifest.
+552 silly tarball no local data for @ckeditor/ckeditor5-cloud-services@https://registry.npmmirror.com/@ckeditor/ckeditor5-cloud-services/-/ckeditor5-cloud-services-44.3.0.tgz. Extracting by manifest.
+553 silly tarball no local data for @ckeditor/ckeditor5-clipboard@https://registry.npmmirror.com/@ckeditor/ckeditor5-clipboard/-/ckeditor5-clipboard-44.3.0.tgz. Extracting by manifest.
+554 silly tarball no local data for @ckeditor/ckeditor5-core@https://registry.npmmirror.com/@ckeditor/ckeditor5-core/-/ckeditor5-core-44.3.0.tgz. Extracting by manifest.
+555 silly tarball no local data for @ckeditor/ckeditor5-ckfinder@https://registry.npmmirror.com/@ckeditor/ckeditor5-ckfinder/-/ckeditor5-ckfinder-44.3.0.tgz. Extracting by manifest.
+556 silly tarball no local data for @ckeditor/ckeditor5-bookmark@https://registry.npmmirror.com/@ckeditor/ckeditor5-bookmark/-/ckeditor5-bookmark-44.3.0.tgz. Extracting by manifest.
+557 silly tarball no local data for @ckeditor/ckeditor5-build-classic@https://registry.npmmirror.com/@ckeditor/ckeditor5-build-classic/-/ckeditor5-build-classic-44.3.0.tgz. Extracting by manifest.
+558 silly tarball no local data for @ckeditor/ckeditor5-block-quote@https://registry.npmmirror.com/@ckeditor/ckeditor5-block-quote/-/ckeditor5-block-quote-44.3.0.tgz. Extracting by manifest.
+559 silly tarball no local data for @ckeditor/ckeditor5-ckbox@https://registry.npmmirror.com/@ckeditor/ckeditor5-ckbox/-/ckeditor5-ckbox-44.3.0.tgz. Extracting by manifest.
+560 silly tarball no local data for @ckeditor/ckeditor5-basic-styles@https://registry.npmmirror.com/@ckeditor/ckeditor5-basic-styles/-/ckeditor5-basic-styles-44.3.0.tgz. Extracting by manifest.
+561 silly tarball no local data for @ckeditor/ckeditor5-autosave@https://registry.npmmirror.com/@ckeditor/ckeditor5-autosave/-/ckeditor5-autosave-44.3.0.tgz. Extracting by manifest.
+562 silly tarball no local data for @ckeditor/ckeditor5-autoformat@https://registry.npmmirror.com/@ckeditor/ckeditor5-autoformat/-/ckeditor5-autoformat-44.3.0.tgz. Extracting by manifest.
+563 silly tarball no local data for @ckeditor/ckeditor5-alignment@https://registry.npmmirror.com/@ckeditor/ckeditor5-alignment/-/ckeditor5-alignment-44.3.0.tgz. Extracting by manifest.
+564 silly tarball no local data for @ckeditor/ckeditor5-adapter-ckfinder@https://registry.npmmirror.com/@ckeditor/ckeditor5-adapter-ckfinder/-/ckeditor5-adapter-ckfinder-44.3.0.tgz. Extracting by manifest.
+565 silly tarball no local data for rollup@https://registry.npmmirror.com/rollup/-/rollup-2.79.1.tgz. Extracting by manifest.
+566 http fetch GET 200 https://cdn.npmmirror.com/packages/picocolors/1.0.0/picocolors-1.0.0.tgz 523ms (cache miss)
+567 http fetch GET 200 https://cdn.npmmirror.com/packages/style-mod/4.0.3/style-mod-4.0.3.tgz 591ms (cache miss)
+568 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/turndown/5.0.5/turndown-5.0.5.tgz 592ms (cache miss)
+569 timing reifyNode:node_modules/@types/turndown Completed in 677ms
+570 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/marked/4.3.2/marked-4.3.2.tgz 598ms (cache miss)
+571 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/color-convert/2.0.4/color-convert-2.0.4.tgz 718ms (cache miss)
+572 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/color-name/1.1.5/color-name-1.1.5.tgz 843ms (cache miss)
+573 timing reifyNode:node_modules/@types/color-name Completed in 927ms
+574 http fetch GET 200 https://cdn.npmmirror.com/packages/fuzzysort/3.1.0/fuzzysort-3.1.0.tgz 888ms (cache miss)
+575 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/estree/1.0.1/estree-1.0.1.tgz 932ms (cache miss)
+576 timing reifyNode:node_modules/@types/estree Completed in 1019ms
+577 timing reifyNode:node_modules/@types/marked Completed in 1025ms
+578 http fetch GET 200 https://cdn.npmmirror.com/packages/nanoid/3.3.6/nanoid-3.3.6.tgz 969ms (cache miss)
+579 timing reifyNode:node_modules/@types/color-convert Completed in 1386ms
+580 timing reifyNode:node_modules/picocolors Completed in 3398ms
+581 timing reifyNode:node_modules/fuzzysort Completed in 3481ms
+582 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-paragraph/44.3.0/ckeditor5-paragraph-44.3.0.tgz 4106ms (cache miss)
+583 http fetch GET 200 https://cdn.npmmirror.com/packages/esbuild/0.17.19/esbuild-0.17.19.tgz 4155ms (cache miss)
+584 timing reifyNode:node_modules/esbuild Completed in 4391ms
+585 timing reifyNode:node_modules/style-mod Completed in 4721ms
+586 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-easy-image/44.3.0/ckeditor5-easy-image-44.3.0.tgz 4899ms (cache miss)
+587 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-essentials/44.3.0/ckeditor5-essentials-44.3.0.tgz 4983ms (cache miss)
+588 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-adapter-ckfinder/44.3.0/ckeditor5-adapter-ckfinder-44.3.0.tgz 5597ms (cache miss)
+589 http fetch GET 200 https://cdn.npmmirror.com/packages/%40codemirror/commands/6.2.4/commands-6.2.4.tgz 5800ms (cache miss)
+590 http fetch GET 200 https://cdn.npmmirror.com/packages/%40lezer/common/1.0.3/common-1.0.3.tgz 6069ms (cache miss)
+591 timing reifyNode:node_modules/@codemirror/commands Completed in 6156ms
+592 timing reifyNode:node_modules/@lezer/common Completed in 6557ms
+593 http fetch GET 200 https://cdn.npmmirror.com/packages/%40codemirror/state/6.2.1/state-6.2.1.tgz 7265ms (cache miss)
+594 timing reifyNode:node_modules/@codemirror/state Completed in 7384ms
+595 http fetch GET 200 https://cdn.npmmirror.com/packages/%40codemirror/language/6.7.0/language-6.7.0.tgz 7987ms (cache miss)
+596 timing reifyNode:node_modules/@codemirror/language Completed in 9508ms
+597 http fetch GET 200 https://cdn.npmmirror.com/packages/source-map-js/1.0.2/source-map-js-1.0.2.tgz 9483ms (cache miss)
+598 timing reifyNode:node_modules/source-map-js Completed in 10996ms
+599 timing reifyNode:node_modules/@ckeditor/ckeditor5-essentials Completed in 13900ms
+600 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-editor-decoupled/44.3.0/ckeditor5-editor-decoupled-44.3.0.tgz 14866ms (cache miss)
+601 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-editor-balloon/44.3.0/ckeditor5-editor-balloon-44.3.0.tgz 14956ms (cache miss)
+602 timing reifyNode:node_modules/nanoid Completed in 15065ms
+603 timing reifyNode:node_modules/@ckeditor/ckeditor5-easy-image Completed in 15090ms
+604 timing reifyNode:node_modules/@ckeditor/ckeditor5-editor-decoupled Completed in 15102ms
+605 timing reifyNode:node_modules/@ckeditor/ckeditor5-editor-balloon Completed in 15135ms
+606 timing reifyNode:node_modules/@ckeditor/ckeditor5-adapter-ckfinder Completed in 15169ms
+607 timing reifyNode:node_modules/@ckeditor/ckeditor5-paragraph Completed in 15382ms
+608 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-editor-inline/44.3.0/ckeditor5-editor-inline-44.3.0.tgz 15455ms (cache miss)
+609 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-editor-classic/44.3.0/ckeditor5-editor-classic-44.3.0.tgz 15512ms (cache miss)
+610 timing reifyNode:node_modules/@ckeditor/ckeditor5-editor-inline Completed in 15648ms
+611 timing reifyNode:node_modules/@ckeditor/ckeditor5-editor-classic Completed in 15669ms
+612 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-watchdog/44.3.0/ckeditor5-watchdog-44.3.0.tgz 15832ms (cache miss)
+613 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-markdown-gfm/44.3.0/ckeditor5-markdown-gfm-44.3.0.tgz 15840ms (cache miss)
+614 timing reifyNode:node_modules/@ckeditor/ckeditor5-watchdog Completed in 16116ms
+615 timing reifyNode:node_modules/@ckeditor/ckeditor5-markdown-gfm Completed in 16115ms
+616 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-editor-multi-root/44.3.0/ckeditor5-editor-multi-root-44.3.0.tgz 16062ms (cache miss)
+617 timing reifyNode:node_modules/@ckeditor/ckeditor5-editor-multi-root Completed in 16281ms
+618 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-cloud-services/44.3.0/ckeditor5-cloud-services-44.3.0.tgz 17165ms (cache miss)
+619 timing reifyNode:node_modules/@ckeditor/ckeditor5-cloud-services Completed in 17283ms
+620 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-minimap/44.3.0/ckeditor5-minimap-44.3.0.tgz 17191ms (cache miss)
+621 http fetch GET 200 https://cdn.npmmirror.com/packages/%40codemirror/view/6.13.0/view-6.13.0.tgz 17215ms (cache miss)
+622 timing reifyNode:node_modules/@codemirror/view Completed in 17302ms
+623 timing reifyNode:node_modules/@ckeditor/ckeditor5-minimap Completed in 17313ms
+624 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-mention/44.3.0/ckeditor5-mention-44.3.0.tgz 18173ms (cache miss)
+625 timing reifyNode:node_modules/@ckeditor/ckeditor5-mention Completed in 18380ms
+626 http fetch GET 200 https://cdn.npmmirror.com/packages/postcss/8.4.23/postcss-8.4.23.tgz 20773ms (cache miss)
+627 timing reifyNode:node_modules/postcss Completed in 20886ms
+628 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-typing/44.3.0/ckeditor5-typing-44.3.0.tgz 20953ms (cache miss)
+629 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-paste-from-office/44.3.0/ckeditor5-paste-from-office-44.3.0.tgz 20955ms (cache miss)
+630 timing reifyNode:node_modules/@ckeditor/ckeditor5-typing Completed in 21056ms
+631 timing reifyNode:node_modules/@ckeditor/ckeditor5-paste-from-office Completed in 21067ms
+632 http fetch GET 200 https://cdn.npmmirror.com/packages/rollup/3.23.0/rollup-3.23.0.tgz 21008ms (cache miss)
+633 timing reifyNode:node_modules/rollup Completed in 21120ms
+634 http fetch GET 200 https://cdn.npmmirror.com/packages/vite/4.3.9/vite-4.3.9.tgz 22749ms (cache miss)
+635 timing reifyNode:node_modules/vite Completed in 22850ms
+636 http fetch GET 200 https://cdn.npmmirror.com/packages/sass/1.62.1/sass-1.62.1.tgz 24086ms (cache miss)
+637 timing reifyNode:node_modules/sass Completed in 24191ms
+638 http fetch GET 200 https://cdn.npmmirror.com/packages/rollup/2.79.1/rollup-2.79.1.tgz 27292ms (cache miss)
+639 timing reifyNode:node_modules/vite-plugin-cdn-import/node_modules/rollup Completed in 27449ms
+640 http fetch GET 200 https://cdn.npmmirror.com/packages/%40esbuild/win32-x64/0.17.19/win32-x64-0.17.19.tgz 28754ms (cache miss)
+641 timing reifyNode:node_modules/@esbuild/win32-x64 Completed in 28855ms
+642 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-utils/44.3.0/ckeditor5-utils-44.3.0.tgz 29377ms (cache miss)
+643 timing reifyNode:node_modules/@ckeditor/ckeditor5-utils Completed in 29714ms
+644 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-theme-lark/44.3.0/ckeditor5-theme-lark-44.3.0.tgz 30325ms (cache miss)
+645 timing reifyNode:node_modules/@ckeditor/ckeditor5-theme-lark Completed in 30484ms
+646 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-build-classic/44.3.0/ckeditor5-build-classic-44.3.0.tgz 35696ms (cache miss)
+647 warn deprecated @ckeditor/ckeditor5-build-classic@44.3.0: The predefined builds are no longer maintained. Check the https://ckeditor.com/docs/ckeditor5/latest/updating/nim-migration/predefined-builds.html page for the details.
+648 timing reifyNode:node_modules/@ckeditor/ckeditor5-build-classic Completed in 35820ms
+649 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-select-all/44.3.0/ckeditor5-select-all-44.3.0.tgz 43950ms (cache miss)
+650 timing reifyNode:node_modules/@ckeditor/ckeditor5-select-all Completed in 44058ms
+651 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-upload/44.3.0/ckeditor5-upload-44.3.0.tgz 43984ms (cache miss)
+652 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-undo/44.3.0/ckeditor5-undo-44.3.0.tgz 44000ms (cache miss)
+653 timing reifyNode:node_modules/@ckeditor/ckeditor5-upload Completed in 44090ms
+654 timing reifyNode:node_modules/@ckeditor/ckeditor5-undo Completed in 44106ms
+655 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-enter/44.3.0/ckeditor5-enter-44.3.0.tgz 44119ms (cache miss)
+656 timing reifyNode:node_modules/@ckeditor/ckeditor5-enter Completed in 44235ms
+657 http fetch GET 200 https://cdn.npmmirror.com/packages/%40types/lodash-es/4.17.12/lodash-es-4.17.12.tgz 44155ms (cache miss)
+658 timing reifyNode:node_modules/@types/lodash-es Completed in 44256ms
+659 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-clipboard/44.3.0/ckeditor5-clipboard-44.3.0.tgz 44639ms (cache miss)
+660 timing reifyNode:node_modules/@ckeditor/ckeditor5-clipboard Completed in 44755ms
+661 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-widget/44.3.0/ckeditor5-widget-44.3.0.tgz 44818ms (cache miss)
+662 timing reifyNode:node_modules/@ckeditor/ckeditor5-widget Completed in 44938ms
+663 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-word-count/44.3.0/ckeditor5-word-count-44.3.0.tgz 45451ms (cache miss)
+664 timing reifyNode:node_modules/@ckeditor/ckeditor5-word-count Completed in 45553ms
+665 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-autosave/44.3.0/ckeditor5-autosave-44.3.0.tgz 45494ms (cache miss)
+666 timing reifyNode:node_modules/@ckeditor/ckeditor5-autosave Completed in 45618ms
+667 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-autoformat/44.3.0/ckeditor5-autoformat-44.3.0.tgz 45602ms (cache miss)
+668 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-page-break/44.3.0/ckeditor5-page-break-44.3.0.tgz 45629ms (cache miss)
+669 timing reifyNode:node_modules/@ckeditor/ckeditor5-autoformat Completed in 45720ms
+670 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-source-editing/44.3.0/ckeditor5-source-editing-44.3.0.tgz 45673ms (cache miss)
+671 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-horizontal-line/44.3.0/ckeditor5-horizontal-line-44.3.0.tgz 45668ms (cache miss)
+672 timing reifyNode:node_modules/@ckeditor/ckeditor5-page-break Completed in 45769ms
+673 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-remove-format/44.3.0/ckeditor5-remove-format-44.3.0.tgz 45681ms (cache miss)
+674 timing reifyNode:node_modules/@ckeditor/ckeditor5-source-editing Completed in 45779ms
+675 timing reifyNode:node_modules/@ckeditor/ckeditor5-horizontal-line Completed in 45781ms
+676 timing reifyNode:node_modules/@ckeditor/ckeditor5-remove-format Completed in 45786ms
+677 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-block-quote/44.3.0/ckeditor5-block-quote-44.3.0.tgz 45699ms (cache miss)
+678 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-language/44.3.0/ckeditor5-language-44.3.0.tgz 45717ms (cache miss)
+679 timing reifyNode:node_modules/@ckeditor/ckeditor5-block-quote Completed in 45815ms
+680 timing reifyNode:node_modules/@ckeditor/ckeditor5-language Completed in 45838ms
+681 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-ckfinder/44.3.0/ckeditor5-ckfinder-44.3.0.tgz 45748ms (cache miss)
+682 timing reifyNode:node_modules/@ckeditor/ckeditor5-ckfinder Completed in 45861ms
+683 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-show-blocks/44.3.0/ckeditor5-show-blocks-44.3.0.tgz 45775ms (cache miss)
+684 timing reifyNode:node_modules/@ckeditor/ckeditor5-show-blocks Completed in 45880ms
+685 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-html-embed/44.3.0/ckeditor5-html-embed-44.3.0.tgz 45840ms (cache miss)
+686 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-alignment/44.3.0/ckeditor5-alignment-44.3.0.tgz 45832ms (cache miss)
+687 timing reifyNode:node_modules/@ckeditor/ckeditor5-html-embed Completed in 45967ms
+688 timing reifyNode:node_modules/@ckeditor/ckeditor5-alignment Completed in 45966ms
+689 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-indent/44.3.0/ckeditor5-indent-44.3.0.tgz 45903ms (cache miss)
+690 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-highlight/44.3.0/ckeditor5-highlight-44.3.0.tgz 45902ms (cache miss)
+691 timing reifyNode:node_modules/@ckeditor/ckeditor5-indent Completed in 46006ms
+692 timing reifyNode:node_modules/@ckeditor/ckeditor5-highlight Completed in 46011ms
+693 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-heading/44.3.0/ckeditor5-heading-44.3.0.tgz 45981ms (cache miss)
+694 timing reifyNode:node_modules/@ckeditor/ckeditor5-heading Completed in 46087ms
+695 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-restricted-editing/44.3.0/ckeditor5-restricted-editing-44.3.0.tgz 46030ms (cache miss)
+696 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-code-block/44.3.0/ckeditor5-code-block-44.3.0.tgz 46026ms (cache miss)
+697 timing reifyNode:node_modules/@ckeditor/ckeditor5-restricted-editing Completed in 46130ms
+698 timing reifyNode:node_modules/@ckeditor/ckeditor5-code-block Completed in 46135ms
+699 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-bookmark/44.3.0/ckeditor5-bookmark-44.3.0.tgz 46044ms (cache miss)
+700 timing reifyNode:node_modules/@ckeditor/ckeditor5-bookmark Completed in 46153ms
+701 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-style/44.3.0/ckeditor5-style-44.3.0.tgz 46108ms (cache miss)
+702 timing reifyNode:node_modules/@ckeditor/ckeditor5-style Completed in 46205ms
+703 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-media-embed/44.3.0/ckeditor5-media-embed-44.3.0.tgz 46119ms (cache miss)
+704 timing reifyNode:node_modules/@ckeditor/ckeditor5-media-embed Completed in 46218ms
+705 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-ckbox/44.3.0/ckeditor5-ckbox-44.3.0.tgz 46140ms (cache miss)
+706 timing reifyNode:node_modules/@ckeditor/ckeditor5-ckbox Completed in 46250ms
+707 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-emoji/44.3.0/ckeditor5-emoji-44.3.0.tgz 46174ms (cache miss)
+708 timing reifyNode:node_modules/@ckeditor/ckeditor5-emoji Completed in 46261ms
+709 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-find-and-replace/44.3.0/ckeditor5-find-and-replace-44.3.0.tgz 46160ms (cache miss)
+710 timing reifyNode:node_modules/@ckeditor/ckeditor5-find-and-replace Completed in 46264ms
+711 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-link/44.3.0/ckeditor5-link-44.3.0.tgz 46212ms (cache miss)
+712 timing reifyNode:node_modules/@ckeditor/ckeditor5-link Completed in 46311ms
+713 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-font/44.3.0/ckeditor5-font-44.3.0.tgz 46240ms (cache miss)
+714 timing reifyNode:node_modules/@ckeditor/ckeditor5-font Completed in 46343ms
+715 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-core/44.3.0/ckeditor5-core-44.3.0.tgz 46245ms (cache miss)
+716 timing reifyNode:node_modules/@ckeditor/ckeditor5-core Completed in 46350ms
+717 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-basic-styles/44.3.0/ckeditor5-basic-styles-44.3.0.tgz 46251ms (cache miss)
+718 timing reifyNode:node_modules/@ckeditor/ckeditor5-basic-styles Completed in 46357ms
+719 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-html-support/44.3.0/ckeditor5-html-support-44.3.0.tgz 46264ms (cache miss)
+720 timing reifyNode:node_modules/@ckeditor/ckeditor5-html-support Completed in 46366ms
+721 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-engine/44.3.0/ckeditor5-engine-44.3.0.tgz 46358ms (cache miss)
+722 timing reifyNode:node_modules/@ckeditor/ckeditor5-engine Completed in 46462ms
+723 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-special-characters/44.3.0/ckeditor5-special-characters-44.3.0.tgz 46542ms (cache miss)
+724 timing reifyNode:node_modules/@ckeditor/ckeditor5-special-characters Completed in 46635ms
+725 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-image/44.3.0/ckeditor5-image-44.3.0.tgz 47209ms (cache miss)
+726 timing reifyNode:node_modules/@ckeditor/ckeditor5-image Completed in 47310ms
+727 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-list/44.3.0/ckeditor5-list-44.3.0.tgz 47238ms (cache miss)
+728 timing reifyNode:node_modules/@ckeditor/ckeditor5-list Completed in 47333ms
+729 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-table/44.3.0/ckeditor5-table-44.3.0.tgz 47618ms (cache miss)
+730 timing reifyNode:node_modules/@ckeditor/ckeditor5-table Completed in 47710ms
+731 http fetch GET 200 https://cdn.npmmirror.com/packages/ckeditor5/44.3.0/ckeditor5-44.3.0.tgz 47697ms (cache miss)
+732 timing reifyNode:node_modules/ckeditor5 Completed in 47784ms
+733 http fetch GET 200 https://cdn.npmmirror.com/packages/%40ckeditor/ckeditor5-ui/44.3.0/ckeditor5-ui-44.3.0.tgz 50282ms (cache miss)
+734 timing reifyNode:node_modules/@ckeditor/ckeditor5-ui Completed in 50372ms
+735 timing reify:unpack Completed in 50376ms
+736 timing reify:unretire Completed in 0ms
+737 timing build:queue Completed in 7ms
+738 timing build:link:node_modules/esbuild Completed in 59ms
+739 timing build:link:node_modules/sass Completed in 59ms
+740 timing build:link:node_modules/nanoid Completed in 59ms
+741 timing build:link:node_modules/vite Completed in 59ms
+742 timing build:link:node_modules/rollup Completed in 60ms
+743 timing build:link:node_modules/vite-plugin-cdn-import/node_modules/rollup Completed in 61ms
+744 timing build:link Completed in 62ms
+745 info run esbuild@0.17.19 postinstall node_modules/esbuild node install.js
+746 info run esbuild@0.17.19 postinstall { code: 0, signal: null }
+747 timing build:run:postinstall:node_modules/esbuild Completed in 2924ms
+748 timing build:run:postinstall Completed in 2925ms
+749 timing build:deps Completed in 2994ms
+750 timing build Completed in 2994ms
+751 timing reify:build Completed in 2995ms
+752 timing reify:trash Completed in 135777ms
+753 timing reify:save Completed in 97ms
+754 timing reify Completed in 196429ms
+755 silly ADD node_modules/fuzzysort
+756 silly ADD node_modules/@ckeditor/ckeditor5-emoji
+757 silly ADD node_modules/@types/color-name
+758 silly ADD node_modules/@types/color-convert
+759 silly ADD node_modules/@types/turndown
+760 silly ADD node_modules/@types/marked
+761 silly ADD
+762 silly ADD
+763 silly ADD
+764 silly ADD
+765 silly ADD
+766 silly ADD
+767 silly ADD
+768 silly ADD
+769 silly ADD
+770 silly ADD
+771 silly ADD
+772 silly ADD
+773 silly ADD
+774 silly ADD
+775 silly ADD
+776 silly ADD
+777 silly ADD
+778 silly ADD
+779 silly ADD
+780 silly ADD
+781 silly ADD
+782 silly ADD
+783 silly ADD node_modules/vite-plugin-cdn-import/node_modules/rollup
+784 silly CHANGE node_modules/vite
+785 silly CHANGE node_modules/style-mod
+786 silly CHANGE node_modules/source-map-js
+787 silly CHANGE node_modules/sass
+788 silly CHANGE node_modules/rollup
+789 silly CHANGE node_modules/postcss
+790 silly CHANGE node_modules/picocolors
+791 silly CHANGE node_modules/nanoid
+792 silly CHANGE node_modules/esbuild
+793 silly CHANGE node_modules/ckeditor5
+794 silly CHANGE node_modules/@types/lodash-es
+795 silly CHANGE node_modules/@types/estree
+796 silly REMOVE node_modules/@rollup/rollup-win32-x64-msvc
+797 silly REMOVE node_modules/@marijn/find-cluster-break
+798 silly CHANGE node_modules/@lezer/common
+799 silly CHANGE node_modules/@esbuild/win32-x64
+800 silly CHANGE node_modules/@codemirror/view
+801 silly CHANGE node_modules/@codemirror/state
+802 silly CHANGE node_modules/@codemirror/language
+803 silly CHANGE node_modules/@codemirror/commands
+804 silly CHANGE node_modules/@ckeditor/ckeditor5-word-count
+805 silly CHANGE node_modules/@ckeditor/ckeditor5-widget
+806 silly CHANGE node_modules/@ckeditor/ckeditor5-watchdog
+807 silly CHANGE node_modules/@ckeditor/ckeditor5-utils
+808 silly CHANGE node_modules/@ckeditor/ckeditor5-upload
+809 silly CHANGE node_modules/@ckeditor/ckeditor5-undo
+810 silly CHANGE node_modules/@ckeditor/ckeditor5-ui
+811 silly CHANGE node_modules/@ckeditor/ckeditor5-typing
+812 silly CHANGE node_modules/@ckeditor/ckeditor5-theme-lark
+813 silly CHANGE node_modules/@ckeditor/ckeditor5-table
+814 silly CHANGE node_modules/@ckeditor/ckeditor5-style
+815 silly CHANGE node_modules/@ckeditor/ckeditor5-special-characters
+816 silly CHANGE node_modules/@ckeditor/ckeditor5-source-editing
+817 silly CHANGE node_modules/@ckeditor/ckeditor5-show-blocks
+818 silly CHANGE node_modules/@ckeditor/ckeditor5-select-all
+819 silly CHANGE node_modules/@ckeditor/ckeditor5-restricted-editing
+820 silly CHANGE node_modules/@ckeditor/ckeditor5-remove-format
+821 silly CHANGE node_modules/@ckeditor/ckeditor5-paste-from-office
+822 silly CHANGE node_modules/@ckeditor/ckeditor5-paragraph
+823 silly CHANGE node_modules/@ckeditor/ckeditor5-page-break
+824 silly CHANGE node_modules/@ckeditor/ckeditor5-minimap
+825 silly CHANGE node_modules/@ckeditor/ckeditor5-mention
+826 silly CHANGE node_modules/@ckeditor/ckeditor5-media-embed
+827 silly CHANGE node_modules/@ckeditor/ckeditor5-markdown-gfm
+828 silly CHANGE node_modules/@ckeditor/ckeditor5-list
+829 silly CHANGE node_modules/@ckeditor/ckeditor5-link
+830 silly CHANGE node_modules/@ckeditor/ckeditor5-language
+831 silly CHANGE node_modules/@ckeditor/ckeditor5-indent
+832 silly CHANGE node_modules/@ckeditor/ckeditor5-image
+833 silly CHANGE node_modules/@ckeditor/ckeditor5-html-support
+834 silly CHANGE node_modules/@ckeditor/ckeditor5-html-embed
+835 silly CHANGE node_modules/@ckeditor/ckeditor5-horizontal-line
+836 silly CHANGE node_modules/@ckeditor/ckeditor5-highlight
+837 silly CHANGE node_modules/@ckeditor/ckeditor5-heading
+838 silly CHANGE node_modules/@ckeditor/ckeditor5-font
+839 silly CHANGE node_modules/@ckeditor/ckeditor5-find-and-replace
+840 silly CHANGE node_modules/@ckeditor/ckeditor5-essentials
+841 silly CHANGE node_modules/@ckeditor/ckeditor5-enter
+842 silly CHANGE node_modules/@ckeditor/ckeditor5-engine
+843 silly CHANGE node_modules/@ckeditor/ckeditor5-editor-multi-root
+844 silly CHANGE node_modules/@ckeditor/ckeditor5-editor-inline
+845 silly CHANGE node_modules/@ckeditor/ckeditor5-editor-decoupled
+846 silly CHANGE node_modules/@ckeditor/ckeditor5-editor-classic
+847 silly CHANGE node_modules/@ckeditor/ckeditor5-editor-balloon
+848 silly CHANGE node_modules/@ckeditor/ckeditor5-easy-image
+849 silly CHANGE node_modules/@ckeditor/ckeditor5-core
+850 silly CHANGE node_modules/@ckeditor/ckeditor5-code-block
+851 silly CHANGE node_modules/@ckeditor/ckeditor5-cloud-services
+852 silly CHANGE node_modules/@ckeditor/ckeditor5-clipboard
+853 silly CHANGE node_modules/@ckeditor/ckeditor5-ckfinder
+854 silly CHANGE node_modules/@ckeditor/ckeditor5-ckbox
+855 silly CHANGE node_modules/@ckeditor/ckeditor5-build-classic
+856 silly CHANGE node_modules/@ckeditor/ckeditor5-bookmark
+857 silly CHANGE node_modules/@ckeditor/ckeditor5-block-quote
+858 silly CHANGE node_modules/@ckeditor/ckeditor5-basic-styles
+859 silly CHANGE node_modules/@ckeditor/ckeditor5-autosave
+860 silly CHANGE node_modules/@ckeditor/ckeditor5-autoformat
+861 silly CHANGE node_modules/@ckeditor/ckeditor5-alignment
+862 silly CHANGE node_modules/@ckeditor/ckeditor5-adapter-ckfinder
+863 timing command:install Completed in 196445ms
+864 verbose exit 0
+865 timing npm Completed in 197053ms
+866 info ok

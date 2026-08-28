@@ -125,8 +125,23 @@ public class TemplateIndexController extends TemplateBaseController {
     }
 
     @RequestMapping("article/{id}")
-    public String article(@PathVariable("id") Long id, Model model) {
-        IArticleService.ArticleInfoVo article = articleService.getArticleDetail(id);
+    public String article(@PathVariable("id") String id, Model model) {
+
+        /**
+         * 检查是否开启伪静态（去除 /article/1.html 中的后缀，避免转 Long 报 NumberFormatException）
+         */
+        if (ApplicationUtils.getBean(FastcmsStaticHtmlManager.class).isFakeStaticEnable() && id.indexOf(StrUtils.DOT) != -1) {
+            id = id.substring(0, id.indexOf(StrUtils.DOT));
+        }
+
+        Long articleId;
+        try {
+            articleId = Long.valueOf(id);
+        } catch (NumberFormatException e) {
+            return UrlBasedViewResolver.FORWARD_URL_PREFIX.concat("404");
+        }
+
+        IArticleService.ArticleInfoVo article = articleService.getArticleDetail(articleId);
 
         if (article == null || !Article.STATUS_PUBLISH.equals(article.getStatus())) {
             return UrlBasedViewResolver.FORWARD_URL_PREFIX.concat("404");

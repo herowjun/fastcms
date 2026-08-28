@@ -189,8 +189,9 @@ defineExpose({
 
 .image {
     width: 100%;
-	height: 200px;
+	height: 110px;
     display: block;
+    object-fit: cover;
 }
 
 .clearfix:before,
@@ -205,12 +206,11 @@ defineExpose({
 .imgWrap {
 	width: 100%;
 	display: grid;
-	// grid-template-columns: repeat(5,1fr);
-	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	// 固定每行 10 个，与附件选择弹窗一致，数量不足时不拉伸占满整行
+	grid-template-columns: repeat(10, minmax(0, 1fr));
 	grid-template-rows:auto;
 	grid-row-gap: 10px;
-	grid-column-gap: 20px;
-	justify-content: space-between;
+	grid-column-gap: 12px;
 }
 
 .filename{

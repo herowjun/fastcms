@@ -33,3 +33,40 @@ CREATE TABLE ai_template_file_backup (
 -- standalone "AI > 模板生成器" menu retired (feature merged into 模板编辑 page); aiModel menu already lives under 设置
 -- ids 42 (AI menu) and 44 (模板生成器) were introduced outside fastcms.sql; remove them if present
 DELETE FROM permission WHERE id IN (42, 44);
+
+-- ----------------------------
+-- AI 治理：调用审计日志（配额统计同样基于本表按日聚合，不单独建配额表）
+-- ----------------------------
+CREATE TABLE ai_usage_log (
+  id bigint NOT NULL AUTO_INCREMENT,
+  user_id bigint NOT NULL COMMENT '触发用户',
+  scene varchar(32) NOT NULL COMMENT '场景: TEMPLATE_GEN/TEMPLATE_ADJUST/ARTICLE_GEN/ARTICLE_REWRITE/ARTICLE_FIELD',
+  session_id varchar(64) DEFAULT NULL COMMENT '关联会话ID（无状态场景为空）',
+  model varchar(128) DEFAULT NULL COMMENT '使用的模型名',
+  prompt_tokens int DEFAULT 0 COMMENT '提示词token数',
+  completion_tokens int DEFAULT 0 COMMENT '补全token数',
+  total_tokens int DEFAULT 0 COMMENT '总token数',
+  duration_ms bigint DEFAULT 0 COMMENT '耗时毫秒',
+  success tinyint DEFAULT 1 COMMENT '是否成功',
+  error_msg varchar(1024) DEFAULT NULL COMMENT '失败原因',
+  created datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_user_created (user_id, created),
+  KEY idx_scene (scene)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 调用审计日志';
+
+CREATE TABLE ai_article_op_log (
+  id bigint NOT NULL AUTO_INCREMENT,
+  user_id bigint NOT NULL COMMENT '触发用户',
+  article_id bigint DEFAULT NULL COMMENT '关联文章ID（新建文章保存前为空，保存后由前端触发绑定）',
+  operation varchar(32) NOT NULL COMMENT '操作类型: rewrite/expand/polish/translate/generate/field_title/field_summary/field_seoKeywords/field_seoDescription',
+  original_text mediumtext COMMENT '原选中文本',
+  rewritten_text mediumtext COMMENT 'AI 改写结果',
+  reasoning mediumtext COMMENT '思考过程',
+  model varchar(128) DEFAULT NULL COMMENT '使用的模型名',
+  duration_ms bigint DEFAULT 0 COMMENT '耗时毫秒',
+  created datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_article (article_id),
+  KEY idx_user_created (user_id, created)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 文章划词操作记录';

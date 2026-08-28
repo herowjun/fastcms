@@ -211,3 +211,56 @@ export function AiTemplateApi() {
 		}
 	};
 }
+
+/**
+ * AI 文章内容生产 API（无状态）
+ *
+ * generate/rewrite 使用 fetch POST + ReadableStream 监听 SSE 事件
+ * （message / reasoning / done / error），与模板对话的前端消费方式一致。
+ */
+export function AiArticleApi() {
+	return {
+		/**
+		 * 构造全文生成的 SSE POST URL
+		 */
+		generateUrl() {
+			return apiBaseUrl() + '/admin/ai/article/generate';
+		},
+
+		/**
+		 * 构造划词改写的 SSE POST URL
+		 */
+		rewriteUrl() {
+			return apiBaseUrl() + '/admin/ai/article/rewrite';
+		},
+
+		/**
+		 * 构造单字段候选生成的 SSE POST URL
+		 */
+		fieldUrl() {
+			return apiBaseUrl() + '/admin/ai/article/field';
+		},
+
+		/**
+		 * 查询文章的 AI 操作历史（划词改写记录，含思考过程）
+		 */
+		listOps(articleId: string | number) {
+			return request({
+				url: '/admin/ai/article/ops/' + articleId,
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 绑定操作记录到文章（新建文章保存成功后调用）
+		 * @param data { articleId, opIds }
+		 */
+		bindOps(data: object) {
+			return request({
+				url: '/admin/ai/article/ops/bind',
+				method: 'post',
+				data: data
+			});
+		}
+	};
+}

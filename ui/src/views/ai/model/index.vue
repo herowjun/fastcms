@@ -58,16 +58,22 @@
 					</el-select>
 				</el-form-item>
 				<el-form-item label="API 端点" prop="baseUrl">
-					<el-input v-model="state.form.baseUrl" :placeholder="`如：${providerPresets[state.form.provider]?.baseUrl || 'https://api.xxx.com'}`" clearable />
+					<el-select v-model="state.form.baseUrl" filterable allow-create default-first-option clearable placeholder="选择预设网关或手动输入" style="width:100%">
+						<el-option v-for="(preset, p) in providerPresets" :key="p" v-if="preset.baseUrl" :label="providerLabels[p as string] + '（' + preset.baseUrl + '）'" :value="preset.baseUrl" />
+					</el-select>
 				</el-form-item>
 				<el-form-item label="API Key" prop="apiKey">
 					<el-input v-model="state.form.apiKey" placeholder="sk-xxx（Ollama 等本地调用可留空）" show-password clearable />
 				</el-form-item>
 				<el-form-item label="模型" prop="model">
-					<el-select v-if="currentProviderModels.length" v-model="state.form.model" placeholder="请选择模型" filterable allow-create default-first-option clearable style="width:100%">
+					<el-select v-if="state.form.provider === 'ollama'" v-model="state.form.model" filterable allow-create default-first-option clearable placeholder="选择本机已安装模型，或输入自定义模型名" style="width:100%">
+						<el-option v-for="m in ollamaModels" :key="m" :label="m" :value="m" />
+					</el-select>
+					<el-select v-else-if="currentProviderModels.length" v-model="state.form.model" filterable allow-create default-first-option clearable placeholder="请选择模型" style="width:100%">
 						<el-option v-for="m in currentProviderModels" :key="m" :label="m" :value="m" />
 					</el-select>
 					<el-input v-else v-model="state.form.model" placeholder="请输入模型名称，如 gpt-3.5-turbo" clearable />
+					<el-button v-if="state.form.provider === 'ollama'" :loading="ollamaState.loading" @click="fetchOllamaModels()" class="ml10" size="small">刷新本机模型</el-button>
 				</el-form-item>
 				<el-form-item label="自定义请求头" prop="extraHeaders">
 					<el-input v-model="state.form.extraHeaders" type="textarea" :rows="2" clearable placeholder='可选，JSON 对象格式，如 {"X-Tenant":"abc"}；Ollama 开启鉴权时可填 {"Authorization":"Bearer ollama"}' />
@@ -249,12 +255,14 @@ const providerSpanMethod = ({ row, columnIndex, rowIndex }: { row: any; columnIn
 	}
 	return { rowspan: span, colspan: 1 };
 };
-// 各供应商预设：API 网关 + 可选模型列表（第一个为默认模型）
+// 各供应商预设：API 网关 + 可选模型列表（第一个为默认模型）。
+// 模型清单按 2026-08 各家官方文档核对（deepseek.com / help.aliyun.com / bigmodel.cn / moonshot.cn），
+// 下拉支持 allow-create 手动输入，文档未覆盖的新模型直接手输即可。
 const providerPresets: Record<string, { baseUrl: string; models: string[] }> = {
-	deepseek: { baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
-	qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen-long'] },
-	zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4.5', 'glm-4.5-air', 'glm-4-plus', 'glm-4-flash'] },
-	moonshot: { baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'kimi-k2-0711-preview'] },
+	deepseek: { baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro', 'deepseek-v4-flash'] },
+	qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus'] },
+	zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'] },
+	moonshot: { baseUrl: 'https://api.moonshot.cn/v1', models: ['kimi-k2.5', 'kimi-k2.6', 'kimi-k3', 'kimi-k2-thinking', 'kimi-k2.7-code'] },
 	openai: { baseUrl: 'https://api.openai.com', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3-mini'] },
 	ollama: { baseUrl: 'http://localhost:11434', models: ['llama3.1', 'llama3.2', 'qwen2.5', 'mistral', 'gemma2'] },
 	custom: { baseUrl: '', models: [] },
@@ -263,12 +271,49 @@ const providerPresets: Record<string, { baseUrl: string; models: string[] }> = {
 // 当前供应商可选模型（用于下拉列表）
 const currentProviderModels = computed(() => providerPresets[state.form.provider]?.models || []);
 
-// 切换供应商时，API 端点跟随该供应商网关，模型回落到该供应商默认模型
+// 切换供应商时，API 端点跟随该供应商网关，模型回落到该供应商默认模型（models[0]）
 const onProviderChange = (provider: string) => {
 	const preset = providerPresets[provider];
 	if (!preset) return;
 	state.form.baseUrl = preset.baseUrl;
 	state.form.model = preset.models[0] || '';
+	if (provider === 'ollama') fetchOllamaModels();
+	else {
+		ollamaState.fetched = false;
+		ollamaState.error = '';
+	}
+};
+
+// Ollama：本机已安装模型清单（动态拉取 /api/tags，失败时回落静态兜底清单 + 手动输入）
+const ollamaState = reactive({ loading: false, fetched: false, error: '', list: [] as string[] });
+const ollamaModels = computed(() => (ollamaState.fetched ? ollamaState.list : (providerPresets.ollama.models || [])));
+const fetchOllamaModels = async (silent = false) => {
+	const baseUrl = (state.form.baseUrl || providerPresets.ollama.baseUrl).replace(/\/+$/, '');
+	ollamaState.loading = true;
+	ollamaState.error = '';
+	try {
+		const resp = await fetch(`${baseUrl}/api/tags`, { method: 'GET' });
+		if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+		const json = await resp.json();
+		const names: string[] = (json.models || []).map((m: any) => m.name);
+		if (names.length === 0) throw new Error('本机没有已安装的模型');
+		ollamaState.list = names;
+		ollamaState.fetched = true;
+		// 动态拉到清单后，若当前选中模型不在其中，回落到第一个
+		if (state.form.provider === 'ollama' && state.form.model && !names.includes(state.form.model)) {
+			state.form.model = names[0];
+		} else if (state.form.provider === 'ollama' && !state.form.model) {
+			state.form.model = names[0];
+		}
+	} catch (e: any) {
+		ollamaState.fetched = false;
+		ollamaState.error = e?.message || '获取失败';
+		if (!silent) {
+			ElMessage.warning('无法获取 Ollama 本机模型清单（' + ollamaState.error + '）。浏览器直连受 CORS 限制，可在 Ollama 设置 OLLAMA_ORIGINS=* 后点「刷新」，或从下拉/输入框手动选择模型名。');
+		}
+	} finally {
+		ollamaState.loading = false;
+	}
 };
 
 const initTableData = () => {
@@ -289,6 +334,7 @@ const onOpenEdit = (row: any) => {
 			state.form.apiKey = '********'; // 后端已脱敏，保持占位
 			state.dialog.title = '编辑模型';
 			state.dialog.visible = true;
+			if (state.form.provider === 'ollama') fetchOllamaModels(true);
 		});
 	} else {
 		state.form = {

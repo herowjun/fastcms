@@ -16,8 +16,12 @@
  */
 package com.fastcms.ai.autoconfigure;
 
+import com.fastcms.ai.audit.AiQuotaChecker;
+import com.fastcms.ai.audit.AiUsageRecorder;
+import com.fastcms.ai.tool.AiToolCallbackProvider;
 import com.fastcms.ai.tool.AiToolRegister;
 import com.fastcms.ai.tool.AiToolRegistry;
+import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -84,6 +88,34 @@ public class FastcmsAiAutoConfiguration {
     @ConditionalOnMissingBean
     public AiToolRegister aiToolRegister(AiToolRegistry aiToolRegistry) {
         return new AiToolRegister(aiToolRegistry);
+    }
+
+    /**
+     * AI 工具桥接：把 {@link AiToolRegistry} 中的 @AiTool 工具转换为 Spring AI
+     * 的 ToolCallback，供 ChatClient.defaultTools() 挂载，模型可在对话中自主调用
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AiToolCallbackProvider aiToolCallbackProvider(AiToolRegistry aiToolRegistry) {
+        return new AiToolCallbackProvider(aiToolRegistry);
+    }
+
+    /**
+     * AI 用量记录器：各 AI 场景服务调用结束后落审计（fastcms.ai.audit-enabled=false 时跳过）
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AiUsageRecorder aiUsageRecorder(IAiUsageLogService usageLogService) {
+        return new AiUsageRecorder(usageLogService, properties);
+    }
+
+    /**
+     * AI 配额检查器：模型调用前检查当日 token 消耗是否超限（fastcms.ai.daily-token-quota，0=不限）
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AiQuotaChecker aiQuotaChecker(IAiUsageLogService usageLogService) {
+        return new AiQuotaChecker(usageLogService, properties);
     }
 
 }
