@@ -1,0 +1,58 @@
+<#import "_layout.html" as layout>
+<#assign pageTitle = (article.title)!"文章详情">
+<@layout.header pageTitle>
+</@layout.header>
+<@layout.body>
+<main class="article-detail">
+ <div class="container">
+ <article class="article-card">
+ <header class="article-header">
+ <h1>${pageTitle}</h1>
+ <div class="article-meta">
+ <#if article.created??>
+ <time><@formatTime value=article.created format="yyyy-MM-dd"/></time>
+ </#if>
+ <#if article.viewCount??>
+ <span class="views">${article.viewCount}阅读</span>
+ </#if>
+ </div>
+ </header>
+ <#assign thumb = (article.thumbnail)!"">
+ <#if thumb?has_content>
+ <div class="article-cover">
+ <img src="${thumb}" alt="${pageTitle}封面图" loading="lazy">
+ </div>
+ </#if>
+ <div class="article-content">
+ <#if article.summary??>
+ <p class="article-summary">${article.summary}</p>
+ </#if>
+ ${article.contentHtml!"内容加载中，请稍后再试。"}
+ </div>
+ </article>
+
+ <#if article.id??>
+ <section class="related-section">
+ <h2>相关文章</h2>
+ <div class="related-grid">
+ <@relatedArticleList articleId=article.id count=3>
+ <#if data?? && data?has_content>
+ <#list data as rel>
+ <#assign relThumb = (rel.thumbnail)!"">
+ <a href="${(rel.url)!""}" class="related-card">
+ <#if relThumb?has_content>
+ <img src="${relThumb}" alt="${(rel.title)!"相关文章"}" loading="lazy">
+ </#if>
+ <h3>${(rel.title)!"相关文章"}</h3>
+ <p>${(rel.summary)!"暂无摘要"}</p>
+ </a>
+ </#list>
+ </#if>
+ </@relatedArticleList>
+ </div>
+ </section>
+ </#if>
+ </div>
+</main>
+</@layout.body>
+<@layout.script></@layout.script>

@@ -213,6 +213,36 @@ export function AiTemplateApi() {
 }
 
 /**
+ * AI 用量审计 API（ai_usage_log 表）
+ */
+export function AiUsageApi() {
+	return {
+		/**
+		 * 用量统计：按场景聚合 + 按用户聚合（默认最近 7 天）
+		 * @param days 统计天数（1~90）
+		 */
+		stats(days: number = 7) {
+			return request({
+				url: '/admin/ai/usage/stats',
+				method: 'get',
+				params: { days }
+			});
+		},
+
+		/**
+		 * 调用明细分页（可按场景过滤）
+		 */
+		logs(params: { page: number; pageSize: number; scene?: string }) {
+			return request({
+				url: '/admin/ai/usage/logs',
+				method: 'get',
+				params
+			});
+		}
+	};
+}
+
+/**
  * AI 文章内容生产 API（无状态）
  *
  * generate/rewrite 使用 fetch POST + ReadableStream 监听 SSE 事件

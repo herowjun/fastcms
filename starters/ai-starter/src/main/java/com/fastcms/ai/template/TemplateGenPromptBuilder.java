@@ -18,6 +18,8 @@ package com.fastcms.ai.template;
 
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
  * AI 模板生成系统提示词构建器
  *
@@ -69,6 +71,158 @@ public class TemplateGenPromptBuilder {
                 + "5. 使用 fastcms 指令渲染动态内容，不要硬编码文章列表\n"
                 + "6. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
                 + "7. 请全程使用中文思考和回复\n";
+    }
+
+    /**
+     * 构建规划轮提示词（分批流水线第一轮：只输出文件清单，不生成内容）
+     *
+     * <p>生成型会话首次对话不再一次性输出整套模板（单轮输出易超 max_tokens 上限被截断），
+     * 而是先让模型规划文件清单（输出量极小、结构上不可能截断），再逐文件生成。</p>
+     *
+     * @param templateName 模板目录名
+     * @param requirement  用户需求描述
+     */
+    public String buildPlanPrompt(String templateName, String requirement) {
+        return "请为模板目录「" + templateName + "」规划一套完整的网站模板。\n\n"
+                + "## 用户需求\n\n" + requirement + "\n\n"
+                + "## 输出要求\n\n"
+                + "1. 本轮只做规划，不生成任何文件内容：files 数组中每一项只包含 path 和 action 两个字段，禁止输出 content 字段\n"
+                + "2. 必须涵盖必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html，以及基础样式 static/css/base.css\n"
+                + "3. 可根据需求补充其他文件（如 static/js/main.js、_articlePage.html），但文件总数控制在 10 个以内\n"
+                + "4. reply 字段简要说明整体设计思路（配色、布局、栏目结构，100 字以内）\n"
+                + "5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n"
+                + "6. 请全程使用中文思考和回复\n";
+    }
+
+    /**
+     * 构建单文件生成轮提示词（分批流水线：一次只生成一个文件的完整内容）
+     *
+     * <p>单文件输出量级天然在几 K token 以内，远低于 max_tokens 上限，
+     * 从结构上避免整套模板一次性输出导致的截断问题。</p>
+     *
+     * @param requirement      用户需求描述
+     * @param targetPath       本次要生成的文件相对路径
+     * @param existingContext  已生成文件的上下文（文件清单 + _layout.html 完整内容），可为空
+     * @param retryHint        重试提示（上次输出截断/格式非法时非空，附加压缩篇幅要求）
+     */
+    public String buildSingleFilePrompt(String requirement, String targetPath,
+                                        String existingContext, String retryHint) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("请生成模板中的一个文件。\n\n## 用户需求\n\n").append(requirement).append("\n\n");
+        if (existingContext != null && !existingContext.isBlank()) {
+            sb.append("## 已生成的文件（保持风格一致，复用其中的路径与宏）\n\n")
+                    .append(existingContext).append("\n\n");
+        }
+        sb.append("## 本次任务\n\n")
+                .append("只生成文件 `").append(targetPath).append("` 的完整内容。\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. files 数组只包含一个元素：path 为 `").append(targetPath)
+                .append("`，content 为完整文件内容，action 为 create\n")
+                .append("2. content 必须是可直接使用的完整内容，禁止省略或输出占位符（如 ... 省略 ...）\n")
+                .append("3. 控制篇幅：").append(buildSizeHint(targetPath)).append('\n')
+                .append("4. 静态资源路径使用 ${ctx()} 前缀\n")
+                .append("5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
+                .append("6. 请全程使用中文思考和回复\n");
+        if (retryHint != null && !retryHint.isBlank()) {
+            sb.append("\n## 注意\n\n").append(retryHint).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 按文件类型给出差异化的篇幅约束（端到端测试中 CSS 最易超限截断，要求最严格）
+     */
+    private String buildSizeHint(String targetPath) {
+        String ext = targetPath.contains(".")
+                ? targetPath.substring(targetPath.lastIndexOf('.') + 1).toLowerCase()
+                : "";
+        return switch (ext) {
+            // CSS 在 JSON 中转义开销最大，最易被 max_tokens 截断：紧凑写法 + 变量复用 + 硬性行数上限
+            case "css" -> "采用紧凑写法（每条规则一行），总行数不超过 200 行；"
+                    + "主题色/字体/间距用 CSS 变量（:root）统一定义后复用；删除全部注释；"
+                    + "响应式只需桌面 + 移动两档断点";
+            case "js" -> "总行数不超过 150 行，只实现必要交互（导航切换、回到顶部等），删除全部注释";
+            case "properties" -> "只输出配置键值对，不超过 10 行";
+            default -> "HTML 文件不超过 250 行，注释精简";
+        };
+    }
+
+    /**
+     * 构建分块规划轮提示词（单文件直出失败后的分块生成路径第一步）
+     *
+     * <p>针对超出 max_tokens 上限的大文件：先让模型按功能划分块（输出量极小，
+     * 结构上不可能截断），再逐块生成（见 {@link #buildChunkPartPrompt}），
+     * 从结构上保证任意大小的文件都能生成。</p>
+     *
+     * @param requirement     用户需求描述
+     * @param targetPath      目标文件相对路径
+     * @param existingContext 已生成文件上下文（保持风格一致），可为空
+     */
+    public String buildChunkPlanPrompt(String requirement, String targetPath, String existingContext) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("文件 `").append(targetPath).append("` 内容较大，需要分块生成，本轮先做分块规划。\n\n")
+                .append("## 用户需求\n\n").append(requirement).append("\n\n");
+        if (existingContext != null && !existingContext.isBlank()) {
+            sb.append("## 已生成的文件（保持风格一致）\n\n").append(existingContext).append("\n\n");
+        }
+        sb.append("## 输出要求\n\n")
+                .append("只输出一个 JSON 对象（不要包裹 markdown 代码块，不要输出其他字段）：\n")
+                .append("{\"total\": 块数, \"outline\": [\"第1块摘要\", \"第2块摘要\", ...]}\n\n")
+                .append("1. 块数尽可能少：每块尽量写满（接近块行数上限），通常 2~5 块，绝对不超过 6 块；")
+                .append("禁止按单个功能/组件切小块（不要出现\"头部一块、页脚一块\"这种碎片划分）\n")
+                .append("2. 按文件结构顺序大块划分，块间内容不重叠、合起来是完整文件\n")
+                .append("3. 每块摘要不超过 12 个字（如：变量与基础重置、布局与组件、响应式适配）\n")
+                .append("4. 本轮禁止输出任何文件内容\n")
+                .append("5. 请全程使用中文思考和回复\n");
+        return sb.toString();
+    }
+
+    /**
+     * 构建单块生成轮提示词（分块生成路径：一次只生成目标文件的一块）
+     *
+     * <p>每块输出量级远低于 max_tokens 上限，从结构上保证不截断；
+     * 单块解析失败时通过 retryHint 压缩篇幅重试该块，错误不传播到其他块。</p>
+     *
+     * @param requirement     用户需求描述
+     * @param targetPath      目标文件相对路径
+     * @param partIndex      当前块序号（从 1 开始）
+     * @param totalParts     总块数
+     * @param partOutline    分块规划轮得到的全部块摘要（让模型明确自己负责哪块）
+     * @param existingContext 已生成文件上下文，可为空
+     * @param maxLines       本块行数上限（按 max_tokens 动态计算）
+     * @param retryHint      重试提示（单块输出截断/格式非法重试时非空）
+     */
+    public String buildChunkPartPrompt(String requirement, String targetPath, int partIndex, int totalParts,
+                                       List<String> partOutline, String existingContext,
+                                       int maxLines, String retryHint) {
+        StringBuilder outline = new StringBuilder();
+        for (int i = 0; i < partOutline.size(); i++) {
+            outline.append("第 ").append(i + 1).append(" 块：").append(partOutline.get(i)).append('\n');
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("本轮是分块生成模式，只生成文件 `").append(targetPath).append("` 的其中一块。\n\n")
+                .append("## 用户需求\n\n").append(requirement).append("\n\n")
+                .append("## 分块方案（共 ").append(totalParts).append(" 块）\n\n")
+                .append(outline).append('\n');
+        if (existingContext != null && !existingContext.isBlank()) {
+            sb.append("## 已生成的文件（保持风格一致，复用其中的路径与宏）\n\n")
+                    .append(existingContext).append("\n\n");
+        }
+        sb.append("## 本次任务\n\n")
+                .append("只生成第 ").append(partIndex).append('/').append(totalParts)
+                .append(" 块（").append(partOutline.get(partIndex - 1)).append("），忽略其他块。\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. 本轮为分块生成：content 只包含该块的内容（不是完整文件），忽略系统提示中\"content 必须是完整文件\"的要求\n")
+                .append("2. files 数组只包含一个元素：path 为 `").append(targetPath)
+                .append("`，content 为本块完整内容，action 为 create\n")
+                .append("3. 本块不超过 ").append(maxLines).append(" 行，采用紧凑写法，禁止省略或输出占位符\n")
+                .append("4. 块首尾保持语法完整（CSS 到完整规则、HTML/JS 到完整标签/语句），不要重复其他块的内容\n")
+                .append("5. 静态资源路径使用 ${ctx()} 前缀；严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
+                .append("6. 请全程使用中文思考和回复\n");
+        if (retryHint != null && !retryHint.isBlank()) {
+            sb.append("\n## 注意\n\n").append(retryHint).append("\n");
+        }
+        return sb.toString();
     }
 
     /**

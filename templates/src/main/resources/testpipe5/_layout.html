@@ -1,0 +1,99 @@
+<#-- fastcms公共布局宏 -->
+<#macro header title>
+<!DOCTYPE html>
+<html lang='zh-CN'>
+<head>
+ <meta charset='utf-8'>
+ <title>${title!''}</title>
+ <meta name='viewport' content='width=device-width, initial-scale=1'>
+ <meta name='keywords' content='${seoTag("website_title")!""}'>
+ <meta name='description' content='${seoTag("website_sub_title")!""}'>
+ <meta name='theme-color' content='#f8fafc'>
+ <link rel='stylesheet' href='${ctx()}/css/base.css'>
+ <#nested/>
+</head>
+</#macro>
+
+<#macro body>
+<body class='light-theme'>
+ <header class='site-header'>
+ <div class='container header-inner'>
+ <a class='logo' href='/'>
+ <img src='${ctx()}/images/logo.png' alt='企业官网标志'>
+ </a>
+ <nav class='site-nav' aria-label='主导航'>
+ <ul class='nav-list'>
+ <li class='nav-item'><a class='nav-link' href='/'>首页</a></li>
+ <@menuTag>
+ <#if data?? && (data?size >0)>
+ <#list data as item>
+ <li class='nav-item'><a class='nav-link' href='${item.url!}'>${item.menuName!}</a></li>
+ </#list>
+ </#if>
+ </@menuTag>
+ </ul>
+ </nav>
+ <button class='nav-toggle' type='button' aria-label='打开菜单' aria-expanded='false'>
+ <span class='nav-toggle-bar'></span>
+ <span class='nav-toggle-bar'></span>
+ <span class='nav-toggle-bar'></span>
+ </button>
+ </div>
+ </header>
+ <main class='site-main'>
+ <#nested/>
+ </main>
+ <footer class='site-footer'>
+ <div class='container footer-inner'>
+ <div class='footer-brand'>
+ <p class='footer-title'>${seoTag("website_title")!'企业官网'}</p>
+ <p class='footer-desc'>${seoTag("website_sub_title")!'专注为企业提供数字化解决方案'}</p>
+ </div>
+ <nav class='footer-nav' aria-label='页脚导航'>
+ <@menuTag>
+ <#if data?? && (data?size >0)>
+ <ul class='footer-list'>
+ <#list data as item>
+ <li><a href='${item.url!}'>${item.menuName!}</a></li>
+ </#list>
+ </ul>
+ </#if>
+ </@menuTag>
+ </nav>
+ <div class='footer-contact'>
+ <p>${seoTag("website_phone")!'联系电话：400-000-0000'}</p>
+ <p>${seoTag("website_email")!'电子邮箱：contact@example.com'}</p>
+ </div>
+ </div>
+ <div class='footer-bottom'>
+ <p>Copyright © ${.now?string('yyyy')} - Powered by Fastcms</p>
+ </div>
+ </footer>
+</#macro>
+
+<#macro script>
+ <script src='${ctx()}/js/main.js'></script>
+ <#nested/>
+</body>
+</html>
+</#macro>
+
+<#macro _articlePage>
+ <@articlePageTag>
+ <#if data??>
+ <nav class='pagination' aria-label='文章分页'>
+ <#if data.prev?? && data.prev.url?? && data.prev.url?has_content>
+ <a class='page-link prev' href='${data.prev.url}'>${data.prev.text!'上一页'}</a>
+ </#if>
+ <#if data.list?? && (data.list?size >0)>
+ <#list data.list as page>
+ <a class='page-link' href='${page.url!}'>${page.text!}</a>
+ </#list>
+ </#if>
+ <#if data.next?? && data.next.url?? && data.next.url?has_content>
+ <a class='page-link next' href='${data.next.url}'>${data.next.text!'下一页'}</a>
+ </#if>
+ </nav>
+ </#if>
+ </@articlePageTag>
+</#macro>

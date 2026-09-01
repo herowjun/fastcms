@@ -44,6 +44,13 @@ public final class AiTemplateConstants {
     public static final String ROLE_SYSTEM = "system";
 
     /**
+     * 失败消息统一前缀：模型调用失败时落库的 assistant 消息以此开头。
+     * 前端据此展示失败态与"重新生成"入口；后端构建对话历史时跳过此类消息
+     * （错误文本对模型是无意义上下文）
+     */
+    public static final String MSG_FAIL_PREFIX = "生成失败：";
+
+    /**
      * 文件操作类型
      */
     public static final String ACTION_CREATE = "create";
@@ -82,6 +89,10 @@ public final class AiTemplateConstants {
      */
     public static final String SSE_EVENT_REASONING = "reasoning";
     public static final String SSE_EVENT_FILE = "file";
+    /**
+     * 分批流水线进度快照（全量推送文件清单及各自状态：done/current/pending）
+     */
+    public static final String SSE_EVENT_PROGRESS = "progress";
     public static final String SSE_EVENT_DONE = "done";
     public static final String SSE_EVENT_ERROR = "error";
 

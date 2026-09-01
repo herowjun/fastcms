@@ -1,45 +1,135 @@
 <template>
 	<div>
-		<el-card shadow="hover">
-			<div class="mb15">
-				<el-button type="primary" size="default" @click="onOpenEdit(null)">
-					<el-icon><ele-Plus /></el-icon>新增模型
-				</el-button>
-				<el-select v-model="providerFilter" placeholder="全部供应商" clearable size="default" class="ml10" style="width: 160px">
-					<el-option v-for="p in presentProviders" :key="p.value" :label="p.label" :value="p.value" />
-				</el-select>
-				<el-tag class="ml10" type="info" v-if="state.activeName">
-					当前激活：{{ state.activeName }}
-				</el-tag>
-			</div>
-			<el-table :data="sortedTableData" stripe style="width: 100%" v-loading="state.loading" :span-method="providerSpanMethod">
-				<el-table-column prop="name" label="配置名称" min-width="120" show-overflow-tooltip />
-				<el-table-column prop="provider" label="供应商" width="110" show-overflow-tooltip>
-					<template #default="scope">
-						<el-tag size="small">{{ providerLabel(scope.row.provider) }}</el-tag>
-					</template>
-				</el-table-column>
-				<el-table-column prop="model" label="模型" min-width="140" show-overflow-tooltip />
-				<el-table-column prop="baseUrl" label="端点" min-width="220" show-overflow-tooltip />
-				<el-table-column prop="temperature" label="温度" width="80" />
-				<el-table-column prop="maxTokens" label="MaxTokens" width="100" />
-				<el-table-column label="状态" width="90">
-					<template #default="scope">
-						<el-tag v-if="scope.row.active" type="success">激活</el-tag>
-						<el-tag v-else type="info">未激活</el-tag>
-					</template>
-				</el-table-column>
-				<el-table-column prop="sortNum" label="排序" width="70" />
-				<el-table-column label="操作" width="260" fixed="right">
-					<template #default="scope">
-						<el-button size="small" text type="primary" @click="onTest(scope.row)">测试</el-button>
-						<el-button size="small" text type="primary" @click="onActivate(scope.row)" v-if="!scope.row.active">激活</el-button>
-						<el-button size="small" text type="primary" @click="onOpenEdit(scope.row)">编辑</el-button>
-						<el-button size="small" text type="danger" @click="onDelete(scope.row)">删除</el-button>
-					</template>
-				</el-table-column>
-			</el-table>
-		</el-card>
+		<el-tabs v-model="activeTab" type="border-card">
+			<el-tab-pane label="模型配置" name="models">
+				<div class="mb15">
+					<el-button type="primary" size="default" @click="onOpenEdit(null)">
+						<el-icon><ele-Plus /></el-icon>新增模型
+					</el-button>
+					<el-select v-model="providerFilter" placeholder="全部供应商" clearable size="default" class="ml10" style="width: 160px">
+						<el-option v-for="p in presentProviders" :key="p.value" :label="p.label" :value="p.value" />
+					</el-select>
+					<el-tag class="ml10" type="info" v-if="state.activeName">
+						当前激活：{{ state.activeName }}
+					</el-tag>
+				</div>
+				<el-table :data="sortedTableData" stripe style="width: 100%" v-loading="state.loading" :span-method="providerSpanMethod">
+					<el-table-column prop="name" label="配置名称" min-width="120" show-overflow-tooltip />
+					<el-table-column prop="provider" label="供应商" width="110" show-overflow-tooltip>
+						<template #default="scope">
+							<el-tag size="small">{{ providerLabel(scope.row.provider) }}</el-tag>
+						</template>
+					</el-table-column>
+					<el-table-column prop="model" label="模型" min-width="140" show-overflow-tooltip />
+					<el-table-column prop="baseUrl" label="端点" min-width="220" show-overflow-tooltip />
+					<el-table-column prop="temperature" label="温度" width="80" />
+					<el-table-column prop="maxTokens" label="MaxTokens" width="100" />
+					<el-table-column label="状态" width="90">
+						<template #default="scope">
+							<el-tag v-if="scope.row.active" type="success">激活</el-tag>
+							<el-tag v-else type="info">未激活</el-tag>
+						</template>
+					</el-table-column>
+					<el-table-column prop="sortNum" label="排序" width="70" />
+					<el-table-column label="操作" width="260" fixed="right">
+						<template #default="scope">
+							<el-button size="small" text type="primary" @click="onTest(scope.row)">测试</el-button>
+							<el-button size="small" text type="primary" @click="onActivate(scope.row)" v-if="!scope.row.active">激活</el-button>
+							<el-button size="small" text type="primary" @click="onOpenEdit(scope.row)">编辑</el-button>
+							<el-button size="small" text type="danger" @click="onDelete(scope.row)">删除</el-button>
+						</template>
+					</el-table-column>
+				</el-table>
+			</el-tab-pane>
+
+			<el-tab-pane label="使用统计" name="usage" lazy>
+				<div class="mb15">
+					<el-radio-group v-model="usageState.days" @change="loadUsageStats">
+						<el-radio-button :label="1">今天</el-radio-button>
+						<el-radio-button :label="7">最近 7 天</el-radio-button>
+						<el-radio-button :label="30">最近 30 天</el-radio-button>
+						<el-radio-button :label="90">最近 90 天</el-radio-button>
+					</el-radio-group>
+					<span class="ml10 usage-range" v-if="usageState.rangeText">{{ usageState.rangeText }}</span>
+				</div>
+
+				<el-row :gutter="15" class="mb15">
+					<el-col :span="12">
+						<el-card shadow="never" header="按场景统计">
+							<el-table :data="usageState.byScene" size="small" v-loading="usageState.loadingStats">
+								<el-table-column label="场景" min-width="130">
+									<template #default="scope">{{ sceneLabel(scope.row.scene) }}</template>
+								</el-table-column>
+								<el-table-column prop="callCount" label="调用次数" width="90" />
+								<el-table-column label="输入 tokens" width="110">
+									<template #default="scope">{{ fmtNum(scope.row.promptTokens) }}</template>
+								</el-table-column>
+								<el-table-column label="输出 tokens" width="110">
+									<template #default="scope">{{ fmtNum(scope.row.completionTokens) }}</template>
+								</el-table-column>
+								<el-table-column label="合计 tokens" width="110">
+									<template #default="scope">{{ fmtNum(scope.row.totalTokens) }}</template>
+								</el-table-column>
+							</el-table>
+						</el-card>
+					</el-col>
+					<el-col :span="12">
+						<el-card shadow="never" header="按用户统计（Top 10）">
+							<el-table :data="usageState.byUser" size="small" v-loading="usageState.loadingStats">
+								<el-table-column prop="userId" label="用户 ID" width="90" />
+								<el-table-column prop="callCount" label="调用次数" width="100" />
+								<el-table-column label="合计 tokens">
+									<template #default="scope">{{ fmtNum(scope.row.totalTokens) }}</template>
+								</el-table-column>
+							</el-table>
+						</el-card>
+					</el-col>
+				</el-row>
+
+				<el-card shadow="never" header="调用明细">
+					<div class="mb15">
+						<el-select v-model="usageState.sceneFilter" placeholder="全部场景" clearable size="default" style="width: 180px" @change="onUsagePageChange(1)">
+							<el-option v-for="s in sceneOptions" :key="s.value" :label="s.label" :value="s.value" />
+						</el-select>
+					</div>
+					<el-table :data="usageState.logs" size="small" v-loading="usageState.loadingLogs">
+						<el-table-column label="时间" width="160">
+							<template #default="scope">{{ scope.row.created }}</template>
+						</el-table-column>
+						<el-table-column label="场景" width="130">
+							<template #default="scope">{{ sceneLabel(scope.row.scene) }}</template>
+						</el-table-column>
+						<el-table-column prop="model" label="模型" min-width="130" show-overflow-tooltip />
+						<el-table-column prop="promptTokens" label="输入" width="90" />
+						<el-table-column prop="completionTokens" label="输出" width="90" />
+						<el-table-column prop="totalTokens" label="合计" width="90" />
+						<el-table-column label="耗时" width="90">
+							<template #default="scope">{{ fmtDuration(scope.row.durationMs) }}</template>
+						</el-table-column>
+						<el-table-column label="结果" width="80">
+							<template #default="scope">
+								<el-tag v-if="scope.row.success" type="success" size="small">成功</el-tag>
+								<el-tooltip v-else :content="scope.row.errorMsg || '失败'" placement="top">
+									<el-tag type="danger" size="small">失败</el-tag>
+								</el-tooltip>
+							</template>
+						</el-table-column>
+					</el-table>
+					<div class="mt15" style="display: flex; justify-content: flex-end">
+						<el-pagination
+							background
+							layout="total, prev, pager, next, sizes"
+							:total="usageState.total"
+							:current-page="usageState.page"
+							:page-size="usageState.pageSize"
+							:page-sizes="[10, 20, 50, 100]"
+							@current-change="onUsagePageChange"
+							@size-change="onUsageSizeChange"
+						/>
+					</div>
+				</el-card>
+			</el-tab-pane>
+		</el-tabs>
 
 		<el-dialog :title="state.dialog.title" v-model="state.dialog.visible" width="640px" :close-on-click-modal="false">
 			<el-form :model="state.form" :rules="state.rules" ref="myRefForm" label-width="100px">
@@ -115,12 +205,107 @@
 </template>
 
 <script setup lang="ts" name="aiModel">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { AiModelApi } from '/@/api/ai/index';
+import { AiModelApi, AiUsageApi } from '/@/api/ai/index';
 
 const aiApi = AiModelApi();
+const usageApi = AiUsageApi();
 const myRefForm = ref();
+
+// 当前激活的 tab（models=模型配置 / usage=使用统计）
+const activeTab = ref('models');
+
+// 场景常量（与后端 IAiUsageLogService.Scene 对齐）
+const sceneOptions = [
+	{ value: 'TEMPLATE_GEN', label: '模板生成' },
+	{ value: 'TEMPLATE_ADJUST', label: '模板调整' },
+	{ value: 'ARTICLE_GEN', label: '文章生成' },
+	{ value: 'ARTICLE_REWRITE', label: '文章改写' },
+	{ value: 'ARTICLE_FIELD', label: '字段生成' },
+];
+const sceneLabel = (scene?: string) => sceneOptions.find((s) => s.value === scene)?.label || scene || '-';
+
+// 用量统计状态
+const usageState = reactive({
+	days: 7,
+	rangeText: '',
+	byScene: [] as any[],
+	byUser: [] as any[],
+	logs: [] as any[],
+	total: 0,
+	page: 1,
+	pageSize: 20,
+	sceneFilter: '',
+	loadingStats: false,
+	loadingLogs: false,
+	loaded: false,
+});
+
+const fmtNum = (n?: number) => (n == null ? '-' : Number(n).toLocaleString());
+
+const fmtDuration = (ms?: number) => {
+	if (ms == null) return '-';
+	if (ms < 1000) return ms + 'ms';
+	const sec = ms / 1000;
+	return sec < 60 ? sec.toFixed(1) + 's' : Math.floor(sec / 60) + '分' + Math.round(sec % 60) + '秒';
+};
+
+const loadUsageStats = () => {
+	usageState.loadingStats = true;
+	usageApi
+		.stats(usageState.days)
+		.then((res: any) => {
+			const data = res.data || {};
+			usageState.byScene = data.byScene || [];
+			usageState.byUser = data.byUser || [];
+			// 后端返回 ISO 时间串，截取日期部分展示
+			const st = String(data.startTime || '').slice(0, 10);
+			const et = String(data.endTime || '').slice(0, 10);
+			usageState.rangeText = st && et ? `${st} ~ ${et}` : '';
+		})
+		.finally(() => {
+			usageState.loadingStats = false;
+		});
+};
+
+const loadUsageLogs = () => {
+	usageState.loadingLogs = true;
+	usageApi
+		.logs({
+			page: usageState.page,
+			pageSize: usageState.pageSize,
+			scene: usageState.sceneFilter || undefined,
+		})
+		.then((res: any) => {
+			const pageData = res.data || {};
+			usageState.logs = pageData.records || [];
+			usageState.total = pageData.total || 0;
+		})
+		.finally(() => {
+			usageState.loadingLogs = false;
+		});
+};
+
+const onUsagePageChange = (page: number) => {
+	usageState.page = page;
+	loadUsageLogs();
+};
+
+const onUsageSizeChange = (size: number) => {
+	usageState.pageSize = size;
+	usageState.page = 1;
+	loadUsageLogs();
+};
+
+// 首次切到"使用统计"tab 时加载（lazy 渲染，避免进页面就查库）
+watch(activeTab, (tab) => {
+	if (tab === 'usage' && !usageState.loaded) {
+		usageState.loaded = true;
+		loadUsageStats();
+		loadUsageLogs();
+	}
+});
 
 // Ollama/自定义 供应商不需要 API Key（本地调用或走自定义请求头）
 const NO_API_KEY_PROVIDERS = ['ollama', 'custom'];
@@ -411,4 +596,5 @@ onMounted(() => {
 .mb15 { margin-bottom: 15px; }
 .ml10 { margin-left: 10px; }
 .mt15 { margin-top: 15px; }
+.usage-range { color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

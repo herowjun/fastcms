@@ -131,7 +131,9 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
             if (lastSep > 0) {
                 substring = substring.substring(0, lastSep);
             }
-            String templatePath = substring + sep + "templates" + sep + "target" + sep + "classes" + sep;
+            // templates 已从 Maven 模块移除，dev 模式直接使用其源码资源目录
+            // （唯一一份模板文件，AI 应用/调整直写于此，mvn clean 不再影响模板）
+            String templatePath = substring + sep + "templates" + sep + "src" + sep + "main" + sep + "resources" + sep;
             if (new File(templatePath).exists()) {
                 return templatePath;
             }
@@ -139,7 +141,7 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
             String userDir = System.getProperty("user.dir");
             File parent = new File(userDir).getParentFile();
             if (parent != null) {
-                String altPath = parent.getAbsolutePath() + sep + "templates" + sep + "target" + sep + "classes" + sep;
+                String altPath = parent.getAbsolutePath() + sep + "templates" + sep + "src" + sep + "main" + sep + "resources" + sep;
                 if (new File(altPath).exists()) {
                     return altPath;
                 }

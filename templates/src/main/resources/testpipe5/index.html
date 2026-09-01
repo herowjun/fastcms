@@ -1,0 +1,157 @@
+<#import '_layout.html' as layout>
+<@layout.header '首页'>
+<style>
+:root{--primary:#2563eb;--text:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#fff;--line:#e2e8f0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.6}
+.container{max-width:1120px;margin:0 auto;padding:020px}
+.hero{background:linear-gradient(135deg,#eff6ff0%,#f8fafc100%);border-bottom:1px solid var(--line)}
+.hero-inner{padding:80px0;display:flex;align-items:center;gap:40px}
+.hero-copy{flex:1}
+.hero h1{margin:0016px;font-size:44px;line-height:1.2}
+.hero p{margin:0024px;color:var(--muted);font-size:18px;max-width:640px}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px22px;border-radius:999px;text-decoration:none;font-weight:600}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-ghost{border:1px solid var(--line);color:var(--text);background:#fff}
+.hero-visual{flex:00320px;height:240px;border-radius:24px;background:linear-gradient(135deg,#2563eb,#60a5fa);opacity:.9}
+.section{padding:64px0}
+.section-head{margin-bottom:28px}
+.section-head h2{margin:008px;font-size:30px}
+.section-head p{margin:0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:010px30px rgba(15,23,42,.04)}
+.card h3{margin:0010px;font-size:20px}
+.card p{margin:0012px;color:var(--muted)}
+.card a{color:var(--primary);text-decoration:none;font-weight:600}
+.news-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.news-card{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
+.news-thumb{height:160px;background:linear-gradient(135deg,#e0f2fe,#dbeafe)}
+.news-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.news-body{padding:18px}
+.news-body time{color:var(--muted);font-size:13px}
+.news-body h3{margin:8px0;font-size:18px}
+.news-body h3 a{color:var(--text);text-decoration:none}
+.news-body p{margin:0;color:var(--muted);font-size:14px}
+.about-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:32px;align-items:start}
+.about-links{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.about-links a{display:block;padding:14px16px;background:#fff;border:1px solid var(--line);border-radius:14px;text-decoration:none;color:var(--text)}
+.about-links a:hover{color:var(--primary);border-color:var(--primary)}
+.empty{color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:14px;padding:20px;text-align:center}
+@media(max-width:900px){.hero-inner{padding:56px0;flex-direction:column;align-items:flex-start}.hero h1{font-size:34px}.hero-visual{width:100%;height:180px}.grid,.news-list{grid-template-columns:repeat(2,1fr)}.about-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.section{padding:44px0}.grid,.news-list{grid-template-columns:1fr}.hero h1{font-size:28px}.hero-actions .btn{width:100%;text-align:center}}
+</style>
+</@layout.header>
+<@layout.body>
+<section class='hero'>
+<div class='container hero-inner'>
+<div class='hero-copy'>
+<h1>${seoTag('website_title')!'企业官网'}</h1>
+<p>${seoTag('website_sub_title')!'以现代、可靠、可持续的数字化能力，帮助企业提升效率、降低成本、创造增长。'}</p>
+<div class='hero-actions'>
+<a class='btn btn-primary' href='/page/services'>了解产品服务</a>
+<a class='btn btn-ghost' href='/page/about'>关于我们</a>
+</div>
+</div>
+<div class='hero-visual' role='img' aria-label='企业数字化能力示意'></div>
+</div>
+</section>
+<section class='section' id='services'>
+<div class='container'>
+<div class='section-head'>
+<h2>产品服务</h2>
+<p>围绕企业经营场景，提供覆盖咨询、实施、运营与优化的完整解决方案。</p>
+</div>
+<@categoryList>
+<#if data?? && (data?size >0)>
+<div class='grid'>
+<#list data as item>
+<article class='card'>
+<h3><a href='${item.url!}'>${item.title!}</a></h3>
+<p>点击了解该服务或产品线的详细说明、适用场景与交付能力。</p>
+<a href='${item.url!}'>查看详情</a>
+</article>
+</#list>
+</div>
+<#else>
+<div class='grid'>
+<article class='card'>
+<h3>数字化咨询</h3>
+<p>梳理业务流程与数据资产，制定可落地的数字化路线图。</p>
+<a href='/page/services'>了解更多</a>
+</article>
+<article class='card'>
+<h3>平台建设</h3>
+<p>提供官网、营销系统、业务中台等建设服务，支持快速上线。</p>
+<a href='/page/services'>了解更多</a>
+</article>
+<article class='card'>
+<h3>运营优化</h3>
+<p>基于数据分析持续优化转化、效率与用户体验。</p>
+<a href='/page/services'>了解更多</a>
+</article>
+</div>
+</#if>
+</@categoryList>
+</div>
+</section>
+<section class='section' id='news'>
+<div class='container'>
+<div class='section-head'>
+<h2>新闻动态</h2>
+<p>了解公司最新进展、行业观察与客户案例。</p>
+</div>
+<@articleListTag orderBy='created' count=6>
+<#if data?? && (data?size >0)>
+<ul class='news-list'>
+<#list data as item>
+<li>
+<article class='news-card'>
+<#if item.thumbnail?? && item.thumbnail?has_content>
+<div class='news-thumb'><a href='${item.url!}'><img src='${item.thumbnail}' alt='${item.title!}'></a></div>
+<#else>
+<div class='news-thumb' aria-hidden='true'></div>
+</#if>
+<div class='news-body'>
+<time><@formatTime value=(item.created)! format='yyyy-MM-dd'/></time>
+<h3><a href='${item.url!}'>${item.title!}</a></h3>
+<p>${item.summary!''}</p>
+</div>
+</article>
+</li>
+</#list>
+</ul>
+<#else>
+<p class='empty'>暂无新闻动态，敬请期待。</p>
+</#if>
+</@articleListTag>
+</div>
+</section>
+<section class='section' id='about'>
+<div class='container about-grid'>
+<div>
+<div class='section-head'>
+<h2>关于我们</h2>
+<p>我们致力于以技术驱动业务增长，帮助客户在变化中保持稳健与创新。</p>
+</div>
+<p>公司汇聚产品、技术、设计与咨询团队，长期服务于多个行业，重视长期价值与持续交付。</p>
+<p>${seoTag('website_phone')!'联系电话：400-000-0000'} · ${seoTag('website_email')!'电子邮箱：contact@example.com'}</p>
+</div>
+<@singlePageList>
+<#if data?? && (data?size >0)>
+<ul class='about-links'>
+<#list data as item>
+<li><a href='${item.url!}'>${item.title!}</a></li>
+</#list>
+</ul>
+<#else>
+<ul class='about-links'>
+<li><a href='/page/about'>公司简介</a></li>
+<li><a href='/page/contact'>联系方式</a></li>
+</ul>
+</#if>
+</@singlePageList>
+</div>
+</section>
+</@layout.body>
+<@layout.script></@layout.script>

@@ -161,6 +161,21 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
      * 用于私有部署、企业网关、Ollama API Key 等场景。</p>
      */
     public static ChatModel buildChatModel(AiModelConfig config) {
+        return OpenAiChatModel.builder()
+                .options(baseOptionsBuilder(config).build())
+                .build();
+    }
+
+    /**
+     * 从模型配置构建 options 基底（默认 options 与 runtime 覆盖 options 共用）。
+     *
+     * <p>关键教训：Spring AI 传入 runtime options 后，默认 options 中的请求级字段
+     * <b>不会</b>自动合并到 runtime options——model 漏设会 404（SDK 回退 gpt-5-mini），
+     * timeout 漏设会断流（SDK 回退 60s callTimeout，长推理必挂"Stream failed"）。
+     * 因此任何 runtime 覆盖 options 都必须从本基底出发构建，保证
+     * apiKey/baseUrl/timeout/customHeaders 等字段永远在场。</p>
+     */
+    public static OpenAiChatOptions.Builder baseOptionsBuilder(AiModelConfig config) {
         OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
                 .apiKey(StringUtils.hasText(config.getApiKey()) ? config.getApiKey() : API_KEY_PLACEHOLDER)
                 .baseUrl(config.getBaseUrl())
@@ -181,9 +196,7 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
         if (!customHeaders.isEmpty()) {
             optionsBuilder.customHeaders(customHeaders);
         }
-        return OpenAiChatModel.builder()
-                .options(optionsBuilder.build())
-                .build();
+        return optionsBuilder;
     }
 
     /**

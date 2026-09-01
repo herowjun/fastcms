@@ -84,6 +84,14 @@ public class AiTemplateSession implements Serializable {
      */
     private String templateId;
 
+    /**
+     * 分批流水线的规划文件清单（JSON 数组字符串，如 ["index.html","static/css/base.css"]）
+     *
+     * <p>持久化的目的：刷新页面后前端可重算进度卡；生成中断后下一次对话
+     * 对比 {@code ai_template_file} 已有文件，只补齐缺失部分（断点续传）。</p>
+     */
+    private String planFiles;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime created;
 
@@ -116,6 +124,9 @@ public class AiTemplateSession implements Serializable {
 
     public String getTemplateId() { return templateId; }
     public void setTemplateId(String templateId) { this.templateId = templateId; }
+
+    public String getPlanFiles() { return planFiles; }
+    public void setPlanFiles(String planFiles) { this.planFiles = planFiles; }
 
     public LocalDateTime getCreated() { return created; }
     public void setCreated(LocalDateTime created) { this.created = created; }

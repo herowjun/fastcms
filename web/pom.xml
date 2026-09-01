@@ -59,11 +59,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.fastcms</groupId>
-            <artifactId>fastcms-templates</artifactId>
-        </dependency>
-
-        <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
         </dependency>
@@ -94,7 +89,7 @@
                 <version>${spring-boot-dependencies.version}</version>
                 <configuration>
                     <classifier>exec</classifier>
-                    <fork>true</fork>
+                    <!-- <fork>true</fork> -->
                     <mainClass>com.fastcms.web.Fastcms</mainClass>
                 </configuration>
                 <executions>

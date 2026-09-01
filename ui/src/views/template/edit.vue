@@ -110,9 +110,11 @@
             </div>
         </el-drawer>
 
-        <!-- AI 新建模板对话框 -->
-        <el-dialog v-model="state.createDialog.visible" title="AI 新建模板" width="520px" :close-on-click-modal="false">
-            <el-form label-width="90px">
+        <!-- AI 新建模板对话框（含历史生成记录入口） -->
+        <el-dialog v-model="state.createDialog.visible"
+                   :title="state.createDialog.view === 'history' ? '历史生成记录' : 'AI 新建模板'"
+                   :width="state.createDialog.view === 'history' ? '680px' : '520px'" :close-on-click-modal="false">
+            <el-form v-if="state.createDialog.view === 'create'" label-width="90px">
                 <el-form-item label="模板目录名" required>
                     <el-input v-model="state.createDialog.templateName" placeholder="英文目录名，以字母开头，如 my-company" />
                 </el-form-item>
@@ -121,9 +123,38 @@
                               placeholder="描述模板需求，例如：企业官网模板，蓝色调，响应式设计" />
                 </el-form-item>
             </el-form>
+            <template v-else>
+                <el-table :data="state.createDialog.sessions" v-loading="state.createDialog.historyLoading" stripe size="small"
+                          max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
+                    <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
+                    <el-table-column label="状态" width="80">
+                        <template #default="scope">
+                            <el-tag size="small" :type="scope.row.status === 'applied' ? 'success' : 'warning'">
+                                {{ scope.row.status === 'applied' ? '已应用' : '未应用' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
+                    <el-table-column label="创建时间" width="130">
+                        <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
+                    </el-table-column>
+                </el-table>
+                <el-empty v-if="!state.createDialog.historyLoading && state.createDialog.sessions.length === 0"
+                          description="暂无生成记录" :image-size="60" />
+                <div class="history-tip">点击记录打开 AI 抽屉：未应用的可继续对话或应用；已应用的仅回看</div>
+            </template>
             <template #footer>
-                <el-button @click="state.createDialog.visible = false">取 消</el-button>
-                <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">开始生成</el-button>
+                <template v-if="state.createDialog.view === 'create'">
+                    <el-button text type="primary" @click="onShowHistory">
+                        <el-icon><ele-Clock /></el-icon>历史生成记录
+                    </el-button>
+                    <el-button @click="state.createDialog.visible = false">取 消</el-button>
+                    <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">开始生成</el-button>
+                </template>
+                <template v-else>
+                    <el-button @click="state.createDialog.view = 'create'">返回新建</el-button>
+                    <el-button type="primary" @click="state.createDialog.visible = false">关 闭</el-button>
+                </template>
             </template>
         </el-dialog>
     </el-card>
@@ -143,6 +174,7 @@ import { html } from "@codemirror/lang-html";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 const codeMirror = ref()
+const treeTable = ref()
 const extensions = [html(), oneDark];
 
 const templateApi = TemplateApi();
@@ -182,12 +214,16 @@ const state = reactive({
     aiSessions: [] as any[],
     currentAiSessionId: '',
     currentAiSession: null as any,
-    // AI 新建模板对话框
+    // AI 新建模板对话框（create：新建表单；history：历史生成记录列表）
     createDialog: {
         visible: false,
+        view: 'create' as 'create' | 'history',
         templateName: '',
         requirement: '',
-        loading: false
+        loading: false,
+        // 历史生成型会话列表（未绑定 templateId，含已应用/未应用）
+        sessions: [] as any[],
+        historyLoading: false
     },
     // 新建调整会话按钮 loading
     creatingAiSession: false,
@@ -321,9 +357,48 @@ const onOpenAiAdjust = async () => {
  * 打开 AI 新建模板对话框（generate 模式）
  */
 const onOpenAiCreate = () => {
+    state.createDialog.view = 'create';
     state.createDialog.templateName = '';
     state.createDialog.requirement = '';
     state.createDialog.visible = true;
+};
+
+/**
+ * 查看历史生成记录：加载生成型会话（未绑定 templateId），
+ * 已应用/未应用全部显示，点击记录可回到抽屉继续处理
+ */
+const onShowHistory = async () => {
+    state.createDialog.view = 'history';
+    state.createDialog.historyLoading = true;
+    try {
+        const res = await aiApi.listSessions();
+        state.createDialog.sessions = (res.data || []).filter((s: any) => !s.templateId);
+    } catch (e: any) {
+        ElMessage.error(e?.message || '加载历史记录失败');
+    } finally {
+        state.createDialog.historyLoading = false;
+    }
+};
+
+/**
+ * 打开历史生成会话：进入 generate 模式抽屉恢复会话（不自动发送消息）
+ */
+const onOpenHistorySession = (row: any) => {
+    state.createDialog.visible = false;
+    state.aiMode = 'generate';
+    state.aiSessions = state.createDialog.sessions;
+    state.currentAiSessionId = row.sessionId;
+    state.currentAiSession = row;
+    state.aiDrawerVisible = true;
+};
+
+/** 历史记录创建时间格式化（月-日 时:分） */
+const formatHistoryTime = (created: any) => {
+    if (!created) return '';
+    const d = new Date(created);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
 /**
@@ -725,6 +800,16 @@ onBeforeUnmount(() => {
         overflow: hidden;
     }
 }
+// 历史生成记录列表（el-dialog 同样 teleport 到 body，需全局选择器）
+.history-session-table {
+    cursor: pointer;
+}
+
+.history-tip {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+}
 // AI 抽屉主体：调整型左右分栏（对话 + 实时预览）
 .ai-drawer-body {
     display: flex;
@@ -743,6 +828,10 @@ onBeforeUnmount(() => {
         flex-direction: column;
         flex: 3;
         min-width: 0;
+        // generate 模式下 drawer-body 为纵向 flex，flex 项目默认 min-height:auto
+        // 不会收缩到内容以下，导致内容超出被外层 overflow:hidden 裁掉、
+        // chat-area 的 overflow-y:auto 失效（split 横向模式下无影响）
+        min-height: 0;
 
         // aiChat 根元素撑满列（组件内部 height:100% 在 flex 列中不稳）
         > :deep(.ai-chat-panel) {

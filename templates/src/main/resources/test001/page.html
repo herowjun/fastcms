@@ -1,0 +1,15 @@
+<#import "_layout.html" as layout>
+<@layout.header (singlePage.title)!"单页面">
+</@layout.header>
+<@layout.body>
+<div class="container page-content">
+ <article class="single-page">
+ <h1 class="page-title">${(singlePage.title)!""}</h1>
+ <div class="page-body">
+ ${(singlePage.contentHtml)!""}
+ </div>
+ </article>
+</div>
+</@layout.body>
+<@layout.script>
+</@layout.script>

@@ -818,6 +818,7 @@ CREATE TABLE `ai_template_session` (
   `user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
   `work_dir` varchar(512) DEFAULT NULL COMMENT '会话工作目录绝对路径',
   `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
+  `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）',
   `created` datetime DEFAULT NULL,
   `updated` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -825,6 +826,9 @@ CREATE TABLE `ai_template_session` (
   KEY `idx_user_id` (`user_id`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板生成会话表';
+
+-- 已有环境升级（0.2.x → 0.3.x）：为 ai_template_session 增加规划清单字段
+-- ALTER TABLE `ai_template_session` ADD COLUMN `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）' AFTER `template_id`;
 
 -- AI 模板生成对话消息表
 DROP TABLE IF EXISTS `ai_template_message`;

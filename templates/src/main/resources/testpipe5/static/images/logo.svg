@@ -1,0 +1,13 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0024064' width='180' height='48' role='img' aria-label='企业官网标志'>
+ <defs>
+ <linearGradient id='logo-gradient' x1='0%' y1='0%' x2='100%' y2='100%'>
+ <stop offset='0%' stop-color='#2563eb'/>
+ <stop offset='100%' stop-color='#06b6d4'/>
+ </linearGradient>
+ </defs>
+ <rect x='4' y='8' width='48' height='48' rx='14' fill='url(#logo-gradient)'/>
+ <path d='M2042V22h22v8H29v5h11v8z' fill='#ffffff'/>
+ <circle cx='44' cy='26' r='4' fill='#ffffff'/>
+ <text x='64' y='38' font-family='Arial, sans-serif' font-size='24' font-weight='700' fill='#0f172a'>企业官网</text>
+ <text x='64' y='54' font-family='Arial, sans-serif' font-size='10' letter-spacing='3' fill='#64748b'>MODERN ENTERPRISE</text>
+</svg>

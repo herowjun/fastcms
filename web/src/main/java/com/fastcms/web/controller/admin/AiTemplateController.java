@@ -51,10 +51,11 @@ import static com.fastcms.service.IResourceService.ResourceI18n.*;
 public class AiTemplateController {
 
     /**
-     * SSE 超时时间：10 分钟（AI 生成模板含长推理阶段，耗时较长；
-     * 与 AiModelConfigServiceImpl 中 OpenAI 客户端的 callTimeout 保持一致）
+     * SSE 超时时间：60 分钟（分批流水线逐文件生成，推理模型单文件可达 3-4 分钟，
+     * 10 个文件全程可能超 30 分钟；超时断流后后端仍会继续完成落盘，但前端看不到进度，
+     * 因此整体放宽。单轮流式调用超时由 AiModelConfigServiceImpl 的 callTimeout + Reactor 兜底控制）
      */
-    private static final long SSE_TIMEOUT = 10 * 60 * 1000L;
+    private static final long SSE_TIMEOUT = 60 * 60 * 1000L;
 
     @Autowired
     private IAiTemplateGenService templateGenService;

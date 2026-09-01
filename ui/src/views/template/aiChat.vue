@@ -22,13 +22,35 @@
 				<el-icon><ele-Plus /></el-icon>新建会话
 			</el-button>
 			<el-tag v-if="mode === 'adjust'" size="small" type="warning">直接修改正式模板</el-tag>
+		<el-tag v-if="mode === 'generate' && isApplied" size="small" type="success">已应用（仅回看）</el-tag>
+		<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
 		<!-- 对话区域 -->
-		<div class="chat-area" ref="chatAreaRef">
+		<div class="chat-area" ref="chatAreaRef" @scroll="onChatAreaScroll">
 			<div v-for="(msg, msgIndex) in state.messages" :key="msgIndex" class="chat-message" :class="msg.role">
 				<div class="message-role">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
 				<div class="message-content">
+					<!-- 分批流水线进度卡：规划完成后逐文件点亮（后端 progress 事件全量快照） -->
+					<div v-if="msg.progress && msg.progress.length" class="progress-box">
+						<div class="progress-header">
+							<span>文件生成进度（{{ progressDoneCount(msg) }}/{{ msg.progress.length }}）</span>
+							<el-button
+							v-if="mode === 'generate' && !isApplied && !state.chatting && msgIndex === state.messages.length - 1
+								&& progressDoneCount(msg) < msg.progress.length"
+								size="small" text type="primary" style="margin-left: auto" @click="onResumeMissing">
+								<el-icon><ele-MagicStick /></el-icon>补齐缺失文件
+							</el-button>
+						</div>
+						<div class="progress-items">
+							<div v-for="f in msg.progress" :key="f.path" class="progress-item" :class="f.status">
+								<el-icon v-if="f.status === 'done'" class="pi-done"><ele-Check /></el-icon>
+								<el-icon v-else-if="f.status === 'current'" class="is-loading pi-current"><ele-Loading /></el-icon>
+								<el-icon v-else class="pi-pending"><ele-Clock /></el-icon>
+								<span class="pi-path">{{ f.path }}</span>
+							</div>
+						</div>
+					</div>
 					<!-- 推理模型思考过程（可折叠，思考中默认展开） -->
 					<div v-if="msg.reasoning" class="reasoning-box">
 						<div class="reasoning-header" @click="msg.reasoningExpanded = !msg.reasoningExpanded">
@@ -41,7 +63,7 @@
 							v-html="renderReasoning(msg.reasoning, reasoningThinking(msg, msgIndex))"
 						></div>
 					</div>
-					<pre class="message-text">{{ msg.content }}<span
+					<pre class="message-text" :class="{ failed: isFailMessage(msg) }">{{ msg.content }}<span
 						v-if="state.chatting && msgIndex === state.messages.length - 1 && !msg.reasoning"
 						class="typing-cursor"
 					>▌</span></pre>
@@ -53,17 +75,24 @@
 
 		<!-- 输入区域 -->
 		<div class="chat-input">
+			<div v-if="mode === 'generate' && isFailed" class="regen-bar">
+				<span class="regen-tip">上次生成失败（详见上方错误信息）。模型配置修复后可重新生成。</span>
+				<el-button type="primary" size="small" @click="onRegenerate" :loading="state.chatting">
+					<el-icon><ele-RefreshRight /></el-icon>重新生成
+				</el-button>
+			</div>
 			<el-input
 				v-model="state.inputText"
 				type="textarea"
 				:rows="3"
-				:placeholder="mode === 'adjust'
-					? (currentFileName ? `AI 当前聚焦页面：${currentFileName}。描述你想调整的内容，例如：把这里的导航改为深色` : '描述你想调整的内容，例如：把首页导航改为深色、文章列表改为卡片式布局')
-					: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计'"
-				:disabled="state.chatting"
+				:placeholder="isApplied ? '该会话已应用到正式模板目录，仅支持回看历史消息与文件'
+					: (mode === 'adjust'
+						? (currentFileName ? `AI 当前聚焦页面：${currentFileName}。描述你想调整的内容，例如：把这里的导航改为深色` : '描述你想调整的内容，例如：把首页导航改为深色、文章列表改为卡片式布局')
+						: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计')"
+				:disabled="state.chatting || isApplied"
 			/>
 			<div class="chat-actions">
-				<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim()">
+				<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
 					<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
 				</el-button>
 				<el-button v-if="state.chatting" type="danger" @click="onStop">
@@ -83,7 +112,7 @@
 					<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
 					</el-button>
-					<el-button v-if="mode === 'generate'" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
+					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
 						<el-icon><ele-Check /></el-icon>应用模板
 					</el-button>
 				</div>
@@ -158,6 +187,39 @@ const emit = defineEmits<{
 const templateApi = AiTemplateApi();
 const chatAreaRef = ref();
 
+/** 已应用的生成型会话：仅回看，禁止继续对话/应用（后端 apply 后 status 置为 applied） */
+const isApplied = computed(() => props.session?.status === 'applied');
+
+/** 失败消息统一前缀（与后端 AiTemplateConstants.MSG_FAIL_PREFIX 对齐） */
+const FAIL_MSG_PREFIX = '生成失败：';
+
+/** 生成失败态判定：最后一条消息是后端落库的失败标记消息（空壳会话的可靠信号） */
+const isFailed = computed(() => {
+	if (isApplied.value || state.chatting) return false;
+	const msgs = state.messages;
+	if (!msgs.length) return false;
+	const last = msgs[msgs.length - 1];
+	return last?.role === 'assistant' && String(last.content || '').startsWith(FAIL_MSG_PREFIX);
+});
+
+/** 单条消息是否为失败消息（红色样式渲染） */
+const isFailMessage = (msg: any) => {
+	return msg?.role === 'assistant' && String(msg.content || '').startsWith(FAIL_MSG_PREFIX);
+};
+
+/**
+ * 重新生成：取会话首条用户需求重走流水线。
+ * 后端对"plan 为空且无文件"的会话会重新进入分批生成（hasMissingPlanFiles），
+ * 失败标记消息不会注入模型上下文
+ */
+const onRegenerate = () => {
+	if (state.chatting) return;
+	const firstUser = state.messages.find((m: any) => m.role === 'user');
+	if (!firstUser?.content) return;
+	state.inputText = firstUser.content;
+	onSend();
+};
+
 /** 会话创建时间格式化：今天只显示时分，跨天显示月-日 时分 */
 const formatSessionTime = (created: any) => {
 	if (!created) return '';
@@ -217,11 +279,43 @@ const loadSessionData = async () => {
 			state.messages = messagesRes.data.map((m: any) => ({ ...m, reasoningExpanded: false }));
 		}
 		if (filesRes.data) state.files = filesRes.data;
+		// 切换/加载会话回到自动跟随模式（历史消息加载后滚到底部）
+		userScrolledUp.value = false;
+		// 进度卡恢复：plan 已持久化（会话对象携带），刷新页面后用 plan + 已生成文件重算全量进度，
+		// 挂到最后一条 assistant 消息上，与生成过程中的进度卡视觉一致
+		restoreProgressCard();
+		scrollToBottom();
 	} catch (e) {
 		console.error(e);
 		ElMessage.error('加载会话数据失败');
 	} finally {
 		state.loading = false;
+	}
+};
+
+/**
+ * 刷新页面后恢复文件进度卡：
+ * 会话的 planFiles（JSON 数组）与文件列表对比，已生成标 done、缺失标 pending
+ */
+const restoreProgressCard = () => {
+	let plan: string[] = [];
+	try {
+		plan = props.session?.planFiles ? JSON.parse(props.session.planFiles) : [];
+	} catch (e) {
+		plan = [];
+	}
+	if (!plan || plan.length === 0) return;
+	const doneSet = new Set(state.files.map((f: any) => f.filePath));
+	const progress = plan.map((p: string) => ({
+		path: p,
+		status: doneSet.has(p) ? 'done' : 'pending',
+	}));
+	// 挂到最后一条 assistant 消息（汇总消息所在位置）
+	for (let i = state.messages.length - 1; i >= 0; i--) {
+		if (state.messages[i].role === 'assistant') {
+			state.messages[i].progress = progress;
+			break;
+		}
 	}
 };
 
@@ -268,6 +362,9 @@ defineExpose({ autoSend });
 const onSend = async () => {
 	if (!state.inputText.trim() || !props.session?.sessionId) return;
 
+	// 新一轮对话回到自动跟随模式
+	userScrolledUp.value = false;
+
 	// 先把用户输入加入消息列表（UI 即时反馈）
 	state.messages.push({
 		role: 'user',
@@ -293,6 +390,7 @@ const onSend = async () => {
 		content: '',
 		reasoning: '',
 		reasoningExpanded: true,
+		progress: [] as any[],
 		created: new Date().toISOString(),
 	});
 	const assistantIndex = state.messages.length - 1;
@@ -333,14 +431,22 @@ const onSend = async () => {
 	};
 
 	const handleError = (e: any) => {
+		let msg = '生成失败';
 		if (e.data) {
 			try {
 				const data = JSON.parse(e.data);
-				ElMessage.error(data.message || '生成失败');
+				msg = data.message || msg;
 			} catch (err) {
-				ElMessage.error('生成失败');
+				/* ignore */
 			}
 		}
+		// 与后端落库逻辑一致：失败写入当前 assistant 占位消息，
+		// 即时触发失败态 UI（红色消息 + 重新生成入口），无需刷新页面
+		const last = state.messages[assistantIndex];
+		if (last && !last.content) {
+			last.content = FAIL_MSG_PREFIX + msg;
+		}
+		ElMessage.error(msg);
 		finish();
 	};
 
@@ -363,6 +469,11 @@ const onSend = async () => {
 				if (errRes && errRes.msg) msg = errRes.msg;
 			} catch (err) {
 				/* ignore */
+			}
+			// HTTP 层失败同样写入占位消息触发失败态 UI
+			const last = state.messages[assistantIndex];
+			if (last && !last.content) {
+				last.content = FAIL_MSG_PREFIX + msg;
 			}
 			ElMessage.error(msg);
 			finish();
@@ -394,17 +505,29 @@ const onSend = async () => {
 					scrollToBottom();
 					break;
 				case 'file':
-					// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）
-					try {
-						const info = JSON.parse(data);
-						if (info.path) {
-							upsertFile(info.path, info.action || 'modify');
-							emit('file-written', info.path);
-						}
-					} catch (err) {
-						/* 忽略格式异常的 file 事件 */
+				// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）
+				try {
+					const info = JSON.parse(data);
+					if (info.path) {
+						upsertFile(info.path, info.action || 'modify');
+						emit('file-written', info.path);
 					}
-					break;
+				} catch (err) {
+					/* 忽略格式异常的 file 事件 */
+				}
+				break;
+			case 'progress':
+				// 分批流水线进度快照（全量文件清单及状态），更新 AI 消息内的进度卡
+				try {
+					const info = JSON.parse(data);
+					if (info.files) {
+						state.messages[assistantIndex].progress = info.files;
+						scrollToBottom();
+					}
+				} catch (err) {
+					/* 忽略格式异常的 progress 事件 */
+				}
+				break;
 				case 'done':
 					handleDone({ data });
 					break;
@@ -460,7 +583,13 @@ const onSend = async () => {
 			finish();
 		} else {
 			console.error(e);
-			ElMessage.error('生成失败：' + (e?.message || '网络错误'));
+			const msg = e?.message || '网络错误';
+			// 网络异常同样写入占位消息触发失败态 UI
+			const last = state.messages[assistantIndex];
+			if (last && !last.content) {
+				last.content = FAIL_MSG_PREFIX + msg;
+			}
+			ElMessage.error('生成失败：' + msg);
 			finish();
 		}
 	}
@@ -472,6 +601,16 @@ const onStop = () => {
 		state.abortController = null;
 	}
 	state.chatting = false;
+};
+
+/**
+ * 补齐缺失文件：后端检测到 plan 未完成时会走断点续传流水线，只生成缺失部分。
+ * 发送的文本内容不限，后端以会话原始需求为生成依据。
+ */
+const onResumeMissing = () => {
+	if (state.chatting || !props.session?.sessionId) return;
+	state.inputText = '请补齐缺失的文件';
+	onSend();
 };
 
 const onRollback = () => {
@@ -550,15 +689,37 @@ const onViewFile = (file: any) => {
 
 const scrollToBottom = () => {
 	nextTick(() => {
-		if (chatAreaRef.value) {
-			chatAreaRef.value.scrollTop = chatAreaRef.value.scrollHeight;
+		const area = chatAreaRef.value;
+		if (!area) return;
+		// 用户主动上滚查看历史时暂停自动滚底，滚回底部（距底 <40px）自动恢复
+		if (!userScrolledUp.value) {
+			area.scrollTop = area.scrollHeight;
+		}
+		// 思考面板内部滚动条跟随流式输出：reasoning 增量追加在面板底部，
+		// 若不跟随，新内容始终在可视区下方，看起来像"过程卡住了"
+		const thinkingEl = area.querySelector('.chat-message:last-child .reasoning-text');
+		if (thinkingEl) {
+			thinkingEl.scrollTop = thinkingEl.scrollHeight;
 		}
 	});
+};
+
+/** 用户滚动状态：距底部超过 40px 视为"正在查看历史"，暂停自动跟随 */
+const userScrolledUp = ref(false);
+const onChatAreaScroll = () => {
+	const el = chatAreaRef.value;
+	if (!el) return;
+	userScrolledUp.value = el.scrollHeight - el.scrollTop - el.clientHeight > 40;
 };
 
 // 判断消息是否处于"思考中"：对话进行中 + 最后一条消息 + 正文尚未开始输出
 const reasoningThinking = (msg: any, msgIndex: number) => {
 	return state.chatting && msgIndex === state.messages.length - 1 && !msg.content;
+};
+
+// 进度卡已完成文件数
+const progressDoneCount = (msg: any) => {
+	return (msg.progress || []).filter((f: any) => f.status === 'done').length;
 };
 
 // 思考过程渲染：模型思考文本常混有 markdown 结构（## 标题、- 列表、**加粗**），
@@ -679,6 +840,68 @@ const breakSentences = (s: string): string =>
 		border-radius: 6px;
 	}
 
+	// 分批流水线进度卡
+	.progress-box {
+		margin-bottom: 8px;
+		border: 1px solid var(--el-border-color-lighter);
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.progress-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 10px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--el-text-color-regular);
+		background: var(--el-fill-color-light);
+	}
+
+	.progress-items {
+		padding: 4px 10px 6px;
+		max-height: 200px;
+		overflow-y: auto;
+	}
+
+	.progress-item {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 2px 0;
+		font-size: 12px;
+		font-family: 'Consolas', 'Monaco', monospace;
+		color: var(--el-text-color-secondary);
+
+		.pi-done {
+			color: var(--el-color-success);
+		}
+
+		.pi-current {
+			color: var(--el-color-primary);
+		}
+
+		.pi-pending {
+			color: var(--el-text-color-placeholder);
+		}
+
+		.pi-path {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		&.done .pi-path {
+			color: var(--el-text-color-primary);
+		}
+
+		&.current .pi-path {
+			color: var(--el-color-primary);
+			font-weight: 600;
+		}
+	}
+
 	.message-text {
 		margin: 0;
 		font-family: 'Consolas', 'Monaco', monospace;
@@ -686,6 +909,29 @@ const breakSentences = (s: string): string =>
 		white-space: pre-wrap;
 		word-break: break-all;
 		line-height: 1.5;
+
+		// 失败消息（后端落库的"生成失败："标记消息）红色醒目渲染
+		&.failed {
+			color: var(--el-color-danger);
+		}
+	}
+
+	// 失败会话的重新生成提示条（输入框上方）
+	.regen-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 8px;
+		padding: 6px 10px;
+		background: var(--el-color-danger-light-9);
+		border-left: 3px solid var(--el-color-danger);
+		border-radius: 4px;
+
+		.regen-tip {
+			font-size: 12px;
+			color: var(--el-color-danger);
+		}
 	}
 
 	.typing-cursor {

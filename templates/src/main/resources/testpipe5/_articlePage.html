@@ -1,0 +1,24 @@
+<#--文章分页宏 -->
+<#macro _articlePage>
+ <@articlePageTag>
+ <#if data??>
+ <nav class='pagination' aria-label='文章分页'>
+ <#if data.prev?? && data.prev.url?? && (data.prev.url?has_content)>
+ <a class='page-link prev' href='${data.prev.url!}'>${data.prev.text!'上一页'}</a>
+ </#if>
+ <#if data.list?? && (data.list?size >0)>
+ <#list data.list as page>
+ <#if page.url?? && (page.url?has_content)>
+ <a class='page-link' href='${page.url!}'>${page.text!}</a>
+ <#else>
+ <span class='page-link current' aria-current='page'>${page.text!}</span>
+ </#if>
+ </#list>
+ </#if>
+ <#if data.next?? && data.next.url?? && (data.next.url?has_content)>
+ <a class='page-link next' href='${data.next.url!}'>${data.next.text!'下一页'}</a>
+ </#if>
+ </nav>
+ </#if>
+ </@articlePageTag>
+</#macro>

@@ -1,0 +1,61 @@
+<#import "_layout.html" as layout>
+<#import "_articlePage.html" as articlePage>
+<#assign pageTitle = (category.title)!"文章列表">
+<@layout.header title="${pageTitle}"/>
+<@layout.body>
+<main class="container article-list-page">
+ <section class="page-hero">
+ <h1>${pageTitle}</h1>
+ <p>浏览所有相关文章</p>
+ </section>
+ <#if articleVoPage?? && articleVoPage.records??>
+ <#list articleVoPage.records as item>
+ <article class="article-card">
+ <#if item.thumbnail??>
+ <a href="${item.url!}" class="thumb"><img src="${item.thumbnail!}" alt="${(item.title)!''}"></a>
+ </#if>
+ <div class="card-body">
+ <h2><a href="${item.url!}">${(item.title)!''}</a></h2>
+ <p>${(item.summary)!"暂无摘要"}</p>
+ <div class="meta">
+ <#if item.created??>
+ <span><@formatTime value=item.created format="yyyy-MM-dd"/></span>
+ <#else>
+ <span>未知日期</span>
+ </#if>
+ <span>${(item.viewCount)!0}阅读</span>
+ </div>
+ </div>
+ </article>
+ </#list>
+ <#else>
+ <@articleListTag orderBy="created" count=10>
+ <#if data?? && data?has_content>
+ <#list data as item>
+ <article class="article-card">
+ <#if item.thumbnail??>
+ <a href="${item.url!}" class="thumb"><img src="${item.thumbnail!}" alt="${(item.title)!''}"></a>
+ </#if>
+ <div class="card-body">
+ <h2><a href="${item.url!}">${(item.title)!''}</a></h2>
+ <p>${(item.summary)!"暂无摘要"}</p>
+ <div class="meta">
+ <#if item.created??>
+ <span><@formatTime value=item.created format="yyyy-MM-dd"/></span>
+ <#else>
+ <span>未知日期</span>
+ </#if>
+ <span>${(item.viewCount)!0}阅读</span>
+ </div>
+ </div>
+ </article>
+ </#list>
+ <#else>
+ <p class="empty">暂无文章</p>
+ </#if>
+ </@articleListTag>
+ </#if>
+ <@articlePage._articlePage/>
+</main>
+</@layout.body>
+<@layout.script/>

@@ -1,0 +1,71 @@
+<#import '_layout.html' as layout>
+<@layout.header "${(category.title)!'文章列表'}">
+<style>
+.container { width: min(1120px,92%); margin:0 auto; }
+.page-hero { background: linear-gradient(180deg, #f8fafc0%, #eef2ff100%); border-bottom:1px solid #e2e8f0; padding:48px0; }
+.page-title { margin:0010px; font-size:34px; color: #0f172a; }
+.page-subtitle { margin:0; color: #475569; }
+.news-section { padding:40px064px; }
+.news-grid { display: grid; grid-template-columns: repeat(3,1fr); gap:24px; }
+.news-card { background: #fff; border:1px solid #e2e8f0; border-radius:14px; overflow: hidden; display: flex; flex-direction: column; box-shadow:08px24px rgba(15,23,42, .04); transition: transform .2s ease, box-shadow .2s ease; }
+.news-card:hover { transform: translateY(-4px); box-shadow:014px30px rgba(15,23,42, .08); }
+.news-media { display: block; aspect-ratio:16 /9; background: #f1f5f9; overflow: hidden; }
+.news-media img { width:100%; height:100%; object-fit: cover; display: block; }
+.news-placeholder { display: flex; align-items: center; justify-content: center; width:100%; height:100%; color: #64748b; font-weight:700; letter-spacing: .12em; }
+.news-content { padding:20px; display: flex; flex-direction: column; flex:1; }
+.news-title { margin:0010px; font-size:18px; line-height:1.4; }
+.news-title a { color: #0f172a; text-decoration: none; }
+.news-title a:hover { color: #4f46e5; }
+.news-summary { margin:0016px; color: #475569; font-size:14px; line-height:1.7; flex:1; display: -webkit-box; -webkit-line-clamp:3; -webkit-box-orient: vertical; overflow: hidden; }
+.news-meta { display: flex; justify-content: space-between; gap:12px; color: #64748b; font-size:13px; border-top:1px solid #f1f5f9; padding-top:12px; }
+.empty-state { text-align: center; padding:60px0; color: #64748b; }
+.pagination { display: flex; justify-content: center; gap:8px; margin-top:40px; flex-wrap: wrap; }
+.page-link { display: inline-flex; align-items: center; justify-content: center; min-width:40px; height:40px; padding:014px; border-radius:10px; border:1px solid #e2e8f0; background: #fff; color: #334155; text-decoration: none; }
+.page-link:hover { border-color: #4f46e5; color: #4f46e5; }
+@media (max-width:900px) { .news-grid { grid-template-columns: repeat(2,1fr); } .page-title { font-size:28px; } }
+@media (max-width:600px) { .news-grid { grid-template-columns:1fr; } .page-hero { padding:36px0; } }
+</style>
+</@layout.header>
+<@layout.body>
+<section class='page-hero'>
+<div class='container'>
+<h1 class='page-title'>${(category.title)!'文章列表'}</h1>
+<p class='page-subtitle'>了解公司动态、行业资讯与解决方案更新</p>
+</div>
+</section>
+<section class='news-section'>
+<div class='container'>
+<#assign hasList = articleVoPage?? && articleVoPage.records?? && articleVoPage.records?has_content>
+<#if hasList>
+<div class='news-grid'>
+<#list articleVoPage.records as item>
+<article class='news-card'>
+<a class='news-media' href='${item.url!}' aria-label='${item.title!}'>
+<#if item.thumbnail?? && item.thumbnail?has_content>
+<img src='${item.thumbnail}' alt='${item.title!}'>
+<#else>
+<span class='news-placeholder'>NEWS</span>
+</#if>
+</a>
+<div class='news-content'>
+<h2 class='news-title'><a href='${item.url!}'>${item.title!}</a></h2>
+<p class='news-summary'>${item.summary!}</p>
+<div class='news-meta'>
+<span><@formatTime value=(item.created)! format='yyyy-MM-dd'/></span>
+<span>${(item.viewCount)!0}次浏览</span>
+</div>
+</div>
+</article>
+</#list>
+</div>
+<#else>
+<div class='empty-state'>
+<p>暂无内容</p>
+<p>请稍后再来查看最新动态。</p>
+</div>
+</#if>
+<@layout._articlePage/>
+</div>
+</section>
+</@layout.body>
+<@layout.script></@layout.script>
