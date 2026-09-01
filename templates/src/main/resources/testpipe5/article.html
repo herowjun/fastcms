@@ -59,15 +59,15 @@
  <footer class='article-footer'>
  <#if article.id??>
  <@prevArticleTag articleId=article.id>
- <#if data?? && data.title??>
- <a class='article-nav prev' href='${data.url!''}'>上一篇<strong>${data.title!''}</strong></a>
+ <#if data?? && data?is_hash && (data.title)??>
+ <a class='article-nav prev' href='${(data.url)!''}'>上一篇<strong>${(data.title)!''}</strong></a>
  <#else>
  <span class='article-nav prev'>上一篇<strong>暂无上一篇</strong></span>
  </#if>
  </@prevArticleTag>
  <@nextArticleTag articleId=article.id>
- <#if data?? && data.title??>
- <a class='article-nav next' href='${data.url!''}'>下一篇<strong>${data.title!''}</strong></a>
+ <#if data?? && data?is_hash && (data.title)??>
+ <a class='article-nav next' href='${(data.url)!''}'>下一篇<strong>${(data.title)!''}</strong></a>
  <#else>
  <span class='article-nav next'>下一篇<strong>暂无下一篇</strong></span>
  </#if>
@@ -83,10 +83,12 @@
  <h2>相关文章</h2>
  <#if article.id??>
  <@relatedArticleList articleId=article.id count=5>
- <#if data?? && (data?size >0)>
+ <#if data?? && data?is_sequence && (data?size >0)>
  <ul class='related-list'>
  <#list data as item>
- <li><a href='${item.url!''}'>${item.title!''}</a></li>
+ <#if item?? && item?is_hash>
+ <li><a href='${(item.url)!''}'>${(item.title)!''}</a></li>
+ </#if>
  </#list>
  </ul>
  <#else>
@@ -100,10 +102,12 @@
  <section class='sidebar-card'>
  <h2>快速导航</h2>
  <@menuTag>
- <#if data?? && (data?size >0)>
+ <#if data?? && data?is_sequence && (data?size >0)>
  <ul class='related-list'>
  <#list data as item>
- <li><a href='${item.url!''}'>${item.menuName!''}</a></li>
+ <#if item?? && item?is_hash>
+ <li><a href='${(item.url)!''}'>${(item.menuName)!''}</a></li>
+ </#if>
  </#list>
  </ul>
  <#else>

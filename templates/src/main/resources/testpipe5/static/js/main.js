@@ -58,6 +58,50 @@
  });
  }
 
+ //当前页面导航高亮（尾部段匹配算法）
+ (function () {
+ var currentPath = window.location.pathname;
+ if (currentPath.endsWith('.html')) currentPath = currentPath.replace(/\.html$/, '');
+ if (currentPath.endsWith('/')) currentPath = currentPath.slice(0, -1);
+
+ var allNavLinks = document.querySelectorAll('.nav-list a');
+ allNavLinks.forEach(function (link) {
+ var href = link.getAttribute('href');
+ if (!href) return;
+
+ //标准化：去除首尾斜杠
+ var normalizedHref = href.replace(/^\/+|\/+$/g, '');
+ var normalizedCurrent = currentPath.replace(/^\/+|\/+$/g, '');
+
+ if (normalizedHref === '') {
+ //首页匹配：当前路径为空、只有一段（模板名）、或最后一段是 index
+ var segs = normalizedCurrent.split('/').filter(Boolean);
+ if (segs.length ===0 || segs.length ===1 || segs[segs.length -1] === 'index') {
+ link.classList.add('is-active');
+ }
+ return;
+ }
+
+ //尾部段匹配：current的最后 N段是否等于 href的所有段
+ var hrefSegs = normalizedHref.split('/').filter(Boolean);
+ var curSegs = normalizedCurrent.split('/').filter(Boolean);
+
+ if (curSegs.length >= hrefSegs.length) {
+ var start = curSegs.length - hrefSegs.length;
+ var match = true;
+ for (var i =0; i < hrefSegs.length; i++) {
+ if (curSegs[start + i] !== hrefSegs[i]) {
+ match = false;
+ break;
+ }
+ }
+ if (match) {
+ link.classList.add('is-active');
+ }
+ }
+ });
+ })();
+
  function smoothScrollTo(top) {
  if ('scrollBehavior' in document.documentElement.style) {
  window.scrollTo({ top: top, behavior: 'smooth' });
@@ -110,7 +154,7 @@
  topButton.type = 'button';
  topButton.className = 'back-to-top';
  topButton.setAttribute('aria-label', '回到顶部');
- topButton.innerHTML = `<svg viewBox='002424' width='18' height='18' aria-hidden='true'><path d='M126l66h-4v6h-4v-6H6l6-6z'/></svg>`;
+ topButton.innerHTML = '<svg viewBox="002424" width="18" height="18" aria-hidden="true"><path d="M126l66h-4v6h-4v-6H6l6-6z"/></svg>';
  document.body.appendChild(topButton);
 
  function toggleTopButton() {

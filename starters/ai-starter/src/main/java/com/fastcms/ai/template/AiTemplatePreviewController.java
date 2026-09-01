@@ -1,7 +1,5 @@
 package com.fastcms.ai.template;
 
-import freemarker.template.Configuration;
-import freemarker.template.Template;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -18,15 +16,6 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /**
  * AI 模板预览控制器：用真实 FreeMarker 引擎 + 演示数据渲染预览目录中的模板
@@ -37,7 +26,7 @@ import java.util.stream.Stream;
  * {@link AiTemplatePreviewMockSupport} 提供的 <b>mock 指令集</b>：
  * 与真实指令返回结构完全一致的演示数据，模板代码无需任何修改即可渲染出完整效果。
  *
- * <p>渲染策略：
+ * <p>渲染核心在 {@link AiTemplatePreviewRenderer}（与调整型会话的渲染校验共用同一管线）：
  * <ul>
  *     <li>内置指令全部替换为 mock 实现（菜单、文章、分类、标签、单页、分页、SEO 等）</li>
  *     <li>ctx() 覆盖为预览静态资源路径，使 CSS/JS 请求回到本控制器的静态文件分支</li>
@@ -68,18 +57,14 @@ public class AiTemplatePreviewController {
      */
     static final String TEMPLATE_PREVIEW_URL_PREFIX = "/template/preview/";
 
-    /**
-     * 扫描模板中的自定义指令调用（<@xxx ...>），用于未知指令兜底注册。
-     * 仅匹配指令名（字母开头、字母数字下划线），宏调用（<@layout.header>）会匹配到
-     * namespace 名（layout），但 namespace 调用不走 sharedVariable，注册了也不影响。
-     */
-    private static final Pattern DIRECTIVE_PATTERN = Pattern.compile("<@([a-zA-Z][a-zA-Z0-9_]*)");
-
     @jakarta.annotation.Resource
     private IAiTemplateGenService aiTemplateGenService;
 
     @jakarta.annotation.Resource
     private com.fastcms.core.template.TemplateService templateService;
+
+    @jakarta.annotation.Resource
+    private AiTemplatePreviewRenderer previewRenderer;
 
     @GetMapping("/ai/template/preview/{sessionId}/{templateName}/**")
     public void preview(@PathVariable("sessionId") String sessionId,
@@ -94,14 +79,15 @@ public class AiTemplatePreviewController {
                 ? URLDecoder.decode(requestUri.substring(prefix.length()), StandardCharsets.UTF_8)
                 : "";
 
-        // 会话工作目录（数据库绝对路径，跨启动方式稳定）
+        // 会话工作目录（数据库绝对路径，跨启动方式稳定；
+        // 调整型会话按模板 ID 实时解析并自愈迁移后的路径）
         com.fastcms.entity.AiTemplateSession session = aiTemplateGenService.getSession(sessionId);
         if (session == null || !StringUtils.hasText(session.getWorkDir())) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND, "预览会话不存在: " + sessionId);
             return;
         }
 
-        Path workDir = Paths.get(session.getWorkDir());
+        Path workDir = aiTemplateGenService.resolveEffectiveWorkDir(session);
         if (!Files.isDirectory(workDir)) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND, "预览目录不存在: " + session.getWorkDir());
             return;
@@ -181,76 +167,23 @@ public class AiTemplatePreviewController {
 
     /**
      * FreeMarker 渲染模板并输出（mock 指令集 + 页面级演示数据）
+     *
+     * <p>渲染核心委托给 {@link AiTemplatePreviewRenderer}（与渲染校验共用同一管线），
+     * 每次渲染重新加载模板目录下的 {@code _preview_data.json}（存在时），
+     * 手工编辑或 AI 修改该文件后刷新预览立即生效，无需重启。</p>
      */
     private void renderTemplate(String urlPrefix, String displayName, Path workDir,
                                 String relPath, HttpServletResponse response) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         try {
-            Map<String, String> pageUrls = resolvePageUrls(urlPrefix, workDir);
-            Configuration cfg = getConfiguration(urlPrefix + "/static", workDir, pageUrls);
-            Template template = cfg.getTemplate(relPath);
-            template.process(AiTemplatePreviewMockSupport.buildPageModel(relPath, pageUrls), response.getWriter());
+            String html = previewRenderer.renderPage(urlPrefix, workDir, relPath);
+            response.getWriter().write(html);
             response.getWriter().flush();
         } catch (Exception e) {
             log.error("AI 模板预览渲染失败: {}/{}", displayName, relPath, e);
             writeErrorPage(response, displayName, relPath, e);
         }
-    }
-
-    /**
-     * 解析整站导航 URL：为 index/文章列表/文章详情/单页四类页面定位模板目录中真实存在的文件，
-     * mock 数据中的链接均指向这些 URL，实现预览内闭环跳转。
-     *
-     * <p>解析规则：优先精确文件名（index.html/article_list.html/article.html/page.html），
-     * 其次按前缀取排序后的第一个（article 排除 article_list* 前缀），都找不到时回退首页，
-     * 保证链接指向的页面一定可渲染。</p>
-     */
-    private Map<String, String> resolvePageUrls(String urlPrefix, Path workDir) {
-        List<String> htmlFiles;
-        try (Stream<Path> stream = Files.list(workDir)) {
-            htmlFiles = stream
-                    .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".html"))
-                    .filter(p -> !p.getFileName().toString().startsWith("_"))
-                    .map(p -> p.getFileName().toString())
-                    .sorted()
-                    .toList();
-        } catch (IOException e) {
-            log.warn("扫描模板目录失败，导航 URL 回退首页: {}", workDir, e);
-            htmlFiles = List.of();
-        }
-
-        String indexFile = pickPageFile(htmlFiles, "index", null);
-        String articleListFile = pickPageFile(htmlFiles, "article_list", null);
-        // article 前缀包含 article_list*，需显式排除
-        String articleFile = pickPageFile(htmlFiles, "article", "article_list");
-        String pageFile = pickPageFile(htmlFiles, "page", null);
-
-        Map<String, String> urls = new LinkedHashMap<>();
-        String indexUrl = indexFile != null ? urlPrefix + "/" + indexFile : urlPrefix;
-        urls.put("index", indexUrl);
-        urls.put("article_list", articleListFile != null ? urlPrefix + "/" + articleListFile : indexUrl);
-        urls.put("article", articleFile != null ? urlPrefix + "/" + articleFile : indexUrl);
-        urls.put("page", pageFile != null ? urlPrefix + "/" + pageFile : indexUrl);
-        return urls;
-    }
-
-    /**
-     * 在模板目录的 html 文件中定位页面文件：精确名优先，其次前缀匹配（可排除另一个前缀）
-     *
-     * @param name          页面类型名（如 article、article_list、page、index）
-     * @param excludePrefix 需要排除的文件名前缀（如定位 article 时排除 article_list），null 表示不排除
-     * @return 文件名，找不到返回 null（由调用方回退首页）
-     */
-    private String pickPageFile(List<String> htmlFiles, String name, String excludePrefix) {
-        if (htmlFiles.contains(name + ".html")) {
-            return name + ".html";
-        }
-        return htmlFiles.stream()
-                .filter(f -> f.startsWith(name))
-                .filter(f -> excludePrefix == null || !f.startsWith(excludePrefix))
-                .findFirst()
-                .orElse(null);
     }
 
     /**
@@ -261,70 +194,6 @@ public class AiTemplatePreviewController {
         response.setContentType(mediaType.toString());
         Files.copy(target, response.getOutputStream());
         response.getOutputStream().flush();
-    }
-
-    /**
-     * 构建指定会话模板的 FreeMarker 配置
-     *
-     * <p>注册的指令集 = mock 指令（内置指令的演示数据实现）+ 未知指令兜底（输出注释），
-     * 不注册任何真实指令 bean，预览渲染完全不查数据库。</p>
-     *
-     * <p><b>不做配置缓存</b>：预览目录的文件随时会被 AI 重新生成（新增/修改/删除），
-     * 缓存失效判断（目录 mtime、文件 mtime、未知指令扫描结果）任何一项过期都会导致
-     * 预览读到旧内容或漏注册兜底指令。预览是低频操作，每次请求重建配置（毫秒级），
-     * 同时设置 templateUpdateDelay=0 让模板文件修改立即生效。</p>
-     */
-    private Configuration getConfiguration(String staticBase, Path workDir, Map<String, String> pageUrls)
-            throws IOException, freemarker.template.TemplateModelException {
-
-        Configuration cfg = new Configuration(Configuration.DEFAULT_INCOMPATIBLE_IMPROVEMENTS);
-        cfg.setDirectoryForTemplateLoading(workDir.toFile());
-        cfg.setDefaultEncoding(StandardCharsets.UTF_8.name());
-        cfg.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
-        cfg.setNumberFormat("0");
-        // 模板文件修改后立即生效（AI 微调模板后无需等待缓存过期）
-        cfg.setTemplateUpdateDelay(0);
-
-        // mock 指令集：内置指令的演示数据实现 + ctx() 指向预览静态资源分支
-        Map<String, Object> shared = AiTemplatePreviewMockSupport.buildSharedVariables(staticBase, pageUrls);
-
-        // 兜底：扫描模板中出现的其余指令名，注册占位实现，避免未知指令导致渲染 500
-        for (String name : scanDirectiveNames(workDir)) {
-            shared.computeIfAbsent(name, AiTemplatePreviewMockSupport::unknownDirective);
-        }
-
-        for (Map.Entry<String, Object> entry : shared.entrySet()) {
-            cfg.setSharedVariable(entry.getKey(), entry.getValue());
-        }
-
-        return cfg;
-    }
-
-    /**
-     * 扫描工作目录下所有模板文件中出现的自定义指令名
-     *
-     * <p>不止扫描当前渲染的文件：<#import>/<#include> 引入的 _layout.html、_articlePage.html
-     * 中的指令同样会在渲染时执行。</p>
-     */
-    private Set<String> scanDirectiveNames(Path workDir) {
-        Set<String> names = new HashSet<>();
-        try (Stream<Path> stream = Files.walk(workDir)) {
-            stream.filter(p -> p.toString().toLowerCase().endsWith(".html") && Files.isRegularFile(p))
-                    .forEach(p -> {
-                        try {
-                            String content = Files.readString(p, StandardCharsets.UTF_8);
-                            Matcher matcher = DIRECTIVE_PATTERN.matcher(content);
-                            while (matcher.find()) {
-                                names.add(matcher.group(1));
-                            }
-                        } catch (IOException e) {
-                            log.warn("扫描模板指令失败，跳过文件: {}", p, e);
-                        }
-                    });
-        } catch (IOException e) {
-            log.warn("扫描预览目录失败: {}", workDir, e);
-        }
-        return names;
     }
 
     /**

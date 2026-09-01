@@ -19,8 +19,9 @@ package com.fastcms.core.template;
 import org.pf4j.util.FileUtils;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -67,8 +68,11 @@ public class DefaultTemplateFinder implements TemplateFinder {
 				return null;
 			}
 
-			try (InputStream input = Files.newInputStream(propertiesPath)) {
-				properties.load(input);
+			// 必须 UTF-8 读取：Properties.load(InputStream) 固定按 ISO-8859-1 解码，
+			// AI 生成的模板元信息为 UTF-8 中文（如描述），用 InputStream 重载会乱码；
+			// load(Reader) 对 unicode 转义（反斜杠u形式）写法同样兼容
+			try (BufferedReader reader = Files.newBufferedReader(propertiesPath, StandardCharsets.UTF_8)) {
+				properties.load(reader);
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}

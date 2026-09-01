@@ -1,156 +1,285 @@
 <#import '_layout.html' as layout>
-<@layout.header '首页'>
+<@layout.header 'FastCMS -现代化内容管理系统'>
 <style>
-:root{--primary:#2563eb;--text:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#fff;--line:#e2e8f0}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.6}
-.container{max-width:1120px;margin:0 auto;padding:020px}
-.hero{background:linear-gradient(135deg,#eff6ff0%,#f8fafc100%);border-bottom:1px solid var(--line)}
-.hero-inner{padding:80px0;display:flex;align-items:center;gap:40px}
-.hero-copy{flex:1}
-.hero h1{margin:0016px;font-size:44px;line-height:1.2}
-.hero p{margin:0024px;color:var(--muted);font-size:18px;max-width:640px}
-.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
-.btn{display:inline-block;padding:12px22px;border-radius:999px;text-decoration:none;font-weight:600}
-.btn-primary{background:var(--primary);color:#fff}
-.btn-ghost{border:1px solid var(--line);color:var(--text);background:#fff}
-.hero-visual{flex:00320px;height:240px;border-radius:24px;background:linear-gradient(135deg,#2563eb,#60a5fa);opacity:.9}
-.section{padding:64px0}
-.section-head{margin-bottom:28px}
-.section-head h2{margin:008px;font-size:30px}
-.section-head p{margin:0;color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:010px30px rgba(15,23,42,.04)}
-.card h3{margin:0010px;font-size:20px}
-.card p{margin:0012px;color:var(--muted)}
-.card a{color:var(--primary);text-decoration:none;font-weight:600}
-.news-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.news-card{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
-.news-thumb{height:160px;background:linear-gradient(135deg,#e0f2fe,#dbeafe)}
-.news-thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.news-body{padding:18px}
-.news-body time{color:var(--muted);font-size:13px}
-.news-body h3{margin:8px0;font-size:18px}
-.news-body h3 a{color:var(--text);text-decoration:none}
-.news-body p{margin:0;color:var(--muted);font-size:14px}
-.about-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:32px;align-items:start}
-.about-links{list-style:none;margin:0;padding:0;display:grid;gap:12px}
-.about-links a{display:block;padding:14px16px;background:#fff;border:1px solid var(--line);border-radius:14px;text-decoration:none;color:var(--text)}
-.about-links a:hover{color:var(--primary);border-color:var(--primary)}
-.empty{color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:14px;padding:20px;text-align:center}
-@media(max-width:900px){.hero-inner{padding:56px0;flex-direction:column;align-items:flex-start}.hero h1{font-size:34px}.hero-visual{width:100%;height:180px}.grid,.news-list{grid-template-columns:repeat(2,1fr)}.about-grid{grid-template-columns:1fr}}
-@media(max-width:600px){.section{padding:44px0}.grid,.news-list{grid-template-columns:1fr}.hero h1{font-size:28px}.hero-actions .btn{width:100%;text-align:center}}
+.cms-hero{padding:100px080px;background:linear-gradient(180deg,#0f172a0%,#1e293b100%);color:#fff;position:relative;overflow:hidden}
+.cms-hero::before{content:'';position:absolute;top:-50%;right:-20%;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(59,130,246,.15)0%,transparent70%)}
+.cms-hero::after{content:'';position:absolute;bottom:-30%;left:-10%;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(52,211,153,.1)0%,transparent70%)}
+.cms-hero-inner{display:grid;grid-template-columns:1.2fr1fr;gap:48px;align-items:center;position:relative;z-index:1}
+.cms-hero-badge{display:inline-flex;align-items:center;gap:6px;padding:6px14px;border-radius:999px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.3);color:#60a5fa;font-size:13px;font-weight:600;margin-bottom:20px}
+.cms-hero-title{font-size:48px;line-height:1.15;margin:0020px;font-weight:800;letter-spacing:-.02em}
+.cms-hero-title span{background:linear-gradient(135deg,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.cms-hero-sub{font-size:18px;color:#94a3b8;line-height:1.8;margin:0032px;max-width:520px}
+.cms-hero-actions{display:flex;gap:14px;flex-wrap:wrap}
+.cms-hero-btn{display:inline-flex;align-items:center;gap:8px;padding:14px28px;border-radius:10px;font-weight:700;font-size:15px;text-decoration:none;transition:all .2s}
+.cms-hero-btn-primary{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;box-shadow:04px20px rgba(59,130,246,.4)}
+.cms-hero-btn-primary:hover{transform:translateY(-2px);box-shadow:08px30px rgba(59,130,246,.5)}
+.cms-hero-btn-ghost{border:1px solid #334155;color:#e2e8f0;background:rgba(255,255,255,.05)}
+.cms-hero-btn-ghost:hover{border-color:#60a5fa;color:#fff;background:rgba(96,165,250,.1)}
+.cms-hero-code{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:24px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:13px;line-height:1.8;color:#e2e8f0;box-shadow:020px60px rgba(0,0,0,.3)}
+.cms-hero-code-header{display:flex;gap:8px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #334155}
+.cms-hero-code-dot{width:12px;height:12px;border-radius:50%}
+.cms-hero-code-dot:nth-child(1){background:#ef4444}
+.cms-hero-code-dot:nth-child(2){background:#f59e0b}
+.cms-hero-code-dot:nth-child(3){background:#22c55e}
+.cms-code-line{margin:0;white-space:pre}
+.cms-code-keyword{color:#c084fc}
+.cms-code-string{color:#34d399}
+.cms-code-tag{color:#60a5fa}
+.cms-code-attr{color:#fbbf24}
+.cms-code-comment{color:#64748b}
+.cms-section{padding:80px0}
+.cms-section-alt{background:linear-gradient(180deg,#f8fafc0%,#eff6ff100%)}
+.cms-section-dark{background:#0f172a;color:#fff}
+.cms-section-head{text-align:center;margin-bottom:48px}
+.cms-section-head h2{font-size:34px;margin:0012px;color:#0f172a;letter-spacing:-.01em}
+.cms-section-dark .cms-section-head h2{color:#fff}
+.cms-section-head p{color:#64748b;margin:0;font-size:16px;max-width:600px;margin-inline:auto}
+.cms-section-dark .cms-section-head p{color:#94a3b8}
+.cms-features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.cms-feature-card{padding:28px;border-radius:16px;border:1px solid #e2e8f0;background:#fff;transition:all .25s}
+.cms-feature-card:hover{transform:translateY(-4px);box-shadow:012px40px rgba(15,23,42,.08);border-color:#bfdbfe}
+.cms-feature-icon{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;margin-bottom:16px;font-size:22px}
+.cms-feature-icon-blue{background:#dbeafe;color:#2563eb}
+.cms-feature-icon-green{background:#d1fae5;color:#059669}
+.cms-feature-icon-purple{background:#ede9fe;color:#7c3aed}
+.cms-feature-icon-orange{background:#ffedd5;color:#ea580c}
+.cms-feature-icon-pink{background:#fce7f3;color:#db2777}
+.cms-feature-icon-cyan{background:#cffafe;color:#0891b2}
+.cms-feature-card h3{margin:008px;font-size:17px;color:#0f172a}
+.cms-feature-card p{margin:0;color:#64748b;font-size:14px;line-height:1.7}
+.cms-plugins-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+.cms-plugin-entry{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:36px;text-align:center;transition:all .25s;display:block;text-decoration:none}
+.cms-plugin-entry:hover{transform:translateY(-4px);box-shadow:012px40px rgba(15,23,42,.1);border-color:#3b82f6}
+.cms-plugin-entry-icon{width:64px;height:64px;border-radius:16px;display:grid;place-items:center;margin:0 auto16px;font-size:28px}
+.cms-plugin-entry-icon-free{background:#d1fae5;color:#059669}
+.cms-plugin-entry-icon-paid{background:#fef3c7;color:#d97706}
+.cms-plugin-entry h3{margin:008px;font-size:20px;color:#0f172a}
+.cms-plugin-entry p{margin:0016px;color:#64748b;font-size:14px;line-height:1.6}
+.cms-plugin-entry-link{color:#2563eb;font-weight:700;font-size:14px}
+.cms-releases-list{display:grid;gap:14px;max-width:800px;margin:0 auto}
+.cms-release-item{display:grid;grid-template-columns:auto1fr auto;gap:20px;align-items:center;padding:20px24px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;transition:all .2s}
+.cms-release-item:hover{border-color:#bfdbfe;background:#f8fafc}
+.cms-release-version{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;padding:6px14px;border-radius:8px;font-weight:700;font-size:13px;font-family:monospace;white-space:nowrap}
+.cms-release-info h3{margin:004px;font-size:15px;color:#0f172a}
+.cms-release-info h3 a{color:inherit;text-decoration:none}
+.cms-release-info h3 a:hover{color:#2563eb}
+.cms-release-info p{margin:0;color:#64748b;font-size:13px}
+.cms-release-date{color:#94a3b8;font-size:13px;white-space:nowrap}
+.cms-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;text-align:center}
+.cms-stat-item .cms-stat-num{font-size:40px;font-weight:800;background:linear-gradient(135deg,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0}
+.cms-stat-item .cms-stat-label{color:#94a3b8;font-size:14px;margin:8px00}
+.cms-news-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.cms-news-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;transition:all .25s;display:block;text-decoration:none}
+.cms-news-card:hover{transform:translateY(-4px);box-shadow:012px40px rgba(15,23,42,.08)}
+.cms-news-thumb{height:160px;background:linear-gradient(135deg,#dbeafe,#e0f2fe);display:grid;place-items:center;color:#3b82f6;font-weight:700;font-size:14px;letter-spacing:.1em;overflow:hidden}
+.cms-news-thumb img{width:100%;height:100%;object-fit:cover}
+.cms-news-body{padding:20px}
+.cms-news-body time{color:#94a3b8;font-size:13px}
+.cms-news-body h3{margin:8px0;font-size:16px;line-height:1.4;color:#0f172a}
+.cms-news-card:hover .cms-news-body h3{color:#2563eb}
+.cms-news-body p{margin:0;color:#64748b;font-size:14px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cms-cta{padding:80px0;background:linear-gradient(135deg,#1e3a5f0%,#0f172a100%);text-align:center;color:#fff}
+.cms-cta h2{font-size:32px;margin:0012px}
+.cms-cta p{color:#94a3b8;margin:0028px;font-size:16px}
+.cms-cta .cms-hero-btn{margin:06px}
+@media(max-width:960px){.cms-hero-inner{grid-template-columns:1fr}.cms-hero-title{font-size:36px}.cms-hero-code{display:none}.cms-features-grid{grid-template-columns:repeat(2,1fr)}.cms-plugins-grid{grid-template-columns:1fr}.cms-stats-grid{grid-template-columns:repeat(2,1fr)}.cms-news-grid{grid-template-columns:repeat(2,1fr)}.cms-release-item{grid-template-columns:1fr;gap:8px}.cms-release-date{display:none}}
+@media(max-width:600px){.cms-hero{padding:64px0}.cms-hero-title{font-size:28px}.cms-section{padding:56px0}.cms-section-head h2{font-size:26px}.cms-features-grid{grid-template-columns:1fr}.cms-news-grid{grid-template-columns:1fr}.cms-stats-grid{grid-template-columns:repeat(2,1fr)}.cms-stat-item .cms-stat-num{font-size:28px}.cms-cta h2{font-size:24px}}
 </style>
 </@layout.header>
 <@layout.body>
-<section class='hero'>
-<div class='container hero-inner'>
-<div class='hero-copy'>
-<h1>${seoTag('website_title')!'企业官网'}</h1>
-<p>${seoTag('website_sub_title')!'以现代、可靠、可持续的数字化能力，帮助企业提升效率、降低成本、创造增长。'}</p>
-<div class='hero-actions'>
-<a class='btn btn-primary' href='/page/services'>了解产品服务</a>
-<a class='btn btn-ghost' href='/page/about'>关于我们</a>
+<!-- Hero产品介绍 -->
+<section class='cms-hero'>
+<div class='container cms-hero-inner'>
+<div>
+<div class='cms-hero-badge'>🚀 FastCMS v3.0已发布</div>
+<h1 class='cms-hero-title'><span>FastCMS</span>现代化内容管理系统</h1>
+<p class='cms-hero-sub'>高性能、易扩展、SEO友好的 Java CMS。基于 FreeMarker模板引擎，支持插件架构，助力快速构建现代化网站。</p>
+<div class='cms-hero-actions'>
+<a class='cms-hero-btn cms-hero-btn-primary' href='/page/download'>⬇立即下载</a>
+<a class='cms-hero-btn cms-hero-btn-ghost' href='/page/docs'>📖开发文档</a>
 </div>
 </div>
-<div class='hero-visual' role='img' aria-label='企业数字化能力示意'></div>
+<div class='cms-hero-code' aria-hidden='true'>
+<div class='cms-hero-code-header'>
+<div class='cms-hero-code-dot'></div>
+<div class='cms-hero-code-dot'></div>
+<div class='cms-hero-code-dot'></div>
+</div>
+<p class='cms-code-line'><span class='cms-code-comment'>&lt;!-- FastCMS模板语法 --&gt;</span></p>
+<p class='cms-code-line'><span class='cms-code-tag'>&lt;@articleListTag</span> <span class='cms-code-attr'>categoryId</span>=<span class='cms-code-string'>3</span> <span class='cms-code-attr'>count</span>=<span class='cms-code-string'>10</span><span class='cms-code-tag'> &gt;</span></p>
+<p class='cms-code-line'> <span class='cms-code-tag'>&lt;#list</span> data <span class='cms-code-keyword'>as</span> item<span class='cms-code-tag'>&gt;</span></p>
+<p class='cms-code-line'> <span class='cms-code-tag'>&lt;h2&gt;&lt;a</span> <span class='cms-code-attr'>href</span>=<span class='cms-code-string'>"${'$'}{item.url}"</span><span class='cms-code-tag'>&gt;</span></p>
+<p class='cms-code-line'> ${'$'}{item.title}</p>
+<p class='cms-code-line'> <span class='cms-code-tag'>&lt;/a&gt;&lt;/h2&gt;</span></p>
+<p class='cms-code-line'> <span class='cms-code-tag'>&lt;/#list&gt;</span></p>
+<p class='cms-code-line'><span class='cms-code-tag'>&lt;/@articleListTag&gt;</span></p>
+</div>
 </div>
 </section>
-<section class='section' id='services'>
+
+<!--核心特性 -->
+<section class='cms-section' id='features'>
 <div class='container'>
-<div class='section-head'>
-<h2>产品服务</h2>
-<p>围绕企业经营场景，提供覆盖咨询、实施、运营与优化的完整解决方案。</p>
+<div class='cms-section-head'>
+<h2>核心特性</h2>
+<p>为现代 Web开发打造的全功能 CMS引擎</p>
 </div>
-<@categoryList>
-<#if data?? && (data?size >0)>
-<div class='grid'>
-<#list data as item>
-<article class='card'>
-<h3><a href='${item.url!}'>${item.title!}</a></h3>
-<p>点击了解该服务或产品线的详细说明、适用场景与交付能力。</p>
-<a href='${item.url!}'>查看详情</a>
+<div class='cms-features-grid'>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-blue'>⚡</div>
+<h3>高性能模板引擎</h3>
+<p>基于 FreeMarker深度优化，模板编译缓存 +异步渲染，页面响应时间 &lt;50ms。</p>
 </article>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-green'>🔌</div>
+<h3>插件架构</h3>
+<p>标准化插件 API，支持热加载与沙箱隔离，已有100+社区插件可即插即用。</p>
+</article>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-purple'>🔍</div>
+<h3>SEO深度优化</h3>
+<p>内置 Sitemap生成、结构化数据、OG标签、语义化 HTML，搜索引擎友好。</p>
+</article>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-orange'>📱</div>
+<h3>响应式设计</h3>
+<p>模板内置响应式 CSS框架，一套模板适配 PC、平板、手机全端展示。</p>
+</article>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-pink'>🌐</div>
+<h3>多语言支持</h3>
+<p>完善的 i18n体系，支持多语言站点、语言包管理与 URL语言路由。</p>
+</article>
+<article class='cms-feature-card'>
+<div class='cms-feature-icon cms-feature-icon-cyan'>🛡️</div>
+<h3>安全加固</h3>
+<p>XSS防护、CSRF Token、SQL注入防御、插件权限隔离，多重安全机制。</p>
+</article>
+</div>
+</div>
+</section>
+
+<!--插件中心 -->
+<section class='cms-section cms-section-alt' id='plugins'>
+<div class='container'>
+<div class='cms-section-head'>
+<h2>插件中心</h2>
+<p>丰富的插件生态，满足各种业务场景需求</p>
+</div>
+<div class='cms-plugins-grid'>
+<a class='cms-plugin-entry' href='/article/category/1'>
+<div class='cms-plugin-entry-icon cms-plugin-entry-icon-free'>🆓</div>
+<h3>免费插件</h3>
+<p>SEO优化、多语言、统计分析、图片压缩等实用插件，全部免费开源，支持社区共建。</p>
+<span class='cms-plugin-entry-link'>浏览免费插件 →</span>
+</a>
+<a class='cms-plugin-entry' href='/article/category/2'>
+<div class='cms-plugin-entry-icon cms-plugin-entry-icon-paid'>💎</div>
+<h3>付费插件</h3>
+<p>电商支付、会员系统、内容付费、高级权限等专业插件，提供企业级技术支持。</p>
+<span class='cms-plugin-entry-link'>浏览付费插件 →</span>
+</a>
+</div>
+</div>
+</section>
+
+<!--版本发布 -->
+<section class='cms-section' id='releases'>
+<div class='container'>
+<div class='cms-section-head'>
+<h2>版本发布</h2>
+<p>持续迭代，保持最佳体验</p>
+</div>
+<@articleListTag categoryId=3 orderBy='created' count=5>
+<#if data?? && data?is_sequence && (data?size >0)>
+<div class='cms-releases-list'>
+<#list data as item>
+<#if item?? && item?is_hash>
+<div class='cms-release-item'>
+<span class='cms-release-version'>v${((item.title)!'')?replace('FastCMS','')?substring(0,10)}</span>
+<div class='cms-release-info'>
+<h3><a href='${(item.url)!''}'>${(item.title)!''}</a></h3>
+<p>${(item.summary)!''}</p>
+</div>
+<time class='cms-release-date'><@formatTime value=(item.created)! format='yyyy-MM-dd'/></time>
+</div>
+</#if>
 </#list>
 </div>
 <#else>
-<div class='grid'>
-<article class='card'>
-<h3>数字化咨询</h3>
-<p>梳理业务流程与数据资产，制定可落地的数字化路线图。</p>
-<a href='/page/services'>了解更多</a>
-</article>
-<article class='card'>
-<h3>平台建设</h3>
-<p>提供官网、营销系统、业务中台等建设服务，支持快速上线。</p>
-<a href='/page/services'>了解更多</a>
-</article>
-<article class='card'>
-<h3>运营优化</h3>
-<p>基于数据分析持续优化转化、效率与用户体验。</p>
-<a href='/page/services'>了解更多</a>
-</article>
-</div>
-</#if>
-</@categoryList>
-</div>
-</section>
-<section class='section' id='news'>
-<div class='container'>
-<div class='section-head'>
-<h2>新闻动态</h2>
-<p>了解公司最新进展、行业观察与客户案例。</p>
-</div>
-<@articleListTag orderBy='created' count=6>
-<#if data?? && (data?size >0)>
-<ul class='news-list'>
-<#list data as item>
-<li>
-<article class='news-card'>
-<#if item.thumbnail?? && item.thumbnail?has_content>
-<div class='news-thumb'><a href='${item.url!}'><img src='${item.thumbnail}' alt='${item.title!}'></a></div>
-<#else>
-<div class='news-thumb' aria-hidden='true'></div>
-</#if>
-<div class='news-body'>
-<time><@formatTime value=(item.created)! format='yyyy-MM-dd'/></time>
-<h3><a href='${item.url!}'>${item.title!}</a></h3>
-<p>${item.summary!''}</p>
-</div>
-</article>
-</li>
-</#list>
-</ul>
-<#else>
-<p class='empty'>暂无新闻动态，敬请期待。</p>
+<p style='text-align:center;color:#64748b'>暂无版本发布信息</p>
 </#if>
 </@articleListTag>
 </div>
 </section>
-<section class='section' id='about'>
-<div class='container about-grid'>
-<div>
-<div class='section-head'>
-<h2>关于我们</h2>
-<p>我们致力于以技术驱动业务增长，帮助客户在变化中保持稳健与创新。</p>
+
+<!--数据统计 -->
+<section class='cms-section cms-section-dark' id='stats'>
+<div class='container'>
+<div class='cms-stats-grid'>
+<div class='cms-stat-item'>
+<p class='cms-stat-num'>50K+</p>
+<p class='cms-stat-label'>累计下载量</p>
 </div>
-<p>公司汇聚产品、技术、设计与咨询团队，长期服务于多个行业，重视长期价值与持续交付。</p>
-<p>${seoTag('website_phone')!'联系电话：400-000-0000'} · ${seoTag('website_email')!'电子邮箱：contact@example.com'}</p>
+<div class='cms-stat-item'>
+<p class='cms-stat-num'>100+</p>
+<p class='cms-stat-label'>社区插件</p>
 </div>
-<@singlePageList>
-<#if data?? && (data?size >0)>
-<ul class='about-links'>
+<div class='cms-stat-item'>
+<p class='cms-stat-num'>10K+</p>
+<p class='cms-stat-label'>GitHub Stars</p>
+</div>
+<div class='cms-stat-item'>
+<p class='cms-stat-num'>99.9%</p>
+<p class='cms-stat-label'>服务可用性</p>
+</div>
+</div>
+</div>
+</section>
+
+<!--最新动态 -->
+<section class='cms-section cms-section-alt' id='news'>
+<div class='container'>
+<div class='cms-section-head'>
+<h2>最新动态</h2>
+<p>了解 FastCMS的最新进展与社区资讯</p>
+</div>
+<@articleListTag orderBy='created' count=6>
+<#if data?? && data?is_sequence && (data?size >0)>
+<div class='cms-news-grid'>
 <#list data as item>
-<li><a href='${item.url!}'>${item.title!}</a></li>
-</#list>
-</ul>
+<#if item?? && item?is_hash>
+<a class='cms-news-card' href='${(item.url)!''}'>
+<#if (item.thumbnail)?? && (item.thumbnail?has_content)>
+<div class='cms-news-thumb'><img src='${item.thumbnail}' alt='${(item.title)!''}'></div>
 <#else>
-<ul class='about-links'>
-<li><a href='/page/about'>公司简介</a></li>
-<li><a href='/page/contact'>联系方式</a></li>
-</ul>
+<div class='cms-news-thumb'>FASTCMS</div>
 </#if>
-</@singlePageList>
+<div class='cms-news-body'>
+<time><@formatTime value=(item.created)! format='yyyy-MM-dd'/></time>
+<h3>${(item.title)!''}</h3>
+<p>${(item.summary)!''}</p>
+</div>
+</a>
+</#if>
+</#list>
+</div>
+<#else>
+<p style='text-align:center;color:#64748b'>暂无动态信息</p>
+</#if>
+</@articleListTag>
+</div>
+</section>
+
+<!-- CTA -->
+<section class='cms-cta'>
+<div class='container'>
+<h2>开始使用 FastCMS</h2>
+<p>开源免费，5分钟即可搭建你的第一个网站</p>
+<div>
+<a class='cms-hero-btn cms-hero-btn-primary' href='/page/download'>⬇下载 FastCMS</a>
+<a class='cms-hero-btn cms-hero-btn-ghost' href='/page/docs'>📖阅读文档</a>
+</div>
 </div>
 </section>
 </@layout.body>

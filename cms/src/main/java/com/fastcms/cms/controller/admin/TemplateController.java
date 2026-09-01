@@ -76,9 +76,11 @@ public class TemplateController {
     private IMenuService menuService;
 
     /**
-     * 允许在线编辑的文件后缀（读取与保存共用同一白名单，防止保存接口绕过后缀限制覆写任意文件）
+     * 允许在线编辑的文件后缀（读取与保存共用同一白名单，防止保存接口绕过后缀限制覆写任意文件）。
+     * json/properties：AI 模板生成的 _preview_data.json（预览演示数据）与
+     * _template.properties（模板元信息）均需在线可编辑
      */
-    private static final List<String> EDITABLE_SUFFIX = Arrays.asList(".html", ".js", ".css", ".txt");
+    private static final List<String> EDITABLE_SUFFIX = Arrays.asList(".html", ".js", ".css", ".txt", ".json", ".properties");
 
     /**
      * 模板列表

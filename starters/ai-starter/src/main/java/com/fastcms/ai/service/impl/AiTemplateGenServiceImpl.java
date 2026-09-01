@@ -30,6 +30,7 @@ import com.fastcms.ai.template.AiTemplateResponseParser;
 import com.fastcms.ai.template.AiTemplateSessionRequest;
 import com.fastcms.ai.template.IAiTemplateGenService;
 import com.fastcms.ai.template.TemplateGenPromptBuilder;
+import com.fastcms.ai.support.FileProgressScanner;
 import com.fastcms.ai.support.ReplyStreamExtractor;
 import com.fastcms.ai.tool.AiToolCallbackProvider;
 import com.fastcms.common.utils.DirUtils;
@@ -108,6 +109,45 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      */
     @Value("${fastcms.ai.template.preview-root:}")
     private String previewRootConfig;
+
+    /**
+     * 调整型会话渲染校验失败后的自动修复轮数上限（每轮都会把渲染错误反馈给模型）
+     */
+    private static final int MAX_RENDER_FIX_ATTEMPTS = 2;
+
+    /**
+     * 从（可能被截断的）响应原文中救出 reply 字段值
+     *
+     * <p>reply 字段位于响应 JSON 开头、通常在截断点之前就已输出完整。
+     * 用正则提取字符串值（处理常见转义），救不出返回 null。</p>
+     */
+    private String extractReplySalvage(String fullResponse) {
+        if (fullResponse == null) {
+            return null;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"reply\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+                .matcher(fullResponse);
+        if (m.find()) {
+            return m.group(1)
+                    .replace("\\n", "\n")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\");
+        }
+        return null;
+    }
+
+    /**
+     * 调整型会话单轮输出上限收紧值：调整是"改文件"任务，收紧上限让思考吃满时
+     * 尽早暴露（触发翻倍重试），避免长时间无产出等待
+     */
+    private static final int ADJUST_MAX_TOKENS_CAP = 8192;
+
+    /**
+     * 预览渲染引擎（渲染校验与预览页面共用同一管线）
+     */
+    @Autowired
+    private com.fastcms.ai.template.AiTemplatePreviewRenderer previewRenderer;
 
     /**
      * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）
@@ -193,6 +233,29 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Override
     public AiTemplateSession getSession(String sessionId) {
         return sessionService.getBySessionId(sessionId);
+    }
+
+    @Override
+    public Path resolveEffectiveWorkDir(AiTemplateSession session) {
+        if (!StringUtils.hasText(session.getWorkDir())) {
+            throw new IllegalArgumentException("会话未记录工作目录: " + session.getSessionId());
+        }
+        // 调整型会话：会话存储的绝对路径可能因模板目录迁移而失效（如 templates 模块移除后
+        // target/classes 不复存在），按模板 ID 实时解析当前正式模板目录
+        if (StringUtils.hasText(session.getTemplateId())) {
+            Template template = templateService.getTemplate(session.getTemplateId());
+            if (template != null && template.getTemplatePath() != null) {
+                Path current = template.getTemplatePath();
+                if (!Paths.get(session.getWorkDir()).equals(current)) {
+                    log.info("调整型会话工作目录已迁移，自动修正: sessionId={}, {} -> {}",
+                            session.getSessionId(), session.getWorkDir(), current);
+                    session.setWorkDir(current.toString());
+                    sessionService.updateById(session);
+                }
+                return current;
+            }
+        }
+        return Paths.get(session.getWorkDir());
     }
 
     @Override
@@ -374,7 +437,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         String userPrompt;
         if (StringUtils.hasText(session.getTemplateId())) {
             // 调整型会话：每一轮都携带正式模板当前文件内容（用户可能在两轮之间手工修改过）
-            String currentFilesWithContent = buildTemplateFileSection(Paths.get(session.getWorkDir()));
+            String currentFilesWithContent = buildTemplateFileSection(resolveEffectiveWorkDir(session));
             // 归一化当前文件路径（去掉模板目录前缀，与文件清单中的相对路径一致），注入提示词让 AI 聚焦用户当前页面
             String normalizedCurrentFile = normalizeRelativePath(currentFile, session.getWorkDir());
             userPrompt = promptBuilder.buildAdjustPrompt(userInput, currentFilesWithContent, normalizedCurrentFile);
@@ -385,116 +448,190 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
         messages.add(new UserMessage(userPrompt));
 
-        // 6. 调用 ChatClient 流式接口（Spring AI stream()）：
-        //    AI 返回的是结构化 JSON（{reply, files}），通过 ReplyStreamExtractor 增量提取
-        //    reply 字段的自然语言文本实时推送给前端（打字机效果），
-        //    同时聚合完整响应到缓冲区——必须等完整响应才能解析文件。
-        //    推理模型（Qwen3/DeepSeek-R1 等）会先输出 reasoning_content 思考过程，
-        //    Spring AI 将其透传到 AssistantMessage.metadata["reasoningContent"]，
-        //    这里同样增量推送给前端实时展示
-        ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
-        // Spring AI 透传的 reasoningContent 是"累积值"（每个 chunk 带到当前为止的完整思考文本），
-        // 做差分后仅推送新增部分
-        StringBuilder reasoningBuf = new StringBuilder();
-        long[] roundUsage = new long[3];
-        // 调整/微调轮同样走统一 options（显式 model + Qwen3 reasoning_effort=low）。
-        // 实测（TEMPLATE_ADJUST 用量记录）：Qwen3.6 全力思考可把 completion 吃满 maxTokens
-        // （8774 输入 / 16384 输出 / 耗时 6.4 分钟，正文一个 token 未出），最终只能报"AI 返回空响应"
-        String fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
-                buildPipelineOptions(modelConfig, null));
+        // 6~9. 模型调用 → 解析 → 写盘 → 渲染校验。
+        //      调整型会话在写盘后立即用预览渲染引擎校验本轮改动的 html 文件，
+        //      渲染失败（FreeMarker 报错）时把错误反馈给模型自动修复（最多 MAX_RENDER_FIX_ATTEMPTS 轮），
+        //      避免"AI 自称已修复但页面实际渲染失败"的盲改循环
+        boolean isAdjust = StringUtils.hasText(session.getTemplateId());
+        long[] usageTotal = new long[3];
+        int totalFiles = 0;
+        // 调整型会话收紧输出上限：调整是"改文件"任务，不需要深度推理。
+        // 全量思考可把 completion 吃满 maxTokens（实测 16384 输出 / 耗时 6.4 分钟，正文一个字未出），
+        // 压到 ADJUST_MAX_TOKENS_CAP 让"思考吃满"尽早暴露并触发翻倍重试，不再白等十几分钟
+        Integer roundMaxTokens = isAdjust && modelConfig.getMaxTokens() != null
+                ? Math.min(modelConfig.getMaxTokens(), ADJUST_MAX_TOKENS_CAP)
+                : null;
+        int effectiveMaxTokens = roundMaxTokens != null ? roundMaxTokens
+                : (modelConfig.getMaxTokens() != null ? modelConfig.getMaxTokens() : 0);
+        // 文件级进度状态：files 流式传输期间每识别出一个文件路径即推送一次状态
+        // （已存在 → "正在修改 xxx…"，不存在 → "正在生成 xxx…"，与写盘动作的真实语义一致）
+        java.util.function.Function<String, String> fileStatusResolver = path -> {
+            Path dir = resolveEffectiveWorkDir(session);
+            boolean exists = StringUtils.hasText(path) && Files.exists(dir.resolve(path).normalize());
+            return (exists ? "正在修改 " : "正在生成 ") + path + "…";
+        };
+        for (int round = 0; ; round++) {
+            ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
+            // Spring AI 透传的 reasoningContent 是"累积值"（每个 chunk 带到当前为止的完整思考文本），
+            // 做差分后仅推送新增部分
+            StringBuilder reasoningBuf = new StringBuilder();
+            long[] roundUsage = new long[3];
+            // 调整/微调轮同样走统一 options（显式 model + Qwen3 reasoning_effort=low）。
+            // 实测（TEMPLATE_ADJUST 用量记录）：Qwen3.6 全力思考可把 completion 吃满 maxTokens
+            // （8774 输入 / 16384 输出 / 耗时 6.4 分钟，正文一个 token 未出），最终只能报"AI 返回空响应"
+            String fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
+                    buildPipelineOptions(modelConfig, roundMaxTokens), fileStatusResolver);
 
-        // 空响应兜底重试：思考吃满 maxTokens 导致正文为空时（roundUsage[1] 即 completion，
-        // 顶到配置上限即为该情形），翻倍上限重试一次，给正文留出输出空间。
-        // 使用全新的 extractor/reasoning 缓冲：上一轮的思考文本不拼进本轮前端流
-        if (!StringUtils.hasText(fullResponse)
-                && modelConfig.getMaxTokens() != null
-                && roundUsage[1] >= modelConfig.getMaxTokens()) {
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
-                    "\n（思考耗尽输出上限，正在提升上限重试…）");
-            replyExtractor = new ReplyStreamExtractor();
-            reasoningBuf = new StringBuilder();
-            fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
-                    buildPipelineOptions(modelConfig, Math.max(modelConfig.getMaxTokens() * 2, 32768)));
-        }
-        lastUsage[0] = aggregateUsage(roundUsage);
-        if (!StringUtils.hasText(fullResponse)) {
-            // 与异常路径一致：失败原因落库（前端刷新后仍能显示失败态与重新生成入口）
-            messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
-                    AiTemplateConstants.MSG_FAIL_PREFIX + "AI 返回空响应（思考过程可能耗尽了输出上限）");
-            sendError(emitter, "AI 返回空响应");
-            return;
-        }
+            // 先解析（空响应时为 null）：截断重试的判定需要解析结果参与
+            AiTemplateResponseParser.ParseResult parsed = StringUtils.hasText(fullResponse)
+                    ? responseParser.parseResponse(fullResponse) : null;
 
-        // 完整思考过程（非推理模型为 null，不落库占位）
-        String reasoningText = reasoningBuf.length() > 0 ? reasoningBuf.toString() : null;
-
-        // 6. 解析响应（reply 自然语言 + files 文件列表，兼容旧版纯数组格式）
-        AiTemplateResponseParser.ParseResult parsed = responseParser.parseResponse(fullResponse);
-        String reply = parsed.getReply();
-        List<AiTemplateFileDto> files = parsed.getFiles();
-        boolean hasReply = StringUtils.hasText(reply);
-        boolean hasFiles = !files.isEmpty();
-
-        if (!hasFiles && !hasReply) {
-            log.warn("AI 响应未解析出任何文件与回复: sessionId={}", session.getSessionId());
-            // 仍保存原始响应作为 assistant 消息
-            messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, fullResponse, reasoningText);
-            sendDone(emitter, "AI 响应未包含可识别的文件内容，请尝试重新描述需求");
-            return;
-        }
-
-        // 7. 保存 assistant 消息（先于文件写入：调整型会话的文件备份以消息ID为回滚粒度），
-        //    优先保存 reply（自然语言摘要，避免巨型 JSON 挤占后续对话上下文），
-        //    同时保存推理模型的完整思考过程（刷新页面后仍可回看，buildMessages 不会将其注入 prompt）
-        String assistantMsg = hasReply ? reply : "已生成 " + files.size() + " 个文件";
-        AiTemplateMessage assistantMessage = messageService.saveMessage(
-                session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, assistantMsg, reasoningText);
-
-        // 8. 持久化文件并写入工作目录（调整型会话写前自动备份到 ai_template_file_backup）
-        int successCount = 0;
-        if (hasFiles) {
-            for (AiTemplateFileDto file : files) {
-                try {
-                    // 持久化到数据库
-                    fileService.saveOrUpdateFile(
-                            session.getSessionId(),
-                            file.getPath(),
-                            file.getContent() == null ? "" : file.getContent(),
-                            file.getAction());
-
-                    // 写入工作目录（生成型=预览目录；调整型=正式模板目录+备份）
-                    writeToFile(session, file, assistantMessage.getId());
-
-                    // 推送文件事件给前端
-                    sendFileEvent(emitter, file);
-
-                    successCount++;
-                } catch (Exception e) {
-                    log.warn("文件写入失败: sessionId={}, path={}", session.getSessionId(), file.getPath(), e);
+            // 截断兜底重试：输出顶满生效上限（两种情形：思考吃满导致正文为空；
+            // 或一次性输出大量文件内容导致 JSON 中途被截断、reply/files 均解析失败——
+            // 实测 7 个文件完整 JSON 超 8k 上限即触发），翻倍上限重试一次，给正文留出输出空间。
+            // 使用全新的 extractor/reasoning 缓冲：上一轮的思考文本不拼进本轮前端流
+            boolean parseFailed = parsed == null
+                    || (!StringUtils.hasText(parsed.getReply()) && parsed.getFiles().isEmpty());
+            if (parseFailed && effectiveMaxTokens > 0 && roundUsage[1] >= effectiveMaxTokens) {
+                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n（输出达到上限（思考耗尽或文件内容被截断），正在提升上限重试…）");
+                replyExtractor = new ReplyStreamExtractor();
+                reasoningBuf = new StringBuilder();
+                fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
+                        buildPipelineOptions(modelConfig, Math.max(effectiveMaxTokens * 2, 32768)), fileStatusResolver);
+                if (StringUtils.hasText(fullResponse)) {
+                    parsed = responseParser.parseResponse(fullResponse);
                 }
             }
-        }
-
-        // 兜底推送：流式期间未推送过 reply（如 AI 把 reply 放在 files 之后、或旧数组格式）时补推，
-        // 保证前端聊天区始终有内容
-        if (hasReply) {
-            if (!replyExtractor.wasEmitted()) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+            usageTotal[0] += roundUsage[0];
+            usageTotal[1] += roundUsage[1];
+            usageTotal[2] += roundUsage[2];
+            lastUsage[0] = aggregateUsage(usageTotal);
+            if (!StringUtils.hasText(fullResponse)) {
+                // 与异常路径一致：失败原因落库（前端刷新后仍能显示失败态与重新生成入口）
+                messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
+                        AiTemplateConstants.MSG_FAIL_PREFIX + "AI 返回空响应（思考过程可能耗尽了输出上限）");
+                sendError(emitter, "AI 返回空响应");
+                return;
             }
-        } else if (hasFiles) {
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "已生成 " + successCount + " 个文件");
-        }
 
-        // 9. 推送完成事件
-        String summary;
-        if (hasFiles) {
-            summary = hasReply ? reply : "生成完成，共 " + successCount + " 个文件";
-        } else {
-            // 纯对话场景（咨询/闲聊）：reply 即完整回复
-            summary = reply;
+            // 完整思考过程（非推理模型为 null，不落库占位）
+            String reasoningText = reasoningBuf.length() > 0 ? reasoningBuf.toString() : null;
+
+            String reply = parsed == null ? null : parsed.getReply();
+            List<AiTemplateFileDto> files = parsed == null ? List.of() : parsed.getFiles();
+            boolean hasReply = StringUtils.hasText(reply);
+            boolean hasFiles = !files.isEmpty();
+
+            if (!hasFiles && !hasReply) {
+                log.warn("AI 响应未解析出任何文件与回复: sessionId={}", session.getSessionId());
+                // 尝试从（可能被截断的）原始 JSON 中救出 reply 字段：reply 位于响应开头、通常完整，
+                // 救出后用户至少能看到 AI 说了什么；不再把原始全文存库（巨型 JSON 刷新后会
+                // 整坨显示在聊天区、还会污染后续对话注入的 prompt）
+                String salvagedReply = extractReplySalvage(fullResponse);
+                String failMsg = AiTemplateConstants.MSG_FAIL_PREFIX
+                        + "AI 响应解析失败（输出可能被截断，本轮文件未写盘）"
+                        + (salvagedReply == null ? "" : "。AI 回复：" + salvagedReply);
+                messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
+                        failMsg, reasoningText);
+                sendError(emitter, "AI 响应解析失败（输出被截断），已提示重试机制，请重试或简化本次改动范围");
+                return;
+            }
+
+            // 保存 assistant 消息（先于文件写入：调整型会话的文件备份以消息ID为回滚粒度），
+            // 优先保存 reply（自然语言摘要，避免巨型 JSON 挤占后续对话上下文），
+            // 同时保存推理模型的完整思考过程（刷新页面后仍可回看，buildMessages 不会将其注入 prompt）
+            String assistantMsg = hasReply ? reply : "已生成 " + files.size() + " 个文件";
+            AiTemplateMessage assistantMessage = messageService.saveMessage(
+                    session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, assistantMsg, reasoningText);
+
+            // 持久化文件并写入工作目录（调整型会话写前自动备份到 ai_template_file_backup）
+            int successCount = 0;
+            List<String> writtenHtmlPaths = new ArrayList<>();
+            if (hasFiles) {
+                for (AiTemplateFileDto file : files) {
+                    try {
+                        // 持久化到数据库
+                        fileService.saveOrUpdateFile(
+                                session.getSessionId(),
+                                file.getPath(),
+                                file.getContent() == null ? "" : file.getContent(),
+                                file.getAction());
+
+                        // 写入工作目录（生成型=预览目录；调整型=正式模板目录+备份）
+                        writeToFile(session, file, assistantMessage.getId());
+
+                        // 推送文件事件给前端
+                        sendFileEvent(emitter, file);
+
+                        // 记录本轮写入的 html（渲染校验对象；删除动作无文件可校验）
+                        if (file.getPath() != null
+                                && !"delete".equalsIgnoreCase(file.getAction())
+                                && file.getPath().toLowerCase().endsWith(".html")) {
+                            writtenHtmlPaths.add(file.getPath());
+                        }
+                        successCount++;
+                    } catch (Exception e) {
+                        log.warn("文件写入失败: sessionId={}, path={}", session.getSessionId(), file.getPath(), e);
+                    }
+                }
+            }
+            totalFiles += successCount;
+
+            // 渲染校验（仅调整型会话）：与预览共用同一渲染管线，预览能过校验必过
+            List<String> renderErrors = isAdjust && !writtenHtmlPaths.isEmpty()
+                    ? previewRenderer.checkRenderedFiles(resolveEffectiveWorkDir(session), writtenHtmlPaths)
+                    : List.of();
+
+            if (!renderErrors.isEmpty() && round < MAX_RENDER_FIX_ATTEMPTS) {
+                // 自动修复轮：把渲染错误（含文件与行号）反馈给模型，附带写盘后的最新文件内容
+                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n\n（检测到 " + renderErrors.size() + " 个文件渲染失败，正在自动修复…）\n");
+                if (hasReply && !replyExtractor.wasEmitted()) {
+                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+                }
+                messages.add(new org.springframework.ai.chat.messages.AssistantMessage(assistantMsg));
+                Path workDir = resolveEffectiveWorkDir(session);
+                messages.add(new UserMessage(promptBuilder.buildRenderFixPrompt(
+                        renderErrors, buildTemplateFileSection(workDir),
+                        normalizeRelativePath(currentFile, workDir.toString()))));
+                continue;
+            }
+
+            // 兜底推送：流式期间未推送过 reply（如 AI 把 reply 放在 files 之后、或旧数组格式）时补推，
+            // 保证前端聊天区始终有内容
+            if (hasReply) {
+                if (!replyExtractor.wasEmitted()) {
+                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+                }
+            } else if (hasFiles) {
+                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "已生成 " + successCount + " 个文件");
+            }
+
+            // 推送完成事件；自动修复后仍存在渲染错误时如实告知（不再谎报"已完成"）
+            String summary;
+            if (!renderErrors.isEmpty()) {
+                StringBuilder errSb = new StringBuilder();
+                for (int i = 0; i < renderErrors.size(); i++) {
+                    errSb.append(i + 1).append(". ").append(renderErrors.get(i)).append('\n');
+                }
+                String failNote = "已自动修复多轮，仍有 " + renderErrors.size()
+                        + " 个文件渲染失败：\n" + errSb
+                        + "可把上述错误信息发给 AI 继续修复，或手工修改对应文件。";
+                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n" + failNote);
+                messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, failNote);
+                summary = "完成，但仍有 " + renderErrors.size() + " 个文件渲染失败（详见消息）";
+            } else if (hasFiles) {
+                summary = hasReply ? reply : "生成完成，共 " + successCount + " 个文件";
+            } else {
+                // 纯对话场景（咨询/闲聊）：reply 即完整回复
+                summary = reply;
+            }
+            sendDone(emitter, truncate(summary, 100));
+            log.info("AI 模板生成对话完成: sessionId={}, files={}, renderErrors={}, fixRounds={}",
+                    session.getSessionId(), totalFiles, renderErrors.size(), round);
+            return;
         }
-        sendDone(emitter, truncate(summary, 100));
-        log.info("AI 模板生成对话完成: sessionId={}, files={}", session.getSessionId(), successCount);
     }
 
     /**
@@ -1005,7 +1142,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private String callModelRound(ChatClient chatClient, List<Message> messages, SseEmitter emitter,
                                   ReplyStreamExtractor replyExtractor, StringBuilder reasoningBuf, long[] usageAgg,
                                   OpenAiChatOptions optionsOverride) {
+        return callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, usageAgg, optionsOverride, null);
+    }
+
+    /**
+     * 带 options 覆盖与文件进度状态的单轮流式调用
+     *
+     * @param fileStatusResolver 文件路径 → 状态文本（如"正在生成 index.html…"），
+     *                           传 null 表示不推送文件级进度（分批流水线轮次自带 progress 快照）
+     */
+    private String callModelRound(ChatClient chatClient, List<Message> messages, SseEmitter emitter,
+                                  ReplyStreamExtractor replyExtractor, StringBuilder reasoningBuf, long[] usageAgg,
+                                  OpenAiChatOptions optionsOverride,
+                                  java.util.function.Function<String, String> fileStatusResolver) {
         StringBuilder responseBuffer = new StringBuilder();
+        // 文件传输阶段状态是否已推送（每次调用独立）
+        boolean[] filesStatusSent = {false};
+        FileProgressScanner fileScanner = new FileProgressScanner();
         try {
             Prompt roundPrompt = optionsOverride != null
                     ? new Prompt(messages, optionsOverride)
@@ -1058,6 +1211,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         String replyDelta = replyExtractor.feed(chunk);
                         if (StringUtils.hasText(replyDelta)) {
                             sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, replyDelta);
+                        }
+                        // reply 已流完（闭引号到达）、后续 chunk 属于 files 等其余字段：
+                        // 推送一次状态事件，让前端知道"回复已生成，文件内容仍在传输中"，
+                        // 消除"回复结束了却长时间转圈"的假死观感（大模板 files 可持续数分钟）
+                        if (replyExtractor.isFinished() && !filesStatusSent[0]) {
+                            filesStatusSent[0] = true;
+                            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_STATUS,
+                                    "正在接收文件内容，大模板可能需要几分钟…");
+                        }
+                        // 文件级进度：每当 files 流中完整出现一个 "path":"xxx"，
+                        // 推送"正在生成/修改 xxx"状态（按文件是否已存在决定动词），
+                        // 让用户明确知道 AI 正在产出哪个文件，而不是笼统地"接收文件内容"
+                        if (fileStatusResolver != null) {
+                            for (String path : fileScanner.feed(chunk)) {
+                                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_STATUS,
+                                        fileStatusResolver.apply(path));
+                            }
                         }
                     })
                     // 双超时兜底（模型流可能无限挂起）：
@@ -1165,7 +1335,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             throw new IllegalStateException("调整型会话的修改已直接生效，无需应用");
         }
 
-        Path workDir = Paths.get(session.getWorkDir());
+        Path workDir = resolveEffectiveWorkDir(session);
         if (!Files.exists(workDir) || !Files.isDirectory(workDir)) {
             throw new IllegalStateException("会话工作目录不存在: " + workDir);
         }
@@ -1228,7 +1398,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             throw new IllegalStateException("当前会话没有可回滚的修改");
         }
 
-        Path workDir = Paths.get(session.getWorkDir());
+        Path workDir = resolveEffectiveWorkDir(session);
         List<String> restored = new ArrayList<>();
         for (AiTemplateFileBackup backup : backups) {
             Path target = workDir.resolve(backup.getFilePath()).normalize();
@@ -1307,7 +1477,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * 且写入/删除前先备份旧内容（以 messageId 为回滚粒度）。</p>
      */
     private void writeToFile(AiTemplateSession session, AiTemplateFileDto file, Long messageId) throws IOException {
-        Path workDir = Paths.get(session.getWorkDir());
+        Path workDir = resolveEffectiveWorkDir(session);
         Path filePath = workDir.resolve(file.getPath()).normalize();
 
         // 安全检查：防止路径穿越

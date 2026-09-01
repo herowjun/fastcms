@@ -68,6 +68,11 @@ public final class AiTemplateConstants {
     public static final String FILE_PAGE = "page.html";
 
     /**
+     * 预览演示数据文件（可选，模板目录根下，缺失时预览回退内置默认数据）
+     */
+    public static final String FILE_PREVIEW_DATA = "_preview_data.json";
+
+    /**
      * 静态资源目录
      */
     public static final String DIR_STATIC = "static";
@@ -95,5 +100,10 @@ public final class AiTemplateConstants {
     public static final String SSE_EVENT_PROGRESS = "progress";
     public static final String SSE_EVENT_DONE = "done";
     public static final String SSE_EVENT_ERROR = "error";
+    /**
+     * 阶段性状态提示（如"正在接收文件内容…"），前端展示为进行中的状态行，
+     * 区别于 message（正文内容）
+     */
+    public static final String SSE_EVENT_STATUS = "status";
 
 }

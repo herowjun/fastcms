@@ -57,6 +57,17 @@ public interface IAiTemplateGenService {
     AiTemplateSession getSession(String sessionId);
 
     /**
+     * 解析会话的有效工作目录
+     *
+     * <p>调整型会话按模板 ID 实时解析当前正式模板目录（会话创建时存储的绝对路径
+     * 可能因模板目录迁移而失效），路径变化时回写会话记录自愈；
+     * 生成型会话直接返回存储的预览工作目录。</p>
+     *
+     * @return 工作目录（不为 null；会话未记录 workDir 时抛出 IllegalArgumentException）
+     */
+    java.nio.file.Path resolveEffectiveWorkDir(AiTemplateSession session);
+
+    /**
      * 列出用户的所有会话
      */
     List<AiTemplateSession> listSessions(Long userId);

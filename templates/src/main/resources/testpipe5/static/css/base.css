@@ -11,8 +11,9 @@ button{font:inherit}
 .logo img{height:44px;width:auto}
 .site-nav{display:flex}
 .nav-list{display:flex;gap:28px;list-style:none;margin:0;padding:0}
-.nav-link{font-weight:600;padding:8px2px;border-bottom:2px solid transparent}
+.nav-link{font-weight:600;padding:8px2px;border-bottom:2px solid transparent;transition:color .2s,border-color .2s}
 .nav-link:hover{color:var(--primary);border-color:var(--primary)}
+.nav-link.is-active{color:var(--primary);border-color:var(--primary)}
 .nav-toggle{display:none;width:44px;height:44px;border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;align-items:center;justify-content:center;flex-direction:column;gap:5px}
 .nav-toggle-bar{width:20px;height:2px;background:var(--text);border-radius:2px}
 .site-main{min-height:calc(100vh - var(--header))}
@@ -81,22 +82,32 @@ button{font:inherit}
 .page-link:hover{border-color:var(--primary);color:var(--primary)}
 .page-link.prev,.page-link.next{padding:014px}
 .site-footer{background:#0f172a;color:#cbd5e1;margin-top:84px}
-.footer-inner{display:grid;grid-template-columns:1.2fr1fr1fr;gap:32px;padding:56px032px}
-.footer-title{font-size:20px;margin:0010px;color:#fff}
-.footer-desc{margin:0;color:#94a3b8}
-.footer-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
-.footer-list a{color:#cbd5e1}
-.footer-list a:hover{color:#fff}
-.footer-contact p{margin:0010px;color:#cbd5e1}
-.footer-bottom{border-top:1px solid rgba(148,163,184,.2);padding:18px0;text-align:center;color:#94a3b8;font-size:14px}
+.footer-inner{display:grid;grid-template-columns:1.4fr1.8fr1fr;gap:48px;padding:56px040px}
+.footer-brand .footer-title{font-size:22px;margin:0012px;color:#fff;font-weight:700;display:flex;align-items:center;gap:8px}
+.footer-brand .footer-desc{margin:0016px;color:#94a3b8;font-size:14px;line-height:1.7}
+.footer-brand .footer-cp{color:#64748b;font-size:12px;margin:0}
+.footer-nav-title{font-size:14px;font-weight:700;color:#fff;margin:0016px;text-transform:uppercase;letter-spacing:.05em}
+.footer-list{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:10px28px}
+.footer-list li{position:relative}
+.footer-list a{color:#94a3b8;font-size:14px;display:inline-flex;align-items:center;gap:8px;transition:color .2s,transform .2s;padding:2px0}
+.footer-list a::before{content:'';width:5px;height:5px;border-radius:50%;background:#475569;transition:background .2s;flex-shrink:0}
+.footer-list a:hover{color:#fff;transform:translateX(2px)}
+.footer-list a:hover::before{background:#60a5fa}
+.footer-contact .footer-contact-title{font-size:14px;font-weight:700;color:#fff;margin:0016px;text-transform:uppercase;letter-spacing:.05em}
+.footer-contact p{margin:0010px;color:#94a3b8;font-size:14px;line-height:1.6;display:flex;align-items:flex-start;gap:8px}
+.footer-contact p::before{content:'';width:5px;height:5px;border-radius:50%;background:#475569;flex-shrink:0;margin-top:8px}
+.footer-bottom{border-top:1px solid rgba(148,163,184,.15);padding:20px0;text-align:center}
+.footer-bottom p{margin:004px;color:#64748b;font-size:13px}
+.footer-bottom .footer-copyright{color:#94a3b8}
 a:focus-visible,.btn:focus-visible,.page-link:focus-visible{outline:3px solid rgba(37,99,235,.35);outline-offset:2px}
 @media (max-width:768px){
  .site-main{min-height:auto}
  .header-inner{min-height:64px}
  .site-nav{position:absolute;top:100%;left:0;right:0;background:var(--surface);border-bottom:1px solid var(--border);display:none}
- .site-nav.open{display:block}
+ .site-nav.open,.site-nav.is-open{display:block}
  .nav-list{flex-direction:column;gap:0;padding:12px16px}
  .nav-link{display:block;padding:12px0;border-bottom:0}
+ .nav-link.is-active{color:var(--primary);background:#eff6ff;border-radius:8px}
  .nav-toggle{display:flex}
  .hero{padding:64px0}
  .hero-title{font-size:36px}
@@ -111,6 +122,7 @@ a:focus-visible,.btn:focus-visible,.page-link:focus-visible{outline:3px solid rg
  .article-content{padding:22px}
  .article-content h1{font-size:26px}
  .article-nav{flex-direction:column}
- .footer-inner{grid-template-columns:1fr;gap:24px;padding:40px024px}
+ .footer-inner{grid-template-columns:1fr;gap:32px;padding:40px032px}
+ .footer-list{gap:10px20px}
  .cta{padding:28px}
 }

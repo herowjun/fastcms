@@ -6,12 +6,21 @@ import freemarker.template.ObjectWrapper;
 import freemarker.template.TemplateDirectiveModel;
 import freemarker.template.TemplateMethodModelEx;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * AI 模板预览 mock 数据支持
@@ -28,9 +37,15 @@ import java.util.Map;
  *     <li>页面级上下文变量（article/category/articleVoPage/singlePage）按模板文件名注入</li>
  * </ul>
  *
+ * <p>支持模板级配置：模板目录下的 {@code _preview_data.json} 可覆盖演示数据
+ * （菜单/分类/标签/单页/文章标题/SEO，见 {@link #loadPreviewDataConfig}），
+ * 文件缺失或解析失败时自动回退内置默认数据，存量模板行为不变。</p>
+ *
  * <p>所有演示 URL 均指向预览路由下真实存在的模板文件（由控制器按文件名前缀解析，
  * 如 article.html / article_list.html / page*.html / index.html），页面内的菜单、文章、
  * 分类、标签、单页、分页链接可在预览内闭环跳转，实现整站模拟导航。
+ * 配置了 suffix 的条目按 fastcms 真实路由约定解析
+ * （page_{suffix}.html / article_{suffix}.html / article_list_{suffix}.html）。
  * 缩略图使用 SVG data URI（不产生外部请求）。
  *
  * @author wjun_java@163.com
@@ -38,10 +53,29 @@ import java.util.Map;
  */
 final class AiTemplatePreviewMockSupport {
 
+    private static final Logger log = LoggerFactory.getLogger(AiTemplatePreviewMockSupport.class);
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private static final ObjectWrapper OBJECT_WRAPPER =
             new DefaultObjectWrapperBuilder(Configuration.VERSION_2_3_25).build();
 
     private static final String DEFAULT_TIME_PATTERN = "yyyy-MM-dd HH:mm:ss";
+
+    /**
+     * 配置数量上限（防 AI 输出失控撑爆预览页面，超长静默截断）
+     */
+    private static final int MAX_MENUS = 8;
+    private static final int MAX_MENU_CHILDREN = 6;
+    private static final int MAX_CATEGORIES = 10;
+    private static final int MAX_TAGS = 10;
+    private static final int MAX_SINGLE_PAGES = 8;
+    private static final int MAX_ARTICLES = 12;
+
+    /**
+     * suffix 合法字符（对应模板文件名 page_{suffix}.html 等，防路径注入）
+     */
+    private static final String SUFFIX_PATTERN = "[a-zA-Z0-9_-]+";
 
     /**
      * 演示缩略图：内联 SVG data URI，避免外链图片加载失败影响预览
@@ -91,31 +125,276 @@ final class AiTemplatePreviewMockSupport {
     }
 
     /**
+     * 预览上下文：URL 前缀 + 四类页面默认导航 URL + 模板目录 html 文件名集合
+     *
+     * <p>htmlFiles 用于 suffix 解析（如 page_about.html），保证带 suffix 的链接
+     * 只在对应模板文件真实存在时才指向它，否则回退该类型的默认 URL。</p>
+     */
+    record PreviewContext(String urlPrefix, Map<String, String> pageUrls, Set<String> htmlFiles) {
+
+        String indexUrl() {
+            return pageUrls.getOrDefault("index", urlPrefix);
+        }
+
+        String articleUrl() {
+            return pageUrls.getOrDefault("article", indexUrl());
+        }
+
+        String articleListUrl() {
+            return pageUrls.getOrDefault("article_list", indexUrl());
+        }
+
+        String pageUrl() {
+            return pageUrls.getOrDefault("page", indexUrl());
+        }
+    }
+
+    /**
+     * 预览数据配置（_preview_data.json 的解析结果），全部字段可 null，null 表示该项回退默认数据
+     */
+    record PreviewDataConfig(List<MenuConfig> menus, List<ItemConfig> categories, List<ItemConfig> tags,
+                             List<ItemConfig> singlePages, ArticleConfig articles, Map<String, String> seo) {
+    }
+
+    /**
+     * 菜单配置项：type ∈ index/article_list/article/page（缺省 article_list），
+     * suffix 对应模板文件 {type}_{suffix}.html（可空）
+     */
+    record MenuConfig(String name, String type, String suffix, List<MenuConfig> children) {
+    }
+
+    /**
+     * 分类/标签/单页配置项：title + 可选 suffix
+     */
+    record ItemConfig(String title, String suffix) {
+    }
+
+    /**
+     * 文章配置：titles/summaries/suffixes 平行数组（suffixes 可空，元素空串表示用默认文章 URL）
+     */
+    record ArticleConfig(List<String> titles, List<String> summaries, List<String> suffixes) {
+    }
+
+    /**
+     * 加载模板目录下的预览数据配置 {@code _preview_data.json}
+     *
+     * <p>每次预览请求都会重新读取（控制器不做配置缓存），手工编辑文件后刷新预览立即生效。
+     * 文件不存在、内容非法（非 JSON 对象/字段类型错误）一律返回 null 回退默认数据，
+     * 预览渲染不能因演示数据文件失败而中断。</p>
+     *
+     * @param workDir 模板根目录
+     * @return 解析后的配置，全部字段为空时也返回 null
+     */
+    static PreviewDataConfig loadPreviewDataConfig(Path workDir) {
+        Path file = workDir.resolve(AiTemplateConstants.FILE_PREVIEW_DATA);
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            JsonNode root = MAPPER.readTree(Files.readString(file, StandardCharsets.UTF_8));
+            if (root == null || !root.isObject()) {
+                log.warn("预览数据文件不是 JSON 对象，忽略并回退默认演示数据: {}", file);
+                return null;
+            }
+            List<MenuConfig> menus = parseMenus(root.get("menus"), MAX_MENUS);
+            List<ItemConfig> categories = parseItems(root.get("categories"), MAX_CATEGORIES);
+            List<ItemConfig> tags = parseItems(root.get("tags"), MAX_TAGS);
+            List<ItemConfig> singlePages = parseItems(root.get("singlePages"), MAX_SINGLE_PAGES);
+            ArticleConfig articles = parseArticles(root.get("articles"));
+            Map<String, String> seo = parseSeo(root.get("seo"));
+            if (menus == null && categories == null && tags == null
+                    && singlePages == null && articles == null && seo == null) {
+                return null;
+            }
+            return new PreviewDataConfig(menus, categories, tags, singlePages, articles, seo);
+        } catch (Exception e) {
+            log.warn("预览数据文件解析失败，回退默认演示数据: {}", file, e);
+            return null;
+        }
+    }
+
+    // ==================== 配置解析 ====================
+
+    /**
+     * 解析菜单数组：仅两级（顶层 + children），超限截断，全部非法返回 null
+     */
+    private static List<MenuConfig> parseMenus(JsonNode node, int max) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<MenuConfig> list = new ArrayList<>();
+        for (JsonNode elem : node) {
+            if (list.size() >= max) {
+                break;
+            }
+            MenuConfig menu = parseMenu(elem, false);
+            if (menu != null) {
+                list.add(menu);
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private static MenuConfig parseMenu(JsonNode elem, boolean child) {
+        if (elem == null || !elem.isObject()) {
+            return null;
+        }
+        String name = textOf(elem, "name", "menuName", "title");
+        if (name == null) {
+            return null;
+        }
+        String type = textOf(elem, "type");
+        if (type == null) {
+            type = "article_list";
+        }
+        List<MenuConfig> children = child ? null : parseMenus(elem.get("children"), MAX_MENU_CHILDREN);
+        return new MenuConfig(name, type, suffixOf(elem.get("suffix")), children);
+    }
+
+    /**
+     * 解析分类/标签/单页数组：元素为字符串（无 suffix）或 {title/name, suffix} 对象
+     */
+    private static List<ItemConfig> parseItems(JsonNode node, int max) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<ItemConfig> list = new ArrayList<>();
+        for (JsonNode elem : node) {
+            if (list.size() >= max) {
+                break;
+            }
+            if (elem != null && elem.isTextual()) {
+                String title = elem.asString().trim();
+                if (!title.isEmpty()) {
+                    list.add(new ItemConfig(title, null));
+                }
+            } else if (elem != null && elem.isObject()) {
+                String title = textOf(elem, "title", "name");
+                if (title != null) {
+                    list.add(new ItemConfig(title, suffixOf(elem.get("suffix"))));
+                }
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private static ArticleConfig parseArticles(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        List<String> titles = stringList(node.get("titles"), MAX_ARTICLES);
+        if (titles == null) {
+            return null;
+        }
+        return new ArticleConfig(titles, stringList(node.get("summaries"), MAX_ARTICLES),
+                stringList(node.get("suffixes"), MAX_ARTICLES));
+    }
+
+    private static Map<String, String> parseSeo(JsonNode node) {
+        if (node == null || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        Map<String, String> seo = new LinkedHashMap<>();
+        node.properties().forEach(entry -> {
+            JsonNode value = entry.getValue();
+            if (value != null && value.isTextual()) {
+                String text = value.asString().trim();
+                if (!text.isEmpty()) {
+                    seo.put(entry.getKey(), text);
+                }
+            }
+        });
+        return seo.isEmpty() ? null : seo;
+    }
+
+    private static List<String> stringList(JsonNode node, int max) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<String> list = new ArrayList<>();
+        for (JsonNode elem : node) {
+            if (list.size() >= max) {
+                break;
+            }
+            if (elem != null && elem.isTextual()) {
+                String text = elem.asString().trim();
+                if (!text.isEmpty()) {
+                    list.add(text);
+                }
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    /**
+     * 读取第一个非空文本字段
+     */
+    private static String textOf(JsonNode node, String... keys) {
+        for (String key : keys) {
+            JsonNode value = node.get(key);
+            if (value != null && value.isTextual()) {
+                String text = value.asString().trim();
+                if (!text.isEmpty()) {
+                    return text;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 校验并规范化 suffix：仅允许字母数字下划线中划线，非法值视为未配置
+     */
+    private static String suffixOf(JsonNode node) {
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String suffix = node.asString().trim();
+        return suffix.matches(SUFFIX_PATTERN) ? suffix : null;
+    }
+
+    /**
+     * 按 type + suffix 解析演示 URL（对齐真实系统的 page_{suffix}.html 路由约定）
+     *
+     * <p>suffix 为空 → 该类型默认 URL；suffix 非空且对应模板文件存在 → 指向该文件；
+     * 文件不存在（AI 没生成对应模板）→ 回退默认 URL，保证链接始终可跳转。</p>
+     */
+    private static String resolveUrl(PreviewContext ctx, String type, String suffix) {
+        String fallback = switch (type == null ? "" : type) {
+            case "article" -> ctx.articleUrl();
+            case "page" -> ctx.pageUrl();
+            case "index" -> ctx.indexUrl();
+            default -> ctx.articleListUrl();
+        };
+        if (suffix == null || suffix.isBlank()) {
+            return fallback;
+        }
+        String file = type + "_" + suffix.trim() + ".html";
+        return ctx.htmlFiles().contains(file) ? ctx.urlPrefix() + "/" + file : fallback;
+    }
+
+    /**
      * 构建 mock 指令集（sharedVariables）
      *
      * @param staticBase ctx() 返回的静态资源根路径（指向预览控制器的静态资源分支）
-     * @param pageUrls   整站导航 URL（key: index/article_list/article/page，值为预览路由下的绝对路径），
-     *                   由控制器按模板目录实际文件解析，保证链接指向的页面一定存在
+     * @param ctx        预览上下文（URL 前缀、四类页面默认导航 URL、html 文件集合）
+     * @param config     模板级预览数据配置（可为 null，null 时全部使用内置默认数据）
      */
-    static Map<String, Object> buildSharedVariables(String staticBase, Map<String, String> pageUrls) {
+    static Map<String, Object> buildSharedVariables(String staticBase, PreviewContext ctx, PreviewDataConfig config) {
         Map<String, Object> vars = new LinkedHashMap<>();
 
-        String articleUrl = pageUrls.getOrDefault("article", pageUrls.get("index"));
-        String articleListUrl = pageUrls.getOrDefault("article_list", pageUrls.get("index"));
-        String pageUrl = pageUrls.getOrDefault("page", pageUrls.get("index"));
-
-        vars.put("menuTag", dataDirective(p -> menus(articleListUrl, pageUrl)));
-        vars.put("articleListTag", dataDirective(p -> articles(countOf(p), articleUrl)));
-        vars.put("articlePageTag", dataDirective(p -> pagination(articleListUrl)));
-        vars.put("categoryList", dataDirective(p -> categories(articleListUrl)));
-        vars.put("tagList", dataDirective(p -> tags(articleListUrl)));
-        vars.put("singlePageList", dataDirective(p -> singlePages(pageUrl)));
-        vars.put("prevArticleTag", dataDirective(p -> article(1, articleUrl)));
-        vars.put("nextArticleTag", dataDirective(p -> article(2, articleUrl)));
-        vars.put("relatedArticleList", dataDirective(p -> articles(3, articleUrl)));
+        vars.put("menuTag", dataDirective(p -> menus(ctx, config)));
+        vars.put("articleListTag", dataDirective(p -> articles(countOf(p), ctx, config)));
+        vars.put("articlePageTag", dataDirective(p -> pagination(ctx.articleListUrl())));
+        vars.put("categoryList", dataDirective(p -> categories(ctx, config)));
+        vars.put("tagList", dataDirective(p -> tags(ctx, config)));
+        vars.put("singlePageList", dataDirective(p -> singlePages(ctx, config)));
+        vars.put("prevArticleTag", dataDirective(p -> article(1, ctx, config == null ? null : config.articles())));
+        vars.put("nextArticleTag", dataDirective(p -> article(2, ctx, config == null ? null : config.articles())));
+        vars.put("relatedArticleList", dataDirective(p -> articles(3, ctx, config)));
         vars.put("formatTime", formatTimeDirective());
 
-        vars.put("seoTag", (TemplateMethodModelEx) AiTemplatePreviewMockSupport::seoValue);
+        vars.put("seoTag", (TemplateMethodModelEx) args -> seoValue(args, config));
         vars.put("i18n", (TemplateMethodModelEx) args -> "");
         vars.put("fieldValue", (TemplateMethodModelEx) args -> "");
         vars.put("ctx", (TemplateMethodModelEx) args -> staticBase);
@@ -145,9 +424,11 @@ final class AiTemplatePreviewMockSupport {
      *     <li>page*.html → singlePage（单页详情）</li>
      * </ul>
      *
-     * @param pageUrls 整站导航 URL（页面内记录的 url 指向预览路由，保证可跳转）
+     * @param relPath 模板内相对路径
+     * @param ctx     预览上下文（URL 前缀、四类页面默认导航 URL、html 文件集合）
+     * @param config  模板级预览数据配置（可为 null，null 时全部使用内置默认数据）
      */
-    static Map<String, Object> buildPageModel(String relPath, Map<String, String> pageUrls) {
+    static Map<String, Object> buildPageModel(String relPath, PreviewContext ctx, PreviewDataConfig config) {
         Map<String, Object> model = new LinkedHashMap<>();
 
         String name = relPath;
@@ -156,17 +437,13 @@ final class AiTemplatePreviewMockSupport {
             name = name.substring(idx + 1);
         }
 
-        String articleUrl = pageUrls.getOrDefault("article", pageUrls.get("index"));
-        String articleListUrl = pageUrls.getOrDefault("article_list", pageUrls.get("index"));
-        String pageUrl = pageUrls.getOrDefault("page", pageUrls.get("index"));
-
         if (name.startsWith("article_list")) {
-            model.put("category", category(articleListUrl));
-            model.put("articleVoPage", articleVoPage(articleUrl));
+            model.put("category", category(ctx, config));
+            model.put("articleVoPage", articleVoPage(ctx, config));
         } else if (name.startsWith("article")) {
-            model.put("article", articleDetail(articleListUrl));
+            model.put("article", articleDetail(ctx, config));
         } else if (name.startsWith("page")) {
-            model.put("singlePage", singlePageDetail(pageUrl));
+            model.put("singlePage", singlePageDetail(ctx, config));
         }
         return model;
     }
@@ -206,11 +483,17 @@ final class AiTemplatePreviewMockSupport {
     }
 
     /**
-     * seoTag 函数：常见 SEO 配置项的演示值
+     * seoTag 函数：常见 SEO 配置项的演示值（配置优先，未配置项走内置默认）
      */
-    private static String seoValue(List args) {
+    private static String seoValue(List args, PreviewDataConfig config) {
         String key = args == null || args.isEmpty() || args.get(0) == null
                 ? "" : args.get(0).toString().trim();
+        if (config != null && config.seo() != null) {
+            String value = config.seo().get(key);
+            if (value != null) {
+                return value;
+            }
+        }
         return switch (key) {
             case "website_title" -> "FastCMS 演示站点";
             case "website_sub_title" -> "基于 Spring Boot 4 的开源内容管理系统";
@@ -222,7 +505,32 @@ final class AiTemplatePreviewMockSupport {
 
     // ==================== 演示数据 ====================
 
-    private static List<Map<String, Object>> menus(String articleListUrl, String pageUrl) {
+    /**
+     * 菜单列表：配置了 menus 时按配置构建（URL 按 type+suffix 解析），否则回退默认菜单
+     */
+    private static List<Map<String, Object>> menus(PreviewContext ctx, PreviewDataConfig config) {
+        List<MenuConfig> items = config == null ? null : config.menus();
+        if (items != null && !items.isEmpty()) {
+            List<Map<String, Object>> menus = new ArrayList<>();
+            for (MenuConfig item : items) {
+                menus.add(menu(item, ctx));
+            }
+            return menus;
+        }
+        return defaultMenus(ctx.articleListUrl(), ctx.pageUrl());
+    }
+
+    private static Map<String, Object> menu(MenuConfig item, PreviewContext ctx) {
+        List<Map<String, Object>> children = new ArrayList<>();
+        if (item.children() != null) {
+            for (MenuConfig child : item.children()) {
+                children.add(menu(child, ctx));
+            }
+        }
+        return menu(item.name(), resolveUrl(ctx, item.type(), item.suffix()), children);
+    }
+
+    private static List<Map<String, Object>> defaultMenus(String articleListUrl, String pageUrl) {
         List<Map<String, Object>> menus = new ArrayList<>();
         menus.add(menu("新闻动态", articleListUrl, List.of(
                 menu("公司新闻", articleListUrl, List.of()), menu("行业资讯", articleListUrl, List.of()))));
@@ -245,17 +553,40 @@ final class AiTemplatePreviewMockSupport {
         return m;
     }
 
-    private static List<Map<String, Object>> categories(String articleListUrl) {
+    /**
+     * 分类列表：配置优先（URL 按 article_list + suffix 解析），否则回退默认分类
+     */
+    private static List<Map<String, Object>> categories(PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.categories();
+        if (items != null && !items.isEmpty()) {
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (int i = 0; i < items.size(); i++) {
+                ItemConfig item = items.get(i);
+                list.add(category((long) (i + 1), item.title(),
+                        resolveUrl(ctx, "article_list", item.suffix())));
+            }
+            return list;
+        }
         List<Map<String, Object>> list = new ArrayList<>();
-        list.add(category(1L, "科技前沿", articleListUrl));
-        list.add(category(2L, "产品动态", articleListUrl));
-        list.add(category(3L, "开发实践", articleListUrl));
-        list.add(category(4L, "行业观察", articleListUrl));
+        list.add(category(1L, "科技前沿", ctx.articleListUrl()));
+        list.add(category(2L, "产品动态", ctx.articleListUrl()));
+        list.add(category(3L, "开发实践", ctx.articleListUrl()));
+        list.add(category(4L, "行业观察", ctx.articleListUrl()));
         return list;
     }
 
-    private static Map<String, Object> category(String articleListUrl) {
-        return category(3L, "开发实践", articleListUrl);
+    /**
+     * article_list 页面上下文的当前分类：默认取配置分类的第 3 项（无则首项），与默认数据行为对齐
+     */
+    private static Map<String, Object> category(PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.categories();
+        if (items != null && !items.isEmpty()) {
+            int index = items.size() >= 3 ? 2 : 0;
+            ItemConfig item = items.get(index);
+            return category((long) (index + 1), item.title(),
+                    resolveUrl(ctx, "article_list", item.suffix()));
+        }
+        return category(3L, "开发实践", ctx.articleListUrl());
     }
 
     private static Map<String, Object> category(Long id, String title, String url) {
@@ -266,27 +597,59 @@ final class AiTemplatePreviewMockSupport {
         return c;
     }
 
-    private static List<Map<String, Object>> tags(String articleListUrl) {
+    /**
+     * 标签列表：配置优先（URL 按 article_list + suffix 解析），否则回退默认标签
+     */
+    private static List<Map<String, Object>> tags(PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.tags();
+        if (items != null && !items.isEmpty()) {
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (int i = 0; i < items.size(); i++) {
+                ItemConfig item = items.get(i);
+                Map<String, Object> t = new LinkedHashMap<>();
+                t.put("id", (long) (i + 1));
+                t.put("name", item.title());
+                t.put("url", resolveUrl(ctx, "article_list", item.suffix()));
+                list.add(t);
+            }
+            return list;
+        }
         List<Map<String, Object>> list = new ArrayList<>();
         String[] names = {"Java", "Spring Boot", "AI", "前端", "开源"};
         for (int i = 0; i < names.length; i++) {
             Map<String, Object> t = new LinkedHashMap<>();
             t.put("id", (long) (i + 1));
             t.put("name", names[i]);
-            t.put("url", articleListUrl);
+            t.put("url", ctx.articleListUrl());
             list.add(t);
         }
         return list;
     }
 
-    private static List<Map<String, Object>> singlePages(String pageUrl) {
+    /**
+     * 单页列表：配置优先（URL 按 page + suffix 解析），否则回退默认单页
+     */
+    private static List<Map<String, Object>> singlePages(PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.singlePages();
+        if (items != null && !items.isEmpty()) {
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (int i = 0; i < items.size(); i++) {
+                ItemConfig item = items.get(i);
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("id", (long) (i + 1));
+                s.put("title", item.title());
+                s.put("url", resolveUrl(ctx, "page", item.suffix()));
+                list.add(s);
+            }
+            return list;
+        }
         List<Map<String, Object>> list = new ArrayList<>();
         String[] names = {"关于我们", "联系方式", "服务条款", "隐私政策"};
         for (int i = 0; i < names.length; i++) {
             Map<String, Object> s = new LinkedHashMap<>();
             s.put("id", (long) (i + 1));
             s.put("title", names[i]);
-            s.put("url", pageUrl);
+            s.put("url", ctx.pageUrl());
             list.add(s);
         }
         return list;
@@ -295,23 +658,41 @@ final class AiTemplatePreviewMockSupport {
     /**
      * 文章列表 mock（articleListTag / relatedArticleList）
      *
-     * @param count 指令传入的 count 参数，null 时默认 10
-     * @param url   文章详情页 URL（预览路由）
+     * <p>配置了 articles.titles 时使用配置标题（摘要缺失项循环使用配置摘要或内置默认），
+     * URL 按每篇的 suffix（articles.suffixes 平行数组）解析。</p>
+     *
+     * @param count 指令传入的 count 参数，null 时取全部标题
      */
-    private static List<Map<String, Object>> articles(Integer count, String url) {
-        int n = count == null || count <= 0 ? ARTICLE_TITLES.length : Math.min(count, ARTICLE_TITLES.length);
+    private static List<Map<String, Object>> articles(Integer count, PreviewContext ctx, PreviewDataConfig config) {
+        ArticleConfig cfg = config == null ? null : config.articles();
+        int total = cfg != null && cfg.titles() != null ? cfg.titles().size() : ARTICLE_TITLES.length;
+        int n = count == null || count <= 0 ? total : Math.min(count, total);
         List<Map<String, Object>> list = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            list.add(article(i, url));
+            list.add(article(i, ctx, cfg));
         }
         return list;
     }
 
-    private static Map<String, Object> article(int index, String url) {
+    private static Map<String, Object> article(int index, PreviewContext ctx, ArticleConfig cfg) {
+        String title = cfg != null && cfg.titles() != null
+                ? cfg.titles().get(index % cfg.titles().size())
+                : ARTICLE_TITLES[index % ARTICLE_TITLES.length];
+        String summary;
+        if (cfg != null && cfg.summaries() != null && !cfg.summaries().isEmpty()) {
+            summary = cfg.summaries().get(index % cfg.summaries().size());
+        } else {
+            summary = ARTICLE_SUMMARIES[index % ARTICLE_SUMMARIES.length];
+        }
+        // URL：配置了该篇 suffix 且对应模板文件存在 → 指向 article_{suffix}.html，否则默认文章页
+        String url = ctx.articleUrl();
+        if (cfg != null && cfg.suffixes() != null && index < cfg.suffixes().size()) {
+            url = resolveUrl(ctx, "article", cfg.suffixes().get(index));
+        }
         Map<String, Object> a = new LinkedHashMap<>();
         a.put("id", (long) (index + 1));
-        a.put("title", ARTICLE_TITLES[index % ARTICLE_TITLES.length]);
-        a.put("summary", ARTICLE_SUMMARIES[index % ARTICLE_SUMMARIES.length]);
+        a.put("title", title);
+        a.put("summary", summary);
         a.put("thumbnail", THUMBNAIL_SVG);
         a.put("url", url);
         a.put("created", LocalDateTime.now().minusDays(index).withNano(0));
@@ -322,8 +703,8 @@ final class AiTemplatePreviewMockSupport {
     /**
      * 文章详情 mock（article.html 页面上下文 / prevArticleTag / nextArticleTag）
      */
-    private static Map<String, Object> articleDetail(String articleListUrl) {
-        Map<String, Object> a = article(0, articleListUrl);
+    private static Map<String, Object> articleDetail(PreviewContext ctx, PreviewDataConfig config) {
+        Map<String, Object> a = article(0, ctx, config == null ? null : config.articles());
         a.put("contentHtml",
                 "<p>这是一篇用于模板预览的演示文章。正式应用模板后，此处将展示站点的真实文章内容，"
                         + "支持富文本、图文混排等常见排版元素。</p>"
@@ -341,12 +722,14 @@ final class AiTemplatePreviewMockSupport {
     }
 
     /**
-     * 单页详情 mock（page.html 页面上下文）
+     * 单页详情 mock（page.html 页面上下文）：标题/URL 取配置的首个单页，否则默认
      */
-    private static Map<String, Object> singlePageDetail(String pageUrl) {
+    private static Map<String, Object> singlePageDetail(PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.singlePages();
+        ItemConfig first = items == null || items.isEmpty() ? null : items.get(0);
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("id", 1L);
-        s.put("title", "关于我们");
+        s.put("title", first != null ? first.title() : "关于我们");
         s.put("summary", "这是单页示例摘要，正式应用后展示真实内容。");
         s.put("contentHtml",
                 "<p>这是用于模板预览的演示单页。正式应用模板后，此处将展示站点真实的单页内容。</p>"
@@ -354,16 +737,16 @@ final class AiTemplatePreviewMockSupport {
                         + "<h2>联系方式</h2><p>演示文案：contact@example.com</p>");
         s.put("seoKeywords", "关于我们,FastCMS");
         s.put("seoDescription", "这是用于模板预览的演示单页内容。");
-        s.put("url", pageUrl);
+        s.put("url", first != null ? resolveUrl(ctx, "page", first.suffix()) : ctx.pageUrl());
         return s;
     }
 
     /**
      * 分页对象 mock（articleVoPage 页面上下文，字段与 MyBatis-Plus Page 对齐）
      */
-    private static Map<String, Object> articleVoPage(String articleUrl) {
+    private static Map<String, Object> articleVoPage(PreviewContext ctx, PreviewDataConfig config) {
         Map<String, Object> page = new LinkedHashMap<>();
-        page.put("records", articles(10, articleUrl));
+        page.put("records", articles(10, ctx, config));
         page.put("size", 10L);
         page.put("current", 2L);
         page.put("total", 95L);

@@ -1,13 +1,13 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0024064' width='180' height='48' role='img' aria-label='企业官网标志'>
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0020048' width='200' height='48' role='img' aria-label='FastCMS Logo'>
  <defs>
- <linearGradient id='logo-gradient' x1='0%' y1='0%' x2='100%' y2='100%'>
- <stop offset='0%' stop-color='#2563eb'/>
+ <linearGradient id='fg' x1='0%' y1='0%' x2='100%' y2='100%'>
+ <stop offset='0%' stop-color='#3b82f6'/>
  <stop offset='100%' stop-color='#06b6d4'/>
  </linearGradient>
  </defs>
- <rect x='4' y='8' width='48' height='48' rx='14' fill='url(#logo-gradient)'/>
- <path d='M2042V22h22v8H29v5h11v8z' fill='#ffffff'/>
- <circle cx='44' cy='26' r='4' fill='#ffffff'/>
- <text x='64' y='38' font-family='Arial, sans-serif' font-size='24' font-weight='700' fill='#0f172a'>企业官网</text>
- <text x='64' y='54' font-family='Arial, sans-serif' font-size='10' letter-spacing='3' fill='#64748b'>MODERN ENTERPRISE</text>
+ <rect x='2' y='6' width='36' height='36' rx='10' fill='url(#fg)'/>
+ <path d='M1428V14h16v5h-11v3h9v5h-9v3z' fill='#fff'/>
+ <circle cx='30' cy='22' r='3' fill='#fff' opacity='.6'/>
+ <text x='46' y='30' font-family='system-ui,sans-serif' font-size='22' font-weight='800' fill='#0f172a'>FastCMS</text>
+ <text x='46' y='42' font-family='system-ui,sans-serif' font-size='9' letter-spacing='2' fill='#64748b'>MODERN CMS</text>
 </svg>

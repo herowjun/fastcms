@@ -65,12 +65,13 @@ public class TemplateGenPromptBuilder {
                 + "## 用户需求\n\n" + requirement + "\n\n"
                 + "## 输出要求\n\n"
                 + "1. 必须包含必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html\n"
-                + "2. 至少包含一个基础样式文件 static/css/base.css\n"
-                + "3. 静态资源路径使用 ${ctx()} 前缀，例如 <link href=\"${ctx()}/css/base.css\">\n"
-                + "4. 页面通过 <#import \"_layout.html\" as layout> 引入布局宏\n"
-                + "5. 使用 fastcms 指令渲染动态内容，不要硬编码文章列表\n"
-                + "6. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
-                + "7. 请全程使用中文思考和回复\n";
+                + "2. 必须生成 _preview_data.json 预览演示数据：菜单/分类/单页/文章标题贴合用户需求主题（如餐饮模板用\"菜品展示/门店故事\"）\n"
+                + "3. 至少包含一个基础样式文件 static/css/base.css\n"
+                + "4. 静态资源路径使用 ${ctx()} 前缀，例如 <link href=\"${ctx()}/css/base.css\">\n"
+                + "5. 页面通过 <#import \"_layout.html\" as layout> 引入布局宏\n"
+                + "6. 使用 fastcms 指令渲染动态内容，不要硬编码文章列表\n"
+                + "7. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
+                + "8. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -87,7 +88,8 @@ public class TemplateGenPromptBuilder {
                 + "## 用户需求\n\n" + requirement + "\n\n"
                 + "## 输出要求\n\n"
                 + "1. 本轮只做规划，不生成任何文件内容：files 数组中每一项只包含 path 和 action 两个字段，禁止输出 content 字段\n"
-                + "2. 必须涵盖必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html，以及基础样式 static/css/base.css\n"
+                + "2. 必须涵盖必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html，"
+                + "以及基础样式 static/css/base.css 与预览演示数据 _preview_data.json（菜单/文章标题贴合需求主题）\n"
                 + "3. 可根据需求补充其他文件（如 static/js/main.js、_articlePage.html），但文件总数控制在 10 个以内\n"
                 + "4. reply 字段简要说明整体设计思路（配色、布局、栏目结构，100 字以内）\n"
                 + "5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n"
@@ -143,6 +145,7 @@ public class TemplateGenPromptBuilder {
                     + "响应式只需桌面 + 移动两档断点";
             case "js" -> "总行数不超过 150 行，只实现必要交互（导航切换、回到顶部等），删除全部注释";
             case "properties" -> "只输出配置键值对，不超过 10 行";
+            case "json" -> "只输出预览演示数据 JSON，总行数不超过 60 行，字段名与系统提示中的 schema 一致";
             default -> "HTML 文件不超过 250 行，注释精简";
         };
     }
@@ -235,6 +238,11 @@ public class TemplateGenPromptBuilder {
         return "请基于当前已有的模板文件进行微调。\n\n"
                 + "## 微调需求\n\n" + requirement + "\n\n"
                 + "## 当前已有文件（相对路径）\n\n" + currentFiles + "\n\n"
+                + "## 数据与展示的边界（重要）\n\n"
+                + "菜单、分类、标签、单页、文章标题等演示内容由 `_preview_data.json` 驱动。"
+                + "凡属于内容增删改的需求（如\"去掉XX菜单\"\"增加一个栏目\"\"更换文章标题\"），"
+                + "必须通过修改 _preview_data.json 实现（没有则新建，action=create，menus 等字段填入调整后的完整内容）；"
+                + "严禁在模板 HTML 中加入菜单名过滤、内容判断等写死逻辑，模板必须保持数据驱动。\n\n"
                 + "## 输出要求\n\n"
                 + "1. files 数组中仅输出需要修改或新增的文件，未提及的文件保持不变\n"
                 + "2. action 字段：新增文件用 create，修改文件用 modify\n"
@@ -259,13 +267,50 @@ public class TemplateGenPromptBuilder {
         return "请基于当前正式模板的文件内容进行调整，调整结果将直接写入正式模板。\n\n"
                 + "## 调整需求\n\n" + requirement + "\n\n"
                 + currentFileSection
+                + "## 数据与展示的边界（重要）\n\n"
+                + "模板中菜单、分类、标签、单页、文章标题等演示内容由 `_preview_data.json` 驱动（预览数据源）。"
+                + "凡属于内容增删改的需求（如\"去掉XX菜单\"\"把某菜单改名为XX\"\"增加一个栏目\"\"更换文章标题\"），"
+                + "必须通过修改 _preview_data.json 实现：\n"
+                + "- 目录中已有该文件：按其现有结构输出修改后的完整 JSON（action=modify）\n"
+                + "- 目录中没有该文件：按系统规范新建，menus 等字段填入调整后的完整内容（action=create）\n"
+                + "- 严禁在模板 HTML 中加入菜单名过滤、内容判断等写死逻辑"
+                + "（如 <#if item.menuName?contains('XX')>），模板必须保持数据驱动\n\n"
                 + "## 当前模板文件（相对路径 + 完整内容）\n\n" + currentFilesWithContent + "\n\n"
                 + "## 输出要求\n\n"
                 + "1. files 数组中仅输出需要修改或新增的文件，未提及的文件保持不变\n"
                 + "2. action 字段：新增文件用 create，修改文件用 modify，删除文件用 delete\n"
                 + "3. 修改文件时必须基于上述文件内容输出修改后的完整内容，不要凭空臆造原有内容\n"
                 + "4. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次调整内容，files 字段为变更文件数组）\n"
-                + "5. 请全程使用中文思考和回复\n";
+                + "5. 请全程使用中文思考和回复\n"
+                + "6. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
+    }
+
+    /**
+     * 构建渲染校验失败后的自动修复提示（调整型会话专用）
+     *
+     * @param renderErrors           渲染失败文件及错误摘要（非空）
+     * @param currentFilesWithContent 当前模板文件内容（已写盘的最新版本）
+     * @param currentFile            用户当前聚焦的页面（可空）
+     */
+    public String buildRenderFixPrompt(List<String> renderErrors, String currentFilesWithContent, String currentFile) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("系统对刚写入的模板文件做了渲染校验，以下文件渲染失败（FreeMarker 错误，含文件名与行号）：\n\n");
+        for (int i = 0; i < renderErrors.size(); i++) {
+            sb.append(i + 1).append(". ").append(renderErrors.get(i)).append('\n');
+        }
+        sb.append("\n请立即修复以上错误。常见修复方式：\n")
+                .append("- 变量空引用（InvalidReferenceException）：改为 `${item.url!''}` 或用 `<#if item?? && item.url??>` 包裹\n")
+                .append("- 宏参数不匹配：核对宏定义（如 _layout.html 中 <#macro> 的参数名）与调用处\n")
+                .append("- 指令未闭合/语法错误（ParseException）：按行号定位修复\n\n")
+                .append((currentFile == null || currentFile.isBlank()) ? ""
+                        : "用户当前聚焦页面：" + currentFile + "，优先修复与该页面相关的错误。\n\n")
+                .append("## 当前模板文件（渲染失败的最新版本，相对路径 + 完整内容）\n\n")
+                .append(currentFilesWithContent).append("\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. 只输出需要修改的文件（action=modify），基于上述内容给出修复后的完整文件\n")
+                .append("2. 修复必须消除报错本身，不要用 try/catch 或判断语句绕过/吞掉错误\n")
+                .append("3. 严格按照约定的 JSON 对象格式输出（reply 简述修复了什么，files 为修复后的文件）\n");
+        return sb.toString();
     }
 
     // ==================== 系统提示词常量 ====================
@@ -288,6 +333,7 @@ public class TemplateGenPromptBuilder {
             ├── article.html              # 文章详情页（必备）
             ├── article_list.html         # 文章列表页（必备）
             ├── page.html                 # 单页面（必备）
+            ├── _preview_data.json        # 预览演示数据（建议生成，内容贴合需求主题）
             └── static/                   # 静态资源目录
                 ├── css/
                 │   └── base.css          # 基础样式
@@ -468,7 +514,42 @@ public class TemplateGenPromptBuilder {
             ```
             不要硬编码路径如 `/static/css/...` 或 `/xjd2022/css/...`。
 
-            ## 9. 响应格式（严格 JSON）
+            ## 9. 预览演示数据 _preview_data.json
+
+            模板目录下应包含 `_preview_data.json`，定义模板预览时使用的演示数据（菜单、分类、标签、单页、文章标题、SEO）。
+            内容必须贴合用户需求主题：如餐饮模板用"菜品展示/门店故事/在线订座"，科技模板用"新闻动态/产品中心"。
+            格式（所有字段可选，未配置的字段使用系统默认演示数据）：
+            ```json
+            {
+              "menus": [
+                { "name": "新闻动态", "type": "article_list", "children": [
+                  { "name": "公司新闻", "type": "article_list" }
+                ]},
+                { "name": "关于我们", "type": "page", "suffix": "about" }
+              ],
+              "categories": ["科技前沿", "产品动态"],
+              "tags": ["Java", "Spring Boot"],
+              "singlePages": [{ "title": "关于我们", "suffix": "about" }, "服务条款"],
+              "articles": {
+                "titles": ["文章标题1", "文章标题2"],
+                "summaries": ["摘要1", "摘要2"],
+                "suffixes": ["news", ""]
+              },
+              "seo": { "website_title": "站点标题" }
+            }
+            ```
+
+            字段规则：
+            - menus：最多 8 项，最多两级（children 每层最多 6 项），每项含 name、type、可选 suffix、可选 children
+            - type 只能取：index、article_list、article、page；省略时默认 article_list
+            - suffix 对应模板文件 {type}_{suffix}.html（如 "about" 对应 page_about.html，"about_h5" 对应 page_about_h5.html）；
+              配置了 suffix 时必须同时生成对应的模板文件
+            - 禁止在 JSON 中写任何 url 字段，预览链接由系统按 type + suffix 自动解析
+            - categories/tags/singlePages 数组元素可以是字符串（无 suffix）或 { "title": ..., "suffix": ... } 对象
+            - articles 的 titles/summaries/suffixes 是平行数组，最多 12 项；summaries/suffixes 可省略
+            - seo 的 key 与 seoTag 指令一致（website_title、website_sub_title、website_seo、public_website_domain）
+
+            ## 10. 响应格式（严格 JSON）
 
             你的每次回复必须是一个 JSON 对象（不能是数组），包含两个字段：
             ```json

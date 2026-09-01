@@ -8,7 +8,7 @@
  <meta name='viewport' content='width=device-width, initial-scale=1'>
  <meta name='keywords' content='${seoTag("website_title")!""}'>
  <meta name='description' content='${seoTag("website_sub_title")!""}'>
- <meta name='theme-color' content='#f8fafc'>
+ <meta name='theme-color' content='#0f172a'>
  <link rel='stylesheet' href='${ctx()}/css/base.css'>
  <#nested/>
 </head>
@@ -19,15 +19,16 @@
  <header class='site-header'>
  <div class='container header-inner'>
  <a class='logo' href='/'>
- <img src='${ctx()}/images/logo.png' alt='企业官网标志'>
+ <img src='${ctx()}/images/logo.svg' alt='FastCMS'>
  </a>
  <nav class='site-nav' aria-label='主导航'>
  <ul class='nav-list'>
- <li class='nav-item'><a class='nav-link' href='/'>首页</a></li>
  <@menuTag>
- <#if data?? && (data?size >0)>
+ <#if data?? && data?is_sequence && (data?size >0)>
  <#list data as item>
- <li class='nav-item'><a class='nav-link' href='${item.url!}'>${item.menuName!}</a></li>
+ <#if item?? && item?is_hash>
+ <li class='nav-item'><a class='nav-link' href='${(item.url)!''}'>${(item.menuName)!''}</a></li>
+ </#if>
  </#list>
  </#if>
  </@menuTag>
@@ -46,27 +47,32 @@
  <footer class='site-footer'>
  <div class='container footer-inner'>
  <div class='footer-brand'>
- <p class='footer-title'>${seoTag("website_title")!'企业官网'}</p>
- <p class='footer-desc'>${seoTag("website_sub_title")!'专注为企业提供数字化解决方案'}</p>
+ <p class='footer-title'>${seoTag("website_title")!'FastCMS'}</p>
+ <p class='footer-desc'>致力于互联网内容应用开发，为开发者提供高性能、易扩展的内容管理系统解决方案。</p>
+ <p class='footer-cp'>粤ICP备20053122号</p>
  </div>
  <nav class='footer-nav' aria-label='页脚导航'>
+ <p class='footer-nav-title'>快速导航</p>
  <@menuTag>
- <#if data?? && (data?size >0)>
+ <#if data?? && data?is_sequence && (data?size >0)>
  <ul class='footer-list'>
  <#list data as item>
- <li><a href='${item.url!}'>${item.menuName!}</a></li>
+ <#if item?? && item?is_hash>
+ <li><a href='${(item.url)!''}'>${(item.menuName)!''}</a></li>
+ </#if>
  </#list>
  </ul>
  </#if>
  </@menuTag>
  </nav>
  <div class='footer-contact'>
- <p>${seoTag("website_phone")!'联系电话：400-000-0000'}</p>
- <p>${seoTag("website_email")!'电子邮箱：contact@example.com'}</p>
+ <p class='footer-contact-title'>联系我们</p>
+ <p>广州市增城区永宁街创汇大道4号B2栋1210房</p>
+ <p>13533109940（微信同号）</p>
  </div>
  </div>
  <div class='footer-bottom'>
- <p>Copyright © ${.now?string('yyyy')} - Powered by Fastcms</p>
+ <p class='footer-copyright'>Copyright ©2021 Fastcms | Design By小橘灯科技</p>
  </div>
  </footer>
 </#macro>
@@ -82,16 +88,22 @@
  <@articlePageTag>
  <#if data??>
  <nav class='pagination' aria-label='文章分页'>
- <#if data.prev?? && data.prev.url?? && data.prev.url?has_content>
- <a class='page-link prev' href='${data.prev.url}'>${data.prev.text!'上一页'}</a>
+ <#if data.prev?? && (data.prev.url)?? && ((data.prev.url)!'')?has_content>
+ <a class='page-link prev' href='${data.prev.url}'>${(data.prev.text)!'上一页'}</a>
  </#if>
- <#if data.list?? && (data.list?size >0)>
+ <#if data.list?? && data.list?is_sequence && (data.list?size >0)>
  <#list data.list as page>
- <a class='page-link' href='${page.url!}'>${page.text!}</a>
+ <#if page?? && page?is_hash>
+ <#if (page.url)?? && ((page.url)!'')?has_content>
+ <a class='page-link' href='${page.url}'>${(page.text)!}</a>
+ <#else>
+ <span class='page-link current' aria-current='page'>${(page.text)!}</span>
+ </#if>
+ </#if>
  </#list>
  </#if>
- <#if data.next?? && data.next.url?? && data.next.url?has_content>
- <a class='page-link next' href='${data.next.url}'>${data.next.text!'下一页'}</a>
+ <#if data.next?? && (data.next.url)?? && ((data.next.url)!'')?has_content>
+ <a class='page-link next' href='${data.next.url}'>${(data.next.text)!'下一页'}</a>
  </#if>
  </nav>
  </#if>

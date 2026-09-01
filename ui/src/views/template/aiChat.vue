@@ -75,6 +75,10 @@
 
 		<!-- 输入区域 -->
 		<div class="chat-input">
+			<div v-if="state.chatting && state.statusText" class="status-bar">
+				<el-icon class="is-loading"><ele-Loading /></el-icon>
+				<span>{{ state.statusText }}</span>
+			</div>
 			<div v-if="mode === 'generate' && isFailed" class="regen-bar">
 				<span class="regen-tip">上次生成失败（详见上方错误信息）。模型配置修复后可重新生成。</span>
 				<el-button type="primary" size="small" @click="onRegenerate" :loading="state.chatting">
@@ -250,6 +254,8 @@ const state = reactive({
 	messages: [] as any[],
 	inputText: '',
 	chatting: false,
+	// SSE status 事件文本（"正在接收文件内容…"等阶段性状态，done/error/结束时清空）
+	statusText: '',
 	abortController: null as AbortController | null,
 	files: [] as any[],
 	loadingFiles: false,
@@ -258,6 +264,34 @@ const state = reactive({
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
+
+/**
+ * 清洗历史 assistant 消息内容：旧版本解析失败时曾把原始 JSON 响应全文存库
+ * （含 reply/files 等字段，刷新后会整坨 JSON 显示在聊天区）。这里提取 reply 字段
+ * 展示；JSON 不完整（被截断）时用正则提取。仅展示层清洗，不改动数据库。
+ */
+const cleanHistoryContent = (m: any): string => {
+	const text = String(m.content || '');
+	if (m.role !== 'assistant' || !text.trimStart().startsWith('{') || !text.includes('"reply"')) {
+		return text;
+	}
+	try {
+		const parsed = JSON.parse(text);
+		if (parsed && typeof parsed.reply === 'string') {
+			return parsed.reply + '\n\n（该轮响应解析失败，文件未写盘）';
+		}
+	} catch (e) {
+		/* JSON 不完整（被截断），走正则提取 */
+	}
+	const match = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+	if (match) {
+		return (
+			match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') +
+			'\n\n（该轮响应被截断，文件未写盘）'
+		);
+	}
+	return text;
+};
 
 /**
  * 加载会话消息与文件列表
@@ -274,9 +308,14 @@ const loadSessionData = async () => {
 			templateApi.listMessages(props.session.sessionId),
 			templateApi.listFiles(props.session.sessionId),
 		]);
-		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）
+		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）；
+		// content 经 cleanHistoryContent 清洗（兜底旧版本存库的原始 JSON 全文）
 		if (messagesRes.data) {
-			state.messages = messagesRes.data.map((m: any) => ({ ...m, reasoningExpanded: false }));
+			state.messages = messagesRes.data.map((m: any) => ({
+				...m,
+				content: cleanHistoryContent(m),
+				reasoningExpanded: false,
+			}));
 		}
 		if (filesRes.data) state.files = filesRes.data;
 		// 切换/加载会话回到自动跟随模式（历史消息加载后滚到底部）
@@ -398,6 +437,7 @@ const onSend = async () => {
 	const finish = () => {
 		state.abortController = null;
 		state.chatting = false;
+		state.statusText = '';
 	};
 
 	const refreshFiles = () => {
@@ -526,6 +566,13 @@ const onSend = async () => {
 					}
 				} catch (err) {
 					/* 忽略格式异常的 progress 事件 */
+				}
+				break;
+			case 'status':
+				// 阶段性状态提示（如 reply 已流完、files 内容仍在传输），
+				// 显示在输入区上方状态行，消除"回复已结束却长时间转圈"的假死观感
+				if (data) {
+					state.statusText = data;
 				}
 				break;
 				case 'done':
@@ -914,6 +961,20 @@ const breakSentences = (s: string): string =>
 		&.failed {
 			color: var(--el-color-danger);
 		}
+	}
+
+	// 生成过程中的阶段性状态条（输入框上方：正在接收文件内容等）
+	.status-bar {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-bottom: 8px;
+		padding: 6px 10px;
+		background: var(--el-color-primary-light-9);
+		border-left: 3px solid var(--el-color-primary);
+		border-radius: 4px;
+		font-size: 12px;
+		color: var(--el-color-primary);
 	}
 
 	// 失败会话的重新生成提示条（输入框上方）

@@ -26,6 +26,7 @@
                             :limit="state.limit">
                             <el-button size="default" type="primary"><el-icon><ele-Plus /></el-icon>上传模板文件</el-button>
                         </el-upload>
+                        <el-divider direction="vertical" />
                         <el-button @click="onPreview" :disabled="!state.loadedTemplateId">
                             <el-icon><ele-View /></el-icon>预览
                         </el-button>
@@ -47,7 +48,16 @@
             <el-row :gutter="35">
                 <el-col :sm="5" class="mb20">
                     <div class="tree-container">
-                        <el-card shadow="hover" header="模板文件树">
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="tree-card-header">
+                                    <span>模板文件树</span>
+                                    <el-button size="small" text :loading="state.treeLoading"
+                                               title="刷新文件树" @click="loadFileTree()">
+                                        <el-icon><ele-Refresh /></el-icon>
+                                    </el-button>
+                                </div>
+                            </template>
                             <div v-loading="state.treeLoading">
                                 <el-tree :data="state.treeTableData"
                                     :default-expand-all="false"
@@ -84,7 +94,7 @@
                 </div>
             </template>
             <div class="ai-drawer-body" :class="{ split: state.aiMode === 'adjust' }">
-                <div v-if="state.aiMode === 'adjust'" class="ai-preview-col">
+                <div v-if="state.aiMode === 'adjust'" class="ai-preview-col" :class="{ 'chat-collapsed': state.aiChatCollapsed }">
                     <div class="preview-toolbar">
                         <el-select v-model="state.aiPreviewEntry" size="small" filterable placeholder="选择预览页面">
                             <el-option v-for="p in previewPageOptions" :key="p" :value="p" :label="p" />
@@ -100,12 +110,25 @@
                         <iframe v-if="aiPreviewUrl" :src="aiPreviewUrl" class="preview-frame" frameborder="0"></iframe>
                     </div>
                 </div>
-                <div class="ai-chat-col">
-                    <ai-chat ref="aiChatRef" :session="state.currentAiSession" :mode="state.aiMode"
-                             :current-file="state.aiMode === 'adjust' ? (state.aiPreviewEntry || state.currEditFile) : ''"
-                             :sessions="state.aiSessions" :creating-session="state.creatingAiSession"
-                             @select-session="onSelectAiSession" @new-session="onNewAiSession"
-                             @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @applied="onAiTemplateApplied" />
+                <div class="ai-chat-col" :class="{ collapsed: state.aiMode === 'adjust' && state.aiChatCollapsed }">
+                    <!-- adjust 模式：收缩/展开切换按钮 -->
+                    <div v-if="state.aiMode === 'adjust'" class="chat-collapse-bar">
+                        <el-button size="small" text :title="state.aiChatCollapsed ? '展开 AI 对话框' : '收缩 AI 对话框'"
+                                   @click="state.aiChatCollapsed = !state.aiChatCollapsed">
+                            <el-icon :size="16">
+                                <ele-Expand v-if="state.aiChatCollapsed" />
+                                <ele-Fold v-else />
+                            </el-icon>
+                        </el-button>
+                        <span v-if="state.aiChatCollapsed" class="collapsed-label">AI</span>
+                    </div>
+                    <div class="ai-chat-col-inner" v-show="!state.aiChatCollapsed">
+                        <ai-chat ref="aiChatRef" :session="state.currentAiSession" :mode="state.aiMode"
+                                 :current-file="state.aiMode === 'adjust' ? (state.aiPreviewEntry || state.currEditFile) : ''"
+                                 :sessions="state.aiSessions" :creating-session="state.creatingAiSession"
+                                 @select-session="onSelectAiSession" @new-session="onNewAiSession"
+                                 @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @applied="onAiTemplateApplied" />
+                    </div>
                 </div>
             </div>
         </el-drawer>
@@ -231,7 +254,9 @@ const state = reactive({
     aiPreviewEntry: '',
     aiPreviewKey: 0,
     // 文件树默认展开的节点（第一层）
-    expandedKeys: [] as string[]
+    expandedKeys: [] as string[],
+    // AI 对话框收缩状态（仅 adjust 模式）
+    aiChatCollapsed: false
 });
 
 // ==================== AI 集成 ====================
@@ -781,6 +806,11 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
     gap: 0;
 }
+.tree-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
 .drawer-header {
     display: flex;
     align-items: center;
@@ -833,8 +863,50 @@ onBeforeUnmount(() => {
         // chat-area 的 overflow-y:auto 失效（split 横向模式下无影响）
         min-height: 0;
 
+        // 收缩态：变成一条窄竖条，显示切换按钮 + 竖排 AI 标签
+        &.collapsed {
+            flex: 0 0 56px;
+            max-width: 56px;
+            border-left: 1px solid var(--el-border-color-lighter);
+
+            .chat-collapse-bar {
+                flex-direction: column;
+                justify-content: flex-start;
+                align-items: center;
+                padding: 16px 0 12px;
+                gap: 12px;
+                border-bottom: none;
+                margin-bottom: 0;
+
+                .collapsed-label {
+                    writing-mode: vertical-rl;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: var(--el-color-primary);
+                    letter-spacing: 3px;
+                }
+            }
+        }
+
+        // 顶部收缩按钮条（展开态：靠右显示一条分隔线下拉小按钮）
+        .chat-collapse-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 2px 8px 6px;
+            border-bottom: 1px solid var(--el-border-color-lighter);
+            margin-bottom: 8px;
+        }
+
+        .ai-chat-col-inner {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
         // aiChat 根元素撑满列（组件内部 height:100% 在 flex 列中不稳）
-        > :deep(.ai-chat-panel) {
+        .ai-chat-col-inner > :deep(.ai-chat-panel) {
             flex: 1;
             min-height: 0;
         }
@@ -848,6 +920,11 @@ onBeforeUnmount(() => {
         border: 1px solid var(--el-border-color-lighter);
         border-radius: 6px;
         overflow: hidden;
+
+        // 对话框收缩时，预览列完全占满剩余空间
+        &.chat-collapsed {
+            flex: 1;
+        }
 
         .preview-toolbar {
             display: flex;

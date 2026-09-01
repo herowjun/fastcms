@@ -115,6 +115,16 @@ public class ReplyStreamExtractor {
     }
 
     /**
+     * reply 是否已提取完毕（遇到闭引号结束）
+     *
+     * <p>调用方据此感知"正文已流完、后续 chunk 属于 files 等其余字段"，
+     * 用于推送文件传输阶段的状态提示。</p>
+     */
+    public boolean isFinished() {
+        return finished;
+    }
+
+    /**
      * 尝试在缓冲区中定位 "reply" 键及其字符串值起点
      *
      * @return true 表示已进入 reply 字符串；false 表示尚未找到（继续等待）
