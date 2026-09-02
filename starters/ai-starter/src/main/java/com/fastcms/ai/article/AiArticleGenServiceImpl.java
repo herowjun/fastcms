@@ -46,7 +46,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * AI 文章内容生产服务实现（无状态）
@@ -65,13 +69,33 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
-     * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）
+     * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）。
+     *
+     * <p>旧实现用 newCachedThreadPool 无上限创建线程，并发滥用会耗尽线程资源；
+     * 改为有界池（SynchronousQueue，超过 max 直接拒绝），拒绝时向调用方返回"并发已达上限"提示
+     * （与 AiTemplateGenServiceImpl 的有界池策略保持一致）。</p>
      */
-    private final ExecutorService sseExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "ai-article-sse");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService sseExecutor = new ThreadPoolExecutor(
+            2, 16, 60L, TimeUnit.SECONDS,
+            new SynchronousQueue<>(),
+            r -> {
+                Thread t = new Thread(r, "ai-article-sse");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 提交 SSE 长任务到有界线程池；池满被拒时直接向前端返回错误事件（明确提示而非无响应）
+     */
+    private void submitSseTask(SseEmitter emitter, Runnable task) {
+        try {
+            sseExecutor.execute(task);
+        } catch (RejectedExecutionException e) {
+            log.warn("AI 文章任务被拒绝（线程池已满）");
+            sendError(emitter, "当前 AI 任务并发已达上限，请稍后再试");
+            complete(emitter);
+        }
+    }
 
     @Autowired
     private IAiModelConfigService modelConfigService;
@@ -92,7 +116,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
     @Override
     public void generate(AiArticleGenRequest request, Long userId, SseEmitter emitter) {
-        sseExecutor.execute(() -> {
+        submitSseTask(emitter, () -> {
             try {
                 doGenerate(request, userId, emitter);
             } catch (Exception e) {
@@ -118,6 +142,10 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
+        // 失败原因跟踪：finally 落审计时区分成功/失败（此前恒传 null，失败调用在 ai_usage_log 里 success=1）
+        String[] errorMessage = {null};
+        // 客户端断开标记：文章生成结果只推送给前端（无服务端持久化），断开后继续消费模型流纯属浪费上游 token
+        final AtomicBoolean clientGone = new AtomicBoolean(false);
         try {
             quotaChecker.check(userId);
 
@@ -170,27 +198,40 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             String rc = String.valueOf(reasoning);
                             String prev = reasoningBuf.toString();
                             if (rc.length() > prev.length() && rc.startsWith(prev)) {
+                                // 累积模式：推送差分增量
                                 String delta = rc.substring(prev.length());
                                 if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta);
+                                    sendEvent(emitter, "reasoning", delta, clientGone);
                                 }
+                                reasoningBuf.setLength(0);
+                                reasoningBuf.append(rc);
+                            } else if (!rc.equals(prev)) {
+                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
+                                sendEvent(emitter, "reasoning", rc, clientGone);
+                                reasoningBuf.append(rc);
                             }
-                            reasoningBuf.setLength(0);
-                            reasoningBuf.append(rc);
                         }
                         String chunk = output.getText();
                         if (StringUtils.hasText(chunk)) {
                             responseBuffer.append(chunk);
                             String replyDelta = replyExtractor.feed(chunk);
                             if (StringUtils.hasText(replyDelta)) {
-                                sendEvent(emitter, "message", replyDelta);
+                                sendEvent(emitter, "message", replyDelta, clientGone);
                             }
                         }
                     })
+                    // 客户端断开后立即停止消费模型流（断开由 sendEvent 推送失败感知），不再白烧上游 token
+                    .takeWhile(resp -> !clientGone.get())
                     .blockLast();
+
+            if (clientGone.get()) {
+                errorMessage[0] = "客户端已断开，生成已中止";
+                return;
+            }
 
             String fullResponse = responseBuffer.toString();
             if (!StringUtils.hasText(fullResponse)) {
+                errorMessage[0] = "AI 返回空响应";
                 sendError(emitter, "AI 返回空响应");
                 return;
             }
@@ -208,6 +249,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             }
 
             if (!article.containsKey("content")) {
+                errorMessage[0] = "AI 响应未包含文章内容";
                 sendError(emitter, "AI 响应未包含文章内容，请重试或换个主题描述");
                 return;
             }
@@ -235,13 +277,15 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             sendDone(emitter, MAPPER.writeValueAsString(doneData));
             log.info("AI 文章生成完成: userId={}, title={}", userId, article.get("title"));
         } catch (AiQuotaExceededException e) {
+            errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
             log.error("AI 文章生成失败: userId={}", userId, e);
+            errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
             recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_GEN, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, null);
+                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
@@ -249,7 +293,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
     @Override
     public void rewrite(AiArticleRewriteRequest request, Long userId, SseEmitter emitter) {
-        sseExecutor.execute(() -> {
+        submitSseTask(emitter, () -> {
             try {
                 doRewrite(request, userId, emitter);
             } catch (Exception e) {
@@ -275,6 +319,8 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
+        String[] errorMessage = {null};
+        final AtomicBoolean clientGone = new AtomicBoolean(false);
         try {
             quotaChecker.check(userId);
 
@@ -329,24 +375,37 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             String rc = String.valueOf(reasoning);
                             String prev = reasoningBuf.toString();
                             if (rc.length() > prev.length() && rc.startsWith(prev)) {
+                                // 累积模式：推送差分增量
                                 String delta = rc.substring(prev.length());
                                 if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta);
+                                    sendEvent(emitter, "reasoning", delta, clientGone);
                                 }
+                                reasoningBuf.setLength(0);
+                                reasoningBuf.append(rc);
+                            } else if (!rc.equals(prev)) {
+                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
+                                sendEvent(emitter, "reasoning", rc, clientGone);
+                                reasoningBuf.append(rc);
                             }
-                            reasoningBuf.setLength(0);
-                            reasoningBuf.append(rc);
                         }
                         // 直接流式推送改写文本增量
                         String chunk = output.getText();
                         if (StringUtils.hasText(chunk)) {
                             rewritten.append(chunk);
-                            sendEvent(emitter, "message", chunk);
+                            sendEvent(emitter, "message", chunk, clientGone);
                         }
                     })
+                    // 客户端断开后立即停止消费模型流，不再白烧上游 token
+                    .takeWhile(resp -> !clientGone.get())
                     .blockLast();
 
+            if (clientGone.get()) {
+                errorMessage[0] = "客户端已断开，生成已中止";
+                return;
+            }
+
             if (rewritten.length() == 0) {
+                errorMessage[0] = "AI 返回空响应";
                 sendError(emitter, "AI 返回空响应");
                 return;
             }
@@ -375,13 +434,15 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 sendDone(emitter, rewritten.toString());
             }
         } catch (AiQuotaExceededException e) {
+            errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
             log.error("AI 文章改写失败: userId={}", userId, e);
+            errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
             recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_REWRITE, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, null);
+                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
@@ -389,7 +450,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
     @Override
     public void generateField(AiArticleFieldRequest request, Long userId, SseEmitter emitter) {
-        sseExecutor.execute(() -> {
+        submitSseTask(emitter, () -> {
             try {
                 doGenerateField(request, userId, emitter);
             } catch (Exception e) {
@@ -410,6 +471,8 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
+        String[] errorMessage = {null};
+        final AtomicBoolean clientGone = new AtomicBoolean(false);
         try {
             quotaChecker.check(userId);
 
@@ -456,23 +519,36 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             String rc = String.valueOf(reasoning);
                             String prev = reasoningBuf.toString();
                             if (rc.length() > prev.length() && rc.startsWith(prev)) {
+                                // 累积模式：推送差分增量
                                 String delta = rc.substring(prev.length());
                                 if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta);
+                                    sendEvent(emitter, "reasoning", delta, clientGone);
                                 }
+                                reasoningBuf.setLength(0);
+                                reasoningBuf.append(rc);
+                            } else if (!rc.equals(prev)) {
+                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
+                                sendEvent(emitter, "reasoning", rc, clientGone);
+                                reasoningBuf.append(rc);
                             }
-                            reasoningBuf.setLength(0);
-                            reasoningBuf.append(rc);
                         }
                         String chunk = output.getText();
                         if (StringUtils.hasText(chunk)) {
                             responseBuffer.append(chunk);
                         }
                     })
+                    // 客户端断开后立即停止消费模型流，不再白烧上游 token
+                    .takeWhile(resp -> !clientGone.get())
                     .blockLast();
+
+            if (clientGone.get()) {
+                errorMessage[0] = "客户端已断开，生成已中止";
+                return;
+            }
 
             List<String> candidates = parseCandidates(responseBuffer.toString());
             if (candidates.isEmpty()) {
+                errorMessage[0] = "AI 未返回有效候选";
                 sendError(emitter, "AI 未返回有效候选，请重试");
                 return;
             }
@@ -500,13 +576,15 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             doneData.put("logId", opLogId);
             sendDone(emitter, MAPPER.writeValueAsString(doneData));
         } catch (AiQuotaExceededException e) {
+            errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
             log.error("AI 字段生成失败: userId={}, field={}", userId, request.getField(), e);
+            errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
             recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_FIELD, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, null);
+                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
@@ -543,6 +621,11 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
     /**
      * 容错提取 JSON：支持被 markdown 代码块包裹、前后有解释文字的响应
+     *
+     * <p>按首个非空白字符判定对象（{@code {}）/数组（{@code []}）形态后只做对应的一次截取。
+     * 此前实现先截 {@code {...}} 再无条件截 {@code [...]}——对象响应的 content 值里
+     * 含 {@code [}（HTML 正文中的 markdown 链接等很常见）时合法 JSON 会被二次截成碎片，
+     * 造成间歇性"AI 响应未包含文章内容"。</p>
      */
     private JsonNode extractJson(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -561,15 +644,34 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             }
             json = json.trim();
         }
-        int braceStart = json.indexOf('{');
-        int braceEnd = json.lastIndexOf('}');
-        if (braceStart >= 0 && braceEnd > braceStart) {
-            json = json.substring(braceStart, braceEnd + 1);
-        }
-        int bracketStart = json.indexOf('[');
-        int bracketEnd = json.lastIndexOf(']');
-        if (bracketStart >= 0 && bracketEnd > bracketStart) {
-            json = json.substring(bracketStart, bracketEnd + 1);
+        char first = json.isEmpty() ? 0 : json.charAt(0);
+        if (first == '{') {
+            // 对象形态：只截最外层大括号（数组符号可能出现在字符串值内，不能再二次截取）
+            int braceEnd = json.lastIndexOf('}');
+            if (braceEnd > 0) {
+                json = json.substring(0, braceEnd + 1);
+            }
+        } else if (first == '[') {
+            // 数组形态：只截最外层中括号
+            int bracketEnd = json.lastIndexOf(']');
+            if (bracketEnd > 0) {
+                json = json.substring(0, bracketEnd + 1);
+            }
+        } else {
+            // 兜底：JSON 前有解释文字，取最先出现的形态（大括号优先，全文生成是最主要场景）
+            int braceStart = json.indexOf('{');
+            if (braceStart >= 0) {
+                int braceEnd = json.lastIndexOf('}');
+                if (braceEnd > braceStart) {
+                    json = json.substring(braceStart, braceEnd + 1);
+                }
+            } else {
+                int bracketStart = json.indexOf('[');
+                int bracketEnd = json.lastIndexOf(']');
+                if (bracketStart >= 0 && bracketEnd > bracketStart) {
+                    json = json.substring(bracketStart, bracketEnd + 1);
+                }
+            }
         }
         try {
             return MAPPER.readTree(json);
@@ -618,6 +720,19 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             emitter.send(SseEmitter.event().name(eventName).data(data));
         } catch (IOException e) {
             log.warn("SSE 推送失败: event={}, {}", eventName, e.getMessage());
+        }
+    }
+
+    /**
+     * 带断连感知的推送：推送失败（客户端已断开/连接已关闭）时置位标记，
+     * 供消费模型流的 takeWhile 立即停止，不再白烧上游 token
+     */
+    private void sendEvent(SseEmitter emitter, String eventName, String data, AtomicBoolean clientGone) {
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+        } catch (IOException | IllegalStateException e) {
+            clientGone.set(true);
+            log.warn("SSE 推送失败（客户端可能已断开）: event={}, {}", eventName, e.getMessage());
         }
     }
 

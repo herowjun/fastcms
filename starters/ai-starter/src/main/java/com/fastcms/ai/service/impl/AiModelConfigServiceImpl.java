@@ -19,10 +19,9 @@ package com.fastcms.ai.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fastcms.ai.service.IAiModelConfigService;
+import com.fastcms.ai.support.AiApiKeyCipher;
 import com.fastcms.entity.AiModelConfig;
 import com.fastcms.mapper.AiModelConfigMapper;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -36,6 +35,7 @@ import org.springframework.util.StringUtils;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AI 模型配置服务实现
@@ -51,6 +51,11 @@ import java.util.Map;
 public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, AiModelConfig> implements IAiModelConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(AiModelConfigServiceImpl.class);
+
+    /**
+     * extraHeaders 解析用的 Jackson 3 Mapper（与模块内其他服务统一，线程安全静态复用）
+     */
+    private static final tools.jackson.databind.ObjectMapper MAPPER = new tools.jackson.databind.ObjectMapper();
 
     /**
      * 前端传回 apiKey 时若为该占位符，表示未修改，保留原值
@@ -96,8 +101,14 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
             return "配置不存在";
         }
         try {
-            ChatModel chatModel = buildChatModel(config);
-            String reply = chatModel.call(new Prompt("hi"))
+            // 测试连接只探测端点连通性与鉴权，不复用 MODEL_CACHE（其 callTimeout 为 10 分钟，
+            // 同步等待会长时间占用 Servlet 线程），这里单独构建 30 秒短超时的一次性模型
+            ChatModel testModel = OpenAiChatModel.builder()
+                    .options(baseOptionsBuilder(config)
+                            .timeout(java.time.Duration.ofSeconds(30))
+                            .build())
+                    .build();
+            String reply = testModel.call(new Prompt("hi"))
                     .getResult()
                     .getOutput()
                     .getText();
@@ -119,6 +130,8 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
                 config.setApiKey(old.getApiKey());
             }
         }
+        // apiKey 加密落库（幂等：空值或已加密值原样返回；历史明文在本次保存时自动转为密文）
+        config.setApiKey(AiApiKeyCipher.encrypt(config.getApiKey()));
         // 如果是新增且 active 未指定，默认 false
         if (config.getId() == null && config.getActive() == null) {
             config.setActive(false);
@@ -132,6 +145,8 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
             }
         }
         saveOrUpdate(config);
+        // 配置变更后整体失效 ChatModel 缓存（apiKey/model/timeout/headers 任一变化都可能影响已缓存的模型实例）
+        MODEL_CACHE.clear();
         log.info("AI 模型配置保存: id={}, name={}, model={}", config.getId(), config.getName(), config.getModel());
         return config;
     }
@@ -152,15 +167,28 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
     private static final String API_KEY_PLACEHOLDER = "no-api-key";
 
     /**
+     * ChatModel 实例缓存（key = 配置 id）：避免每次请求重建模型客户端栈
+     * （OpenAiChatModel 构建含底层 HTTP 客户端装配，文章生成每次请求、模板生成每轮对话都要走）。
+     * 配置变更时在 {@link #saveConfig} 中整体失效。
+     */
+    private static final Map<Long, ChatModel> MODEL_CACHE = new ConcurrentHashMap<>();
+
+    /**
      * 根据配置构建 OpenAiChatModel（运行时动态切换模型用）
      *
-     * <p>每次调用都新建一个 ChatModel 实例。如果后续要做连接池/缓存，
-     * 可以用 config id 作为 key 缓存（监听配置变更失效）。</p>
+     * <p>带 id 的配置优先命中缓存（见 {@link #MODEL_CACHE}），无 id（理论不存在，防御）直接新建。</p>
      *
      * <p>支持通过 extraHeaders 字段注入自定义请求头（JSON 格式），
      * 用于私有部署、企业网关、Ollama API Key 等场景。</p>
      */
     public static ChatModel buildChatModel(AiModelConfig config) {
+        if (config == null || config.getId() == null) {
+            return doBuildChatModel(config);
+        }
+        return MODEL_CACHE.computeIfAbsent(config.getId(), id -> doBuildChatModel(config));
+    }
+
+    private static ChatModel doBuildChatModel(AiModelConfig config) {
         return OpenAiChatModel.builder()
                 .options(baseOptionsBuilder(config).build())
                 .build();
@@ -177,7 +205,9 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
      */
     public static OpenAiChatOptions.Builder baseOptionsBuilder(AiModelConfig config) {
         OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
-                .apiKey(StringUtils.hasText(config.getApiKey()) ? config.getApiKey() : API_KEY_PLACEHOLDER)
+                // 库中为密文（{AES} 前缀）时解密；历史明文原样使用；解密失败抛出明确异常
+                .apiKey(StringUtils.hasText(config.getApiKey())
+                        ? AiApiKeyCipher.decryptIfNeeded(config.getApiKey()) : API_KEY_PLACEHOLDER)
                 .baseUrl(config.getBaseUrl())
                 .model(config.getModel())
                 // OpenAI Java SDK（OkHttp）默认 callTimeout=60s，模板生成等长流式响应会被强制断流
@@ -210,9 +240,9 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
             return Collections.emptyMap();
         }
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> raw = mapper.readValue(json, new TypeReference<Map<String, Object>>() {
-            });
+            Map<String, Object> raw = MAPPER.readValue(json,
+                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+                    });
             Map<String, String> result = new java.util.HashMap<>(raw.size());
             raw.forEach((k, v) -> {
                 if (k != null && v != null) {
@@ -224,6 +254,20 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
             log.warn("解析 extraHeaders 失败，已忽略: {}", e.getMessage());
             return Collections.emptyMap();
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteConfig(Long id) {
+        AiModelConfig config = getById(id);
+        if (config == null) {
+            return;
+        }
+        removeById(id);
+        // 删除后必须失效该配置的 ChatModel 缓存：绕过 saveConfig 直接删除会留下
+        // 已删配置的模型实例残留（含 apiKey/headers），下次按 id 命中即复用脏缓存
+        MODEL_CACHE.remove(id);
+        log.info("AI 模型配置删除: id={}, name={}, model={}", id, config.getName(), config.getModel());
     }
 
 }

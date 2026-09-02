@@ -151,6 +151,12 @@ public class FastcmsPluginManager extends DefaultPluginManager implements Plugin
     @Override
     public void onApplicationEvent(ApplicationStartedEvent event) {
         try {
+            // 收集各模块（如 ai-starter 的 AI 工具注册器）通过 Spring 容器贡献的 PluginRegister，
+            // 追加到注册链末尾后再初始化插件：此时容器已刷新完毕，bean 依赖可正常解析
+            if (applicationContext != null && pluginRegister instanceof CompoundPluginRegister compoundRegister) {
+                applicationContext.getBeansOfType(PluginRegister.class)
+                        .forEach((name, register) -> compoundRegister.addRegister(register));
+            }
             initPlugins();
         } catch (Exception e) {
             e.printStackTrace();

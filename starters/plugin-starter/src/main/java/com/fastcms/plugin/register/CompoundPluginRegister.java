@@ -60,7 +60,11 @@ public class CompoundPluginRegister extends AbstractPluginRegister implements Pl
         }
     }
 
-    void addRegister(PluginRegister pluginRegister) {
+    /**
+     * 追加自定义注册器到注册链末尾（供其他模块通过 Spring 容器贡献插件组件注册逻辑，
+     * 如 ai-starter 的插件 AI 工具注册器）：注册顺序晚于内置注册器，卸载顺序早于内置注册器
+     */
+    public void addRegister(PluginRegister pluginRegister) {
         registerList.add(pluginRegister);
     }
 

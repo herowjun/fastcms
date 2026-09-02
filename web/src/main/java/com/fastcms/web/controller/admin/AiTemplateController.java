@@ -61,6 +61,21 @@ public class AiTemplateController {
     private IAiTemplateGenService templateGenService;
 
     /**
+     * 加载会话并校验属主：会话属于创建者本人，其他管理员（即使拥有 ai:template 权限）
+     * 不可查看/操作他人会话（水平越权防护：apply/rollback/delete 会改动模板目录）
+     *
+     * @return 属主校验通过的会话；会话不存在或非属主时返回 null（调用方统一返回"会话不存在"，
+     *         不区分两种情况，避免向非属主泄露会话是否存在）
+     */
+    private AiTemplateSession requireOwnedSession(String sessionId) {
+        AiTemplateSession session = templateGenService.getSession(sessionId);
+        if (session == null || !java.util.Objects.equals(session.getUserId(), AuthUtils.getUserId())) {
+            return null;
+        }
+        return session;
+    }
+
+    /**
      * 列出当前用户的会话
      */
     @GetMapping("sessions")
@@ -75,7 +90,7 @@ public class AiTemplateController {
     @GetMapping("sessions/{sessionId}")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_LIST, resource = "ai:template:list", action = ActionTypes.READ)
     public RestResult<AiTemplateSession> getSession(@PathVariable("sessionId") String sessionId) {
-        AiTemplateSession session = templateGenService.getSession(sessionId);
+        AiTemplateSession session = requireOwnedSession(sessionId);
         if (session == null) {
             return RestResultUtils.failed("会话不存在");
         }
@@ -101,6 +116,9 @@ public class AiTemplateController {
     @PostMapping("sessions/{sessionId}/delete")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_DELETE, resource = "ai:template:delete", action = ActionTypes.WRITE)
     public RestResult<Boolean> deleteSession(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
         templateGenService.deleteSession(sessionId);
         return RestResultUtils.success(true);
     }
@@ -111,6 +129,9 @@ public class AiTemplateController {
     @GetMapping("sessions/{sessionId}/messages")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_LIST, resource = "ai:template:list", action = ActionTypes.READ)
     public RestResult<List<AiTemplateMessage>> listMessages(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
         return RestResultUtils.success(templateGenService.listMessages(sessionId));
     }
 
@@ -120,6 +141,9 @@ public class AiTemplateController {
     @GetMapping("sessions/{sessionId}/files")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILES, resource = "ai:template:files", action = ActionTypes.READ)
     public RestResult<List<AiTemplateFile>> listFiles(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
         return RestResultUtils.success(templateGenService.listFiles(sessionId));
     }
 
@@ -145,6 +169,14 @@ public class AiTemplateController {
     public SseEmitter chat(@PathVariable("sessionId") String sessionId,
                            @RequestBody AiTemplateChatRequest request) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
+        if (requireOwnedSession(sessionId) == null) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data("{\"message\":\"会话不存在\"}"));
+                emitter.complete();
+            } catch (java.io.IOException ignored) {
+            }
+            return emitter;
+        }
         templateGenService.chatStream(sessionId, request == null ? null : request.getInput(),
                 request == null ? null : request.getCurrentFile(), emitter);
         return emitter;
@@ -159,6 +191,9 @@ public class AiTemplateController {
     @PostMapping("sessions/{sessionId}/apply")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_APPLY, resource = "ai:template:apply", action = ActionTypes.WRITE)
     public RestResult<String> apply(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
         try {
             return RestResultUtils.success(templateGenService.applyTemplate(sessionId));
         } catch (Exception e) {
@@ -176,6 +211,9 @@ public class AiTemplateController {
     @PostMapping("sessions/{sessionId}/rollback")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_ROLLBACK, resource = "ai:template:rollback", action = ActionTypes.WRITE)
     public RestResult<String> rollback(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
         try {
             return RestResultUtils.success(templateGenService.rollbackLast(sessionId));
         } catch (Exception e) {

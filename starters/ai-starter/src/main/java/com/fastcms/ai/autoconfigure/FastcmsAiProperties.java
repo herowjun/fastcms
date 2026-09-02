@@ -77,6 +77,13 @@ public class FastcmsAiProperties {
      */
     private boolean auditEnabled = true;
 
+    /**
+     * API Key 加密主密钥（用于 ai_model_config 表 api_key 字段的 AES-GCM 加密）。
+     * <p>为空时自动生成随机密钥并保存到 ~/fastcms/ai-api-key.secret；
+     * 多实例部署需各实例配置相同值（SHA-256 派生密钥），否则已加密的 API Key 无法跨实例解密。</p>
+     */
+    private String apiKeySecret;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -123,6 +130,14 @@ public class FastcmsAiProperties {
 
     public void setAuditEnabled(boolean auditEnabled) {
         this.auditEnabled = auditEnabled;
+    }
+
+    public String getApiKeySecret() {
+        return apiKeySecret;
+    }
+
+    public void setApiKeySecret(String apiKeySecret) {
+        this.apiKeySecret = apiKeySecret;
     }
 
 }

@@ -99,7 +99,8 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
     /**
      * 运行时刷新静态资源目录
      */
-    private void refreshStaticMapping() throws Exception {
+    @Override
+    public void refreshStaticMapping() throws Exception {
 
         final HandlerMapping resourceHandlerMapping = ApplicationUtils.getBean("resourceHandlerMapping", HandlerMapping.class);
         final Map<String, Object> handlerMap = (Map<String, Object>) ReflectUtil.getFieldValue(resourceHandlerMapping, "handlerMap");

@@ -70,4 +70,11 @@ public interface IAiModelConfigService extends IService<AiModelConfig> {
      */
     List<AiModelConfig> listAll();
 
+    /**
+     * 删除配置（同时失效对应 ChatModel 缓存，避免已删配置的模型实例残留）
+     *
+     * @param id 配置 id
+     */
+    void deleteConfig(Long id);
+
 }

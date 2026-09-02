@@ -53,6 +53,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -65,11 +66,18 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -150,13 +158,76 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private com.fastcms.ai.template.AiTemplatePreviewRenderer previewRenderer;
 
     /**
-     * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）
+     * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）。
+     *
+     * <p>模板生成是长任务（单会话最长 60 分钟），旧实现用 newCachedThreadPool 无上限创建线程，
+     * 并发滥用会耗尽线程资源；这里改为有界池（SynchronousQueue，超过 max 直接拒绝），
+     * 拒绝时向调用方返回"并发已达上限"提示。</p>
      */
-    private final ExecutorService sseExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "ai-template-sse");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService sseExecutor = new ThreadPoolExecutor(
+            2, 16, 60L, TimeUnit.SECONDS,
+            new SynchronousQueue<>(),
+            r -> {
+                Thread t = new Thread(r, "ai-template-sse");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 客户端取消/断开时中断生成的信号（非失败，单独类型避免被当作生成错误处理）
+     */
+    private static final class ChatCancelledException extends RuntimeException {
+        ChatCancelledException() {
+            super("AI 生成已取消（客户端断开）");
+        }
+    }
+
+    /**
+     * SSE 通道封装：客户端断开检测与事件推送
+     *
+     * <p>断开感知的两条路径：①send 失败抛 IOException/IllegalStateException（容器在写出时发现连接已断）；
+     * ②emitter.onError/onTimeout 回调。任一路径触发即标记取消，
+     * 各生成轮次在 doOnNext/循环顶部检测取消标记，抛出 {@link ChatCancelledException} 中断生成，
+     * 不再白烧上游 token（已生成的文件已落盘，断点续传语义保留）。</p>
+     */
+    private static final class SseChannel {
+        private final SseEmitter emitter;
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+
+        SseChannel(SseEmitter emitter) {
+            this.emitter = emitter;
+        }
+
+        boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        void markCancelled() {
+            cancelled.set(true);
+        }
+
+        void send(String eventName, String data) {
+            try {
+                emitter.send(SseEmitter.event().name(eventName).data(data));
+            } catch (IOException | IllegalStateException e) {
+                // 客户端已断开：标记取消（后续轮次中断），推送失败静默（无接收方）
+                cancelled.set(true);
+                log.debug("SSE 推送失败（客户端断开）: event={}", eventName);
+            }
+        }
+
+        void complete() {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * applyTemplate 按模板名互斥锁（不同会话可应用同名模板，并发 apply 会互相踩踏）
+     */
+    private static final Map<String, Object> APPLY_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
     private IAiTemplateSessionService sessionService;
@@ -264,20 +335,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteSession(String sessionId) {
         AiTemplateSession session = getSession(sessionId);
         if (session == null) {
             return;
         }
-        // 仅生成型会话删除预览工作目录；调整型会话的工作目录是正式模板目录，禁止删除
-        if (session.getTemplateId() == null && StringUtils.hasText(session.getWorkDir())) {
-            deleteDirectory(Paths.get(session.getWorkDir()));
-        }
-        // 删除数据库记录
+        // 先删数据库记录（事务内保证多表一致；旧实现先删磁盘目录再删库，
+        // DB 删除失败会留下"目录已删但会话仍出现在列表里"的孤儿数据）
         messageService.deleteBySessionId(sessionId);
         fileService.deleteBySessionId(sessionId);
         backupService.deleteBySessionId(sessionId);
         sessionService.removeById(session.getId());
+        // 再删预览工作目录（仅生成型会话；调整型会话的工作目录是正式模板目录，禁止删除）。
+        // 目录删除失败只留下无 DB 记录的孤儿目录（不出现在会话列表，可手工清理），可接受
+        if (session.getTemplateId() == null && StringUtils.hasText(session.getWorkDir())) {
+            deleteDirectory(Paths.get(session.getWorkDir()));
+        }
         log.info("AI 模板生成会话删除: sessionId={}", sessionId);
     }
 
@@ -295,32 +369,54 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
     @Override
     public void chatStream(String sessionId, String userInput, String currentFile, SseEmitter emitter) {
+        // SSE 通道封装：send 失败/断开回调即标记取消，各生成轮次检测后中断（见 SseChannel）
+        SseChannel channel = new SseChannel(emitter);
         AiTemplateSession session = getSession(sessionId);
         if (session == null) {
-            sendError(emitter, "会话不存在: " + sessionId);
-            complete(emitter);
+            sendError(channel, "会话不存在: " + sessionId);
+            channel.complete();
             return;
         }
+        // 客户端断开/超时的容器回调：send 失败之外的第二条断开感知路径
+        emitter.onError(t -> channel.markCancelled());
+        emitter.onTimeout(channel::markCancelled);
 
-        sseExecutor.execute(() -> {
-            try {
-                doChatStream(session, userInput, currentFile, emitter);
-            } catch (Exception e) {
-                log.error("AI 模板生成 SSE 对话异常: sessionId={}", sessionId, e);
-                // 失败原因落库为带标记的 assistant 消息：会话刷新/重进后仍能看到失败原因
-                // （不落库会产生"空壳会话"：只有用户需求，无回复无文件无 plan，且无从追溯）
-                String errMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+        try {
+            sseExecutor.execute(() -> {
                 try {
-                    messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
-                            AiTemplateConstants.MSG_FAIL_PREFIX + errMsg);
-                } catch (Exception persistEx) {
-                    log.warn("失败消息落库异常: sessionId={}", sessionId, persistEx);
+                    doChatStream(session, userInput, currentFile, channel);
+                } catch (ChatCancelledException ce) {
+                    // 客户端断开/用户停止：已生成的文件已落盘（断点续传语义保留），
+                    // 落一条带标记的 assistant 消息，避免刷新后无法追溯这轮为何没有结果
+                    log.info("AI 模板生成已取消（客户端断开）: sessionId={}", sessionId);
+                    try {
+                        messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
+                                AiTemplateConstants.MSG_FAIL_PREFIX + "生成已中断（连接断开或已停止），已生成的文件已保存，重新发送消息可继续。");
+                    } catch (Exception persistEx) {
+                        log.warn("取消消息落库异常: sessionId={}", sessionId, persistEx);
+                    }
+                } catch (Exception e) {
+                    log.error("AI 模板生成 SSE 对话异常: sessionId={}", sessionId, e);
+                    // 失败原因落库为带标记的 assistant 消息：会话刷新/重进后仍能看到失败原因
+                    // （不落库会产生"空壳会话"：只有用户需求，无回复无文件无 plan，且无从追溯）
+                    String errMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    try {
+                        messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
+                                AiTemplateConstants.MSG_FAIL_PREFIX + errMsg);
+                    } catch (Exception persistEx) {
+                        log.warn("失败消息落库异常: sessionId={}", sessionId, persistEx);
+                    }
+                    sendError(channel, errMsg);
+                } finally {
+                    channel.complete();
                 }
-                sendError(emitter, errMsg);
-            } finally {
-                complete(emitter);
-            }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            // 有界线程池已满（并发长任务过多）：明确提示而不是无响应
+            log.warn("AI 模板生成任务被拒绝（线程池已满）: sessionId={}", sessionId);
+            sendError(channel, "当前 AI 任务并发已达上限，请稍后再试");
+            channel.complete();
+        }
     }
 
     /**
@@ -337,12 +433,12 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      *     <li>通过 SSE 推送事件给前端</li>
      * </ol>
      */
-    private void doChatStream(AiTemplateSession session, String userInput, String currentFile, SseEmitter emitter) throws Exception {
+    private void doChatStream(AiTemplateSession session, String userInput, String currentFile, SseChannel channel) throws Exception {
         // 0. 配额检查（fastcms.ai.daily-token-quota，超限直接拒绝，不产生模型调用）
         try {
             quotaChecker.check(session.getUserId());
         } catch (AiQuotaExceededException e) {
-            sendError(emitter, e.getMessage());
+            sendError(channel, e.getMessage());
             return;
         }
 
@@ -353,7 +449,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         org.springframework.ai.chat.metadata.Usage[] lastUsage = {null};
 
         try {
-            doChatStreamInternal(session, userInput, currentFile, emitter, lastUsage);
+            doChatStreamInternal(session, userInput, currentFile, channel, lastUsage);
             succeeded[0] = true;
         } catch (Exception e) {
             errorMessage[0] = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -364,14 +460,15 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             int completionTokens = lastUsage[0] == null || lastUsage[0].getCompletionTokens() == null ? 0 : lastUsage[0].getCompletionTokens();
             int totalTokens = lastUsage[0] == null || lastUsage[0].getTotalTokens() == null
                     ? promptTokens + completionTokens : lastUsage[0].getTotalTokens();
+            // 模型名只查一次（此前每个分支各调两次 getActiveConfig，各触发一次 DB 查询）
+            AiModelConfig auditConfig = modelConfigService.getActiveConfig();
+            String auditModel = auditConfig == null ? null : auditConfig.getModel();
             if (succeeded[0]) {
                 usageRecorder.record(session.getUserId(), sceneOf(session), session.getSessionId(),
-                        modelConfigService.getActiveConfig() == null ? null : modelConfigService.getActiveConfig().getModel(),
-                        promptTokens, completionTokens, totalTokens, System.currentTimeMillis() - startTime);
+                        auditModel, promptTokens, completionTokens, totalTokens, System.currentTimeMillis() - startTime);
             } else {
                 usageRecorder.recordError(session.getUserId(), sceneOf(session), session.getSessionId(),
-                        modelConfigService.getActiveConfig() == null ? null : modelConfigService.getActiveConfig().getModel(),
-                        System.currentTimeMillis() - startTime, errorMessage[0]);
+                        auditModel, System.currentTimeMillis() - startTime, errorMessage[0]);
             }
         }
     }
@@ -386,11 +483,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     private void doChatStreamInternal(AiTemplateSession session, String userInput, String currentFile,
-                                      SseEmitter emitter, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
+                                      SseChannel channel, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
         // 1. 获取激活的模型配置
         AiModelConfig modelConfig = modelConfigService.getActiveConfig();
         if (modelConfig == null) {
-            sendError(emitter, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
+            sendError(channel, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
             return;
         }
         ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
@@ -413,7 +510,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         //    任何新一轮对话都继续流水线、只补齐缺失文件，而不是当作微调。
         if (!StringUtils.hasText(session.getTemplateId())
                 && (isFirstChat || hasMissingPlanFiles(session))) {
-            runBatchPipeline(session, modelConfig, chatClient, userInput, emitter, lastUsage);
+            runBatchPipeline(session, modelConfig, chatClient, userInput, channel, lastUsage);
             return;
         }
 
@@ -471,6 +568,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return (exists ? "正在修改 " : "正在生成 ") + path + "…";
         };
         for (int round = 0; ; round++) {
+            // 客户端已断开：不再发起下一轮模型调用（白烧上游 token），中断并保留已落盘文件
+            if (channel.isCancelled()) {
+                throw new ChatCancelledException();
+            }
             ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
             // Spring AI 透传的 reasoningContent 是"累积值"（每个 chunk 带到当前为止的完整思考文本），
             // 做差分后仅推送新增部分
@@ -479,7 +580,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             // 调整/微调轮同样走统一 options（显式 model + Qwen3 reasoning_effort=low）。
             // 实测（TEMPLATE_ADJUST 用量记录）：Qwen3.6 全力思考可把 completion 吃满 maxTokens
             // （8774 输入 / 16384 输出 / 耗时 6.4 分钟，正文一个 token 未出），最终只能报"AI 返回空响应"
-            String fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
+            String fullResponse = callModelRound(chatClient, messages, channel, replyExtractor, reasoningBuf, roundUsage,
                     buildPipelineOptions(modelConfig, roundMaxTokens), fileStatusResolver);
 
             // 先解析（空响应时为 null）：截断重试的判定需要解析结果参与
@@ -493,11 +594,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             boolean parseFailed = parsed == null
                     || (!StringUtils.hasText(parsed.getReply()) && parsed.getFiles().isEmpty());
             if (parseFailed && effectiveMaxTokens > 0 && roundUsage[1] >= effectiveMaxTokens) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（输出达到上限（思考耗尽或文件内容被截断），正在提升上限重试…）");
                 replyExtractor = new ReplyStreamExtractor();
                 reasoningBuf = new StringBuilder();
-                fullResponse = callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, roundUsage,
+                fullResponse = callModelRound(chatClient, messages, channel, replyExtractor, reasoningBuf, roundUsage,
                         buildPipelineOptions(modelConfig, Math.max(effectiveMaxTokens * 2, 32768)), fileStatusResolver);
                 if (StringUtils.hasText(fullResponse)) {
                     parsed = responseParser.parseResponse(fullResponse);
@@ -511,7 +612,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 // 与异常路径一致：失败原因落库（前端刷新后仍能显示失败态与重新生成入口）
                 messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
                         AiTemplateConstants.MSG_FAIL_PREFIX + "AI 返回空响应（思考过程可能耗尽了输出上限）");
-                sendError(emitter, "AI 返回空响应");
+                sendError(channel, "AI 返回空响应");
                 return;
             }
 
@@ -534,7 +635,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         + (salvagedReply == null ? "" : "。AI 回复：" + salvagedReply);
                 messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
                         failMsg, reasoningText);
-                sendError(emitter, "AI 响应解析失败（输出被截断），已提示重试机制，请重试或简化本次改动范围");
+                sendError(channel, "AI 响应解析失败（输出被截断），已提示重试机制，请重试或简化本次改动范围");
                 return;
             }
 
@@ -562,7 +663,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         writeToFile(session, file, assistantMessage.getId());
 
                         // 推送文件事件给前端
-                        sendFileEvent(emitter, file);
+                        sendFileEvent(channel, file);
 
                         // 记录本轮写入的 html（渲染校验对象；删除动作无文件可校验）
                         if (file.getPath() != null
@@ -585,10 +686,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
             if (!renderErrors.isEmpty() && round < MAX_RENDER_FIX_ATTEMPTS) {
                 // 自动修复轮：把渲染错误（含文件与行号）反馈给模型，附带写盘后的最新文件内容
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n\n（检测到 " + renderErrors.size() + " 个文件渲染失败，正在自动修复…）\n");
                 if (hasReply && !replyExtractor.wasEmitted()) {
-                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
                 }
                 messages.add(new org.springframework.ai.chat.messages.AssistantMessage(assistantMsg));
                 Path workDir = resolveEffectiveWorkDir(session);
@@ -602,10 +703,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             // 保证前端聊天区始终有内容
             if (hasReply) {
                 if (!replyExtractor.wasEmitted()) {
-                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
                 }
             } else if (hasFiles) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "已生成 " + successCount + " 个文件");
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "已生成 " + successCount + " 个文件");
             }
 
             // 推送完成事件；自动修复后仍存在渲染错误时如实告知（不再谎报"已完成"）
@@ -618,7 +719,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 String failNote = "已自动修复多轮，仍有 " + renderErrors.size()
                         + " 个文件渲染失败：\n" + errSb
                         + "可把上述错误信息发给 AI 继续修复，或手工修改对应文件。";
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n" + failNote);
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n" + failNote);
                 messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, failNote);
                 summary = "完成，但仍有 " + renderErrors.size() + " 个文件渲染失败（详见消息）";
             } else if (hasFiles) {
@@ -627,7 +728,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 // 纯对话场景（咨询/闲聊）：reply 即完整回复
                 summary = reply;
             }
-            sendDone(emitter, truncate(summary, 100));
+            sendDone(channel, truncate(summary, 100));
             log.info("AI 模板生成对话完成: sessionId={}, files={}, renderErrors={}, fixRounds={}",
                     session.getSessionId(), totalFiles, renderErrors.size(), round);
             return;
@@ -659,9 +760,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             AiTemplateConstants.DIR_STATIC_CSS + "/base.css");
 
     /**
-     * plan 文件清单的 JSON 序列化/反序列化（独立于响应解析器的 Mapper，仅处理简单字符串数组）
+     * JSON 序列化/反序列化 Mapper（plan 清单持久化 + SSE 事件数据；替代手写 JSON 拼接，
+     * Jackson 3 线程安全，异常为 unchecked）
      */
-    private static final tools.jackson.databind.ObjectMapper PLAN_MAPPER = new tools.jackson.databind.ObjectMapper();
+    private static final tools.jackson.databind.ObjectMapper JSON_MAPPER = new tools.jackson.databind.ObjectMapper();
 
     /**
      * 单轮流式调用的信号间隔超时：连续该时长无任何增量（含思考增量）判定为流死
@@ -689,11 +791,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @param modelConfig 激活的模型配置（用于截断判断）
      * @param chatClient 已构建的 ChatClient
      * @param userInput 用户需求描述
-     * @param emitter   SSE 推送器
+     * @param channel   SSE 通道（推送事件 + 客户端断开检测）
      * @param usageOut  审计用量输出（多轮累计）
      */
     private void runBatchPipeline(AiTemplateSession session, AiModelConfig modelConfig, ChatClient chatClient,
-                                  String userInput, SseEmitter emitter,
+                                  String userInput, SseChannel channel,
                                   org.springframework.ai.chat.metadata.Usage[] usageOut) {
         String systemPrompt = promptBuilder.buildSystemPrompt(session.getTemplateName());
         long[] usageAgg = new long[3];
@@ -716,7 +818,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             ReplyStreamExtractor planExtractor = new ReplyStreamExtractor();
             String planResponse = callModelRound(chatClient,
                     List.of(new SystemMessage(systemPrompt), new UserMessage(planPrompt)),
-                    emitter, planExtractor, allReasoning, usageAgg,
+                    channel, planExtractor, allReasoning, usageAgg,
                     buildPipelineOptions(modelConfig, null));
 
             AiTemplateResponseParser.ParseResult planParsed = responseParser.parseResponse(planResponse);
@@ -729,13 +831,13 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             // 规划解析兜底：解析失败时按必备文件清单生成，不让流程中断
             if (plannedFiles.isEmpty()) {
                 plannedFiles = new ArrayList<>(DEFAULT_PLAN_FILES);
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（规划结果解析失败，按必备文件清单逐个生成）");
                 log.warn("规划轮解析失败，使用默认清单: sessionId={}", session.getSessionId());
             }
             // 规划 reply 兜底（流式期间未推出时补推）
             if (StringUtils.hasText(planParsed.getReply()) && !planExtractor.wasEmitted()) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, planParsed.getReply());
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, planParsed.getReply());
             }
             // 持久化 plan：刷新页面重算进度卡、中断后断点续传的依据
             persistPlan(session, plannedFiles);
@@ -754,7 +856,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     layoutContent = f.getContent();
                 }
             }
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                     "（检测到未完成的生成任务，继续补齐缺失文件）");
             log.info("流水线断点续传: sessionId={}, planned={}, done={}",
                     session.getSessionId(), plannedFiles.size(), donePaths.size());
@@ -767,7 +869,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (pendingFiles.isEmpty()) {
             String msg = "所有规划文件均已生成完毕。如需调整，请直接描述微调需求。";
             messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, msg, null);
-            sendDone(emitter, msg);
+            sendDone(channel, msg);
             return;
         }
         // 单文件轮的需求描述：续传时用会话的原始需求（本轮输入可能只是"补齐"）；
@@ -776,34 +878,38 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 ? session.getRequirement() : userInput;
 
         for (String path : pendingFiles) {
-            sendProgress(emitter, plannedFiles, plannedFiles.indexOf(path), donePaths);
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n📄 正在生成 " + path + " …");
+            // 客户端已断开：停止发起后续文件轮（白烧上游 token），已生成的文件保留（断点续传）
+            if (channel.isCancelled()) {
+                throw new ChatCancelledException();
+            }
+            sendProgress(channel, plannedFiles, plannedFiles.indexOf(path), donePaths);
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n📄 正在生成 " + path + " …");
 
             String existingContext = buildGenContext(generatedFiles, layoutContent);
             String filePrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext, null);
             AiTemplateFileDto fileDto = generateSingleFile(chatClient, systemPrompt, filePrompt,
-                    path, emitter, allReasoning, usageAgg, modelConfig, null);
+                    path, channel, allReasoning, usageAgg, modelConfig, null);
 
             // 直出失败（多为触达 max_tokens 截断）→ 分块生成路径：
             // 规划轮划分块（输出极小不会截断）+ 逐块生成（每块输出量级远低于上限），
             // 从结构上保证文件大小与 max_tokens 配置解耦——文件再大也只是块数变多
             if (fileDto == null) {
                 fileDto = generateFileByChunks(chatClient, systemPrompt, genRequirement, path,
-                        existingContext, emitter, allReasoning, usageAgg, modelConfig);
+                        existingContext, channel, allReasoning, usageAgg, modelConfig);
             }
 
             // 分块仍失败 → 压缩篇幅 + maxTokens 翻倍重试（兜底）。
             // 思考 tokens 计入 completion：推理模型单轮思考过长也可能吃满 max_tokens 配置导致 JSON 截断，
             // 重试轮在上限不为空时翻倍（至少 32768），给长思考留出完整输出空间
             if (fileDto == null) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（" + path + " 输出异常，正在重试…）");
                 String retryPrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext,
                         "上一次输出被截断或格式非法。请务必压缩篇幅：删除全部注释、精简样式与结构，确保 JSON 完整且 content 为完整文件内容。");
                 Integer retryMaxTokens = modelConfig.getMaxTokens() != null
                         ? Math.max(modelConfig.getMaxTokens() * 2, 32768) : null;
                 fileDto = generateSingleFile(chatClient, systemPrompt, retryPrompt,
-                        path, emitter, allReasoning, usageAgg, modelConfig, retryMaxTokens);
+                        path, channel, allReasoning, usageAgg, modelConfig, retryMaxTokens);
             }
 
             if (fileDto != null) {
@@ -820,7 +926,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                             fileDto.getContent() == null ? "" : fileDto.getContent(),
                             AiTemplateConstants.ACTION_CREATE);
                     writeToFile(session, fileDto, null);
-                    sendFileEvent(emitter, fileDto);
+                    sendFileEvent(channel, fileDto);
                 } catch (Exception e) {
                     log.warn("流水线文件写入失败: sessionId={}, path={}", session.getSessionId(), path, e);
                 }
@@ -828,7 +934,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 failedPaths.add(path);
                 log.warn("流水线单文件生成失败（重试后仍失败）: sessionId={}, path={}", session.getSessionId(), path);
             }
-            sendProgress(emitter, plannedFiles, -1, donePaths);
+            sendProgress(channel, plannedFiles, -1, donePaths);
         }
 
         // ===== 汇总收尾 =====
@@ -841,10 +947,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         String reasoningText = allReasoning.length() > 0 ? allReasoning.toString() : null;
         messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, summary, reasoningText);
         if (donePaths.isEmpty()) {
-            sendError(emitter, "所有文件生成失败，请重试或调整需求描述");
+            sendError(channel, "所有文件生成失败，请重试或调整需求描述");
             return;
         }
-        sendDone(emitter, truncate(summary, 100));
+        sendDone(channel, truncate(summary, 100));
         log.info("AI 模板分批生成完成: sessionId={}, resumed={}, planned={}, done={}, failed={}",
                 session.getSessionId(), resumed, plannedFiles.size(), donePaths.size(), failedPaths.size());
     }
@@ -860,7 +966,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return List.of();
         }
         try {
-            List<String> files = PLAN_MAPPER.readValue(plan,
+            List<String> files = JSON_MAPPER.readValue(plan,
                     new tools.jackson.core.type.TypeReference<List<String>>() {});
             if (files == null) {
                 return List.of();
@@ -882,7 +988,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      */
     private void persistPlan(AiTemplateSession session, List<String> plannedFiles) {
         try {
-            session.setPlanFiles(PLAN_MAPPER.writeValueAsString(plannedFiles));
+            session.setPlanFiles(JSON_MAPPER.writeValueAsString(plannedFiles));
             sessionService.updateById(session);
         } catch (Exception e) {
             log.warn("持久化 plan 失败: sessionId={}", session.getSessionId(), e);
@@ -915,7 +1021,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @return 校验通过的文件 DTO；调用异常/输出截断/解析失败/内容为空时返回 null（触发调用方重试）
      */
     private AiTemplateFileDto generateSingleFile(ChatClient chatClient, String systemPrompt, String filePrompt,
-                                                 String targetPath, SseEmitter emitter, StringBuilder reasoningSink,
+                                                 String targetPath, SseChannel channel, StringBuilder reasoningSink,
                                                  long[] usageAgg, AiModelConfig modelConfig, Integer maxTokensOverride) {
         ReplyStreamExtractor extractor = new ReplyStreamExtractor();
         long completionBefore = usageAgg[1];
@@ -923,8 +1029,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         try {
             response = callModelRound(chatClient,
                     List.of(new SystemMessage(systemPrompt), new UserMessage(filePrompt)),
-                    emitter, extractor, reasoningSink, usageAgg,
+                    channel, extractor, reasoningSink, usageAgg,
                     buildPipelineOptions(modelConfig, maxTokensOverride));
+        } catch (ChatCancelledException e) {
+            // 客户端断开不是"单文件失败"：向上传播中断整条流水线，避免误入重试继续白烧 token
+            throw e;
         } catch (Exception e) {
             // 单轮调用异常（含两种超时）不冒泡：返回 null 走单文件重试，避免炸掉整条流水线
             log.warn("单文件生成调用异常（按失败处理，走重试）: path={}, err={}", targetPath, e.getMessage());
@@ -961,7 +1070,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
         // reply 兜底（流式期间未推出时补推）
         if (StringUtils.hasText(parsed.getReply()) && !extractor.wasEmitted()) {
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n" + parsed.getReply());
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n" + parsed.getReply());
         }
         return target;
     }
@@ -983,16 +1092,16 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      */
     private AiTemplateFileDto generateFileByChunks(ChatClient chatClient, String systemPrompt,
                                                   String requirement, String targetPath, String existingContext,
-                                                  SseEmitter emitter, StringBuilder reasoningSink,
+                                                  SseChannel channel, StringBuilder reasoningSink,
                                                   long[] usageAgg, AiModelConfig modelConfig) {
-        sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+        sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                 "\n（" + targetPath + " 单轮输出失败（超限或格式非法），转分块生成模式）");
         try {
             // ===== 分块规划轮：只输出块数与每块摘要 =====
             String planPrompt = promptBuilder.buildChunkPlanPrompt(requirement, targetPath, existingContext);
             String planResponse = callModelRound(chatClient,
                     List.of(new SystemMessage(systemPrompt), new UserMessage(planPrompt)),
-                    emitter, new ReplyStreamExtractor(), reasoningSink, usageAgg,
+                    channel, new ReplyStreamExtractor(), reasoningSink, usageAgg,
                     buildPipelineOptions(modelConfig, null));
             List<String> outline = parseChunkPlan(planResponse);
             if (outline == null || outline.size() < 2 || outline.size() > MAX_CHUNK_PARTS) {
@@ -1006,20 +1115,20 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             int maxLines = computeChunkPartLines(modelConfig);
             StringBuilder content = new StringBuilder();
             for (int i = 1; i <= totalParts; i++) {
-                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（分块 " + i + "/" + totalParts + "：" + outline.get(i - 1) + " …）");
                 String partPrompt = promptBuilder.buildChunkPartPrompt(requirement, targetPath, i,
                         totalParts, outline, existingContext, maxLines, null);
                 AiTemplateFileDto part = generateSingleFile(chatClient, systemPrompt, partPrompt,
-                        targetPath, emitter, reasoningSink, usageAgg, modelConfig, null);
+                        targetPath, channel, reasoningSink, usageAgg, modelConfig, null);
                 if (part == null) {
-                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                             "\n（第 " + i + " 块输出异常，压缩篇幅重试…）");
                     String retryPrompt = promptBuilder.buildChunkPartPrompt(requirement, targetPath, i,
                             totalParts, outline, existingContext, maxLines,
                             "上一次输出被截断或格式非法。请压缩篇幅至一半以内，确保 JSON 完整且 content 为本块完整内容。");
                     part = generateSingleFile(chatClient, systemPrompt, retryPrompt,
-                            targetPath, emitter, reasoningSink, usageAgg, modelConfig, null);
+                            targetPath, channel, reasoningSink, usageAgg, modelConfig, null);
                 }
                 if (part == null || !StringUtils.hasText(part.getContent())) {
                     log.warn("分块生成失败（块级重试后仍失败）: path={}, part={}/{}", targetPath, i, totalParts);
@@ -1032,9 +1141,12 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             fileDto.setPath(targetPath);
             fileDto.setContent(content.toString());
             fileDto.setAction(AiTemplateConstants.ACTION_CREATE);
-            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE,
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                     "\n（" + targetPath + " 分块生成完成，共 " + totalParts + " 块）");
             return fileDto;
+        } catch (ChatCancelledException e) {
+            // 客户端断开不按"分块失败"处理：向上传播中断流水线，避免继续白烧 token
+            throw e;
         } catch (Exception e) {
             log.warn("分块生成异常: path={}", targetPath, e);
             return null;
@@ -1093,7 +1205,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             if (start < 0 || end <= start) {
                 return null;
             }
-            tools.jackson.databind.JsonNode root = PLAN_MAPPER.readTree(text.substring(start, end + 1));
+            tools.jackson.databind.JsonNode root = JSON_MAPPER.readTree(text.substring(start, end + 1));
             tools.jackson.databind.JsonNode outline = root.get("outline");
             if (outline == null || !outline.isArray() || outline.isEmpty()) {
                 return null;
@@ -1128,9 +1240,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      *
      * <p>分批流水线各轮与单轮对话路径共用；usage 累计到 usageAgg[0..2]。</p>
      */
-    private String callModelRound(ChatClient chatClient, List<Message> messages, SseEmitter emitter,
+    private String callModelRound(ChatClient chatClient, List<Message> messages, SseChannel channel,
                                   ReplyStreamExtractor replyExtractor, StringBuilder reasoningBuf, long[] usageAgg) {
-        return callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, usageAgg, null);
+        return callModelRound(chatClient, messages, channel, replyExtractor, reasoningBuf, usageAgg, null);
     }
 
     /**
@@ -1139,10 +1251,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * <p>覆盖项通过 {@link #buildPipelineOptions} 构造（maxTokens 重试翻倍、思考预算控制），
      * 其余字段（model、apiKey、temperature 等）仍沿用构建 ChatModel 时的默认 options。</p>
      */
-    private String callModelRound(ChatClient chatClient, List<Message> messages, SseEmitter emitter,
+    private String callModelRound(ChatClient chatClient, List<Message> messages, SseChannel channel,
                                   ReplyStreamExtractor replyExtractor, StringBuilder reasoningBuf, long[] usageAgg,
                                   OpenAiChatOptions optionsOverride) {
-        return callModelRound(chatClient, messages, emitter, replyExtractor, reasoningBuf, usageAgg, optionsOverride, null);
+        return callModelRound(chatClient, messages, channel, replyExtractor, reasoningBuf, usageAgg, optionsOverride, null);
     }
 
     /**
@@ -1151,7 +1263,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @param fileStatusResolver 文件路径 → 状态文本（如"正在生成 index.html…"），
      *                           传 null 表示不推送文件级进度（分批流水线轮次自带 progress 快照）
      */
-    private String callModelRound(ChatClient chatClient, List<Message> messages, SseEmitter emitter,
+    private String callModelRound(ChatClient chatClient, List<Message> messages, SseChannel channel,
                                   ReplyStreamExtractor replyExtractor, StringBuilder reasoningBuf, long[] usageAgg,
                                   OpenAiChatOptions optionsOverride,
                                   java.util.function.Function<String, String> fileStatusResolver) {
@@ -1167,6 +1279,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {
+                        // 客户端已断开：抛出取消信号中断本轮流式调用（Reactor 会取消上游订阅）
+                        if (channel.isCancelled()) {
+                            throw new ChatCancelledException();
+                        }
                         // 捕获 token 用量（OpenAI 兼容流式仅在最后一个 chunk 携带 usage，累加聚合）
                         if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null) {
                             org.springframework.ai.chat.metadata.Usage u = resp.getMetadata().getUsage();
@@ -1190,17 +1306,19 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                             String rc = String.valueOf(reasoning);
                             String prev = reasoningBuf.toString();
                             if (rc.length() > prev.length() && rc.startsWith(prev)) {
-                                // 累积模式：推送差分增量
+                                // 累积模式（Spring AI 透传的是累积值）：推送差分增量，缓冲整体替换
                                 String delta = rc.substring(prev.length());
                                 if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, AiTemplateConstants.SSE_EVENT_REASONING, delta);
+                                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, delta);
                                 }
+                                reasoningBuf.setLength(0);
+                                reasoningBuf.append(rc);
                             } else if (!rc.equals(prev)) {
-                                // 兜底：非累积模式（纯增量），直接推送
-                                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_REASONING, rc);
+                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加，
+                                // 覆盖缓冲会导致前端重复推送同一内容
+                                sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, rc);
+                                reasoningBuf.append(rc);
                             }
-                            reasoningBuf.setLength(0);
-                            reasoningBuf.append(rc);
                         }
                         // 正文增量
                         String chunk = output.getText();
@@ -1210,14 +1328,14 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         responseBuffer.append(chunk);
                         String replyDelta = replyExtractor.feed(chunk);
                         if (StringUtils.hasText(replyDelta)) {
-                            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_MESSAGE, replyDelta);
+                            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, replyDelta);
                         }
                         // reply 已流完（闭引号到达）、后续 chunk 属于 files 等其余字段：
                         // 推送一次状态事件，让前端知道"回复已生成，文件内容仍在传输中"，
                         // 消除"回复结束了却长时间转圈"的假死观感（大模板 files 可持续数分钟）
                         if (replyExtractor.isFinished() && !filesStatusSent[0]) {
                             filesStatusSent[0] = true;
-                            sendEvent(emitter, AiTemplateConstants.SSE_EVENT_STATUS,
+                            sendEvent(channel, AiTemplateConstants.SSE_EVENT_STATUS,
                                     "正在接收文件内容，大模板可能需要几分钟…");
                         }
                         // 文件级进度：每当 files 流中完整出现一个 "path":"xxx"，
@@ -1225,7 +1343,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         // 让用户明确知道 AI 正在产出哪个文件，而不是笼统地"接收文件内容"
                         if (fileStatusResolver != null) {
                             for (String path : fileScanner.feed(chunk)) {
-                                sendEvent(emitter, AiTemplateConstants.SSE_EVENT_STATUS,
+                                sendEvent(channel, AiTemplateConstants.SSE_EVENT_STATUS,
                                         fileStatusResolver.apply(path));
                             }
                         }
@@ -1240,6 +1358,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     // generateSingleFile 捕获后走单文件重试
                     .timeout(ROUND_SIGNAL_TIMEOUT)
                     .blockLast(ROUND_TOTAL_TIMEOUT);
+        } catch (ChatCancelledException e) {
+            // 取消信号不包装为"AI 调用失败"：向上传播由 chatStream 统一落"已中断"消息
+            throw e;
         } catch (Exception e) {
             log.error("ChatClient 流式调用失败", e);
             throw new RuntimeException("AI 调用失败: " + e.getMessage(), e);
@@ -1254,19 +1375,19 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @param currentIndex 当前正在生成的文件下标（-1 表示无生成中文件）
      * @param donePaths    已完成的文件路径
      */
-    private void sendProgress(SseEmitter emitter, List<String> plannedFiles, int currentIndex, List<String> donePaths) {
-        StringBuilder sb = new StringBuilder("{\"files\":[");
+    private void sendProgress(SseChannel channel, List<String> plannedFiles, int currentIndex, List<String> donePaths) {
+        // JSON_MAPPER 序列化替代手写拼接：转义完整覆盖（含控制字符），异常文件名不会再产生非法 JSON
+        List<Map<String, String>> files = new ArrayList<>(plannedFiles.size());
         for (int i = 0; i < plannedFiles.size(); i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
             String p = plannedFiles.get(i);
-            String status = donePaths.contains(p) ? "done" : (i == currentIndex ? "current" : "pending");
-            sb.append("{\"path\":\"").append(escapeJson(p))
-                    .append("\",\"status\":\"").append(status).append("\"}");
+            Map<String, String> item = new LinkedHashMap<>();
+            item.put("path", p);
+            item.put("status", donePaths.contains(p) ? "done" : (i == currentIndex ? "current" : "pending"));
+            files.add(item);
         }
-        sb.append("]}");
-        sendEvent(emitter, AiTemplateConstants.SSE_EVENT_PROGRESS, sb.toString());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("files", files);
+        sendEvent(channel, AiTemplateConstants.SSE_EVENT_PROGRESS, toJson(data));
     }
 
     /**
@@ -1353,21 +1474,22 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
         Path targetPath = Paths.get(templateDir, session.getTemplateName());
 
-        // 若目标已存在，先删除（覆盖更新）
-        if (Files.exists(targetPath)) {
-            deleteDirectory(targetPath);
+        // 同名模板并发 apply 互斥（不同会话可应用同名模板，并发替换会互相踩踏）
+        Object lock = APPLY_LOCKS.computeIfAbsent(session.getTemplateName(), k -> new Object());
+        synchronized (lock) {
+            try {
+                applyWorkDirToTarget(workDir, targetPath);
+            } catch (IOException e) {
+                throw new RuntimeException("模板应用失败: " + e.getMessage(), e);
+            }
         }
 
-        // 复制工作目录到目标目录
-        try {
-            copyDirectory(workDir, targetPath);
-        } catch (IOException e) {
-            throw new RuntimeException("复制模板文件失败: " + e.getMessage(), e);
-        }
-
-        // 刷新模板注册
+        // 刷新模板注册 + 静态资源映射：
+        // 只 initialize() 不刷新映射，新模板的 /<模板名>/static/** 会 404 直到重启
+        // （与 createTemplate 的 initialize + refreshStaticMapping 模式保持一致）
         try {
             templateService.initialize();
+            templateService.refreshStaticMapping();
         } catch (Exception e) {
             throw new RuntimeException("刷新模板注册失败: " + e.getMessage(), e);
         }
@@ -1601,53 +1723,34 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         return sb.toString();
     }
 
-    private void sendFileEvent(SseEmitter emitter, AiTemplateFileDto file) {
-        String data = "{\"path\":\"" + escapeJson(file.getPath())
-                + "\",\"action\":\"" + escapeJson(file.getAction()) + "\"}";
-        sendEvent(emitter, AiTemplateConstants.SSE_EVENT_FILE, data);
+    private void sendFileEvent(SseChannel channel, AiTemplateFileDto file) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("path", file.getPath());
+        data.put("action", file.getAction());
+        sendEvent(channel, AiTemplateConstants.SSE_EVENT_FILE, toJson(data));
     }
 
-    private void sendDone(SseEmitter emitter, String summary) {
-        String data = "{\"summary\":\"" + escapeJson(summary) + "\"}";
-        sendEvent(emitter, AiTemplateConstants.SSE_EVENT_DONE, data);
+    private void sendDone(SseChannel channel, String summary) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("summary", summary);
+        sendEvent(channel, AiTemplateConstants.SSE_EVENT_DONE, toJson(data));
     }
 
-    private void sendError(SseEmitter emitter, String message) {
-        String data = "{\"message\":\"" + escapeJson(message) + "\"}";
-        sendEvent(emitter, AiTemplateConstants.SSE_EVENT_ERROR, data);
+    private void sendError(SseChannel channel, String message) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("message", message);
+        sendEvent(channel, AiTemplateConstants.SSE_EVENT_ERROR, toJson(data));
     }
 
-    private void sendEvent(SseEmitter emitter, String eventName, String data) {
-        try {
-            emitter.send(SseEmitter.event().name(eventName).data(data));
-        } catch (IOException e) {
-            log.warn("SSE 推送失败: event={}, {}", eventName, e.getMessage());
-        } catch (IllegalStateException e) {
-            // 客户端断开后 emitter 被容器标记为已完成，后续 send 抛 IllegalStateException：
-            // 只跳过推送，不中断生成流程（文件仍会完整落盘，前端刷新后可见）
-            log.warn("SSE 推送失败（连接已关闭）: event={}, {}", eventName, e.getMessage());
-        }
-    }
-
-    private void complete(SseEmitter emitter) {
-        try {
-            emitter.complete();
-        } catch (Exception ignored) {
-        }
+    private void sendEvent(SseChannel channel, String eventName, String data) {
+        channel.send(eventName, data);
     }
 
     /**
-     * 简易 JSON 字符串转义（避免引入额外依赖）
+     * 统一 JSON 序列化（Jackson 3，异常为 unchecked，直接向上抛由既有异常路径处理）
      */
-    private String escapeJson(String s) {
-        if (s == null) {
-            return "";
-        }
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+    private static String toJson(Object value) {
+        return JSON_MAPPER.writeValueAsString(value);
     }
 
     private void validateRequest(AiTemplateSessionRequest request) {
@@ -1715,6 +1818,52 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    /**
+     * 将工作目录内容原子化应用到目标模板目录
+     *
+     * <p>旧实现"先 deleteDirectory 再 copyDirectory"，拷贝中途失败（磁盘满/权限）会留下
+     * 半成品模板目录且原模板已丢失。这里改为四步：
+     * <ol>
+     *     <li>工作目录完整拷贝到 staging 临时目录（拷贝过程不触碰正式目录）</li>
+     *     <li>已存在的目标目录改名备份为 {@code <模板名>.bak}（同分区 rename，原子）</li>
+     *     <li>staging rename 到目标路径（同分区，原子替换）</li>
+     *     <li>成功后清理备份；第 3 步失败则回滚——清掉不完整目标、恢复备份</li>
+     * </ol></p>
+     *
+     * <p>staging 建在目标目录同级（模板根目录下），保证与目标同分区，rename 原子生效。</p>
+     *
+     * <p>调用方须持有同名模板锁（{@link #APPLY_LOCKS}），本方法自身不做并发控制。</p>
+     */
+    private void applyWorkDirToTarget(Path workDir, Path targetPath) throws IOException {
+        Path staging = Files.createTempDirectory(targetPath.getParent(), "fastcms-template-staging");
+        Path backup = targetPath.resolveSibling(targetPath.getFileName() + ".bak");
+        try {
+            // ① 完整拷贝到 staging（失败不触碰正式目录）
+            copyDirectory(workDir, staging);
+            // ② 备份现有目标目录（先清掉上一轮失败可能遗留的旧备份）
+            if (Files.exists(targetPath)) {
+                deleteDirectory(backup);
+                Files.move(targetPath, backup);
+            }
+            // ③ 原子替换目标
+            try {
+                Files.move(staging, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveEx) {
+                // ④ 失败回滚：清掉不完整目标，恢复备份
+                if (Files.exists(backup)) {
+                    deleteDirectory(targetPath);
+                    Files.move(backup, targetPath);
+                }
+                throw moveEx;
+            }
+            // 成功：清理备份
+            deleteDirectory(backup);
+        } finally {
+            // staging 正常路径下已被 move 走，此处兜底清理失败遗留
+            deleteDirectory(staging);
+        }
     }
 
     // ==================== 模板源码目录镜像（已移除） ====================

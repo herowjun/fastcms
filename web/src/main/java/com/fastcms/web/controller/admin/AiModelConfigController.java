@@ -103,7 +103,10 @@ public class AiModelConfigController {
         if (config.getModel() == null || config.getModel().isBlank()) {
             return RestResultUtils.failed("模型名称不能为空");
         }
-        return RestResultUtils.success(aiModelConfigService.saveConfig(config));
+        AiModelConfig saved = aiModelConfigService.saveConfig(config);
+        // 保存后实体携带的是加密后的 apiKey（{AES}...），返回前脱敏，不外泄密文
+        maskApiKey(saved);
+        return RestResultUtils.success(saved);
     }
 
     /**
@@ -112,7 +115,9 @@ public class AiModelConfigController {
     @PostMapping("delete/{id}")
     @Secured(name = RESOURCE_NAME_AI_MODEL_DELETE, resource = "ai:model:delete", action = ActionTypes.WRITE)
     public RestResult<Boolean> delete(@PathVariable("id") Long id) {
-        return RestResultUtils.success(aiModelConfigService.removeById(id));
+        // 走 service 方法以同步失效 ChatModel 缓存（直接 removeById 会残留已删配置的模型实例）
+        aiModelConfigService.deleteConfig(id);
+        return RestResultUtils.success(true);
     }
 
     /**

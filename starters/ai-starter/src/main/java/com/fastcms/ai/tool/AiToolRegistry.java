@@ -91,6 +91,42 @@ public class AiToolRegistry {
     }
 
     /**
+     * 注销由指定类加载器加载的所有工具（插件卸载时调用）
+     *
+     * <p>按目标类的 ClassLoader 判定归属，避免依赖插件 bean 实例引用——
+     * 卸载时 bean 可能已被 Spring 销毁，拿不到实例引用。</p>
+     *
+     * @param classLoader 插件类加载器
+     * @return 本次移除的工具数量
+     */
+    public int unregisterByClassLoader(ClassLoader classLoader) {
+        if (classLoader == null) {
+            return 0;
+        }
+        synchronized (toolDescriptors) {
+            int before = toolDescriptors.size();
+            toolDescriptors.entrySet().removeIf(entry -> {
+                Object target = entry.getValue().getTarget();
+                if (target == null) {
+                    return false;
+                }
+                // AOP 代理类可能由其他加载器生成，优先用 AopUtils 取用户类判定归属
+                Class<?> targetClass = target.getClass();
+                try {
+                    targetClass = org.springframework.aop.support.AopUtils.getTargetClass(target);
+                } catch (Exception ignored) {
+                }
+                return targetClass.getClassLoader() == classLoader;
+            });
+            int removed = before - toolDescriptors.size();
+            if (removed > 0) {
+                log.info("按类加载器注销 {} 个 AI 工具", removed);
+            }
+            return removed;
+        }
+    }
+
+    /**
      * 获取所有已注册工具的描述符
      */
     public Map<String, ToolDescriptor> getToolDescriptors() {

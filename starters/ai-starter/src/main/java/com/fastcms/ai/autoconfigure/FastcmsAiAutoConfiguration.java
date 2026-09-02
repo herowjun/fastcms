@@ -18,13 +18,17 @@ package com.fastcms.ai.autoconfigure;
 
 import com.fastcms.ai.audit.AiQuotaChecker;
 import com.fastcms.ai.audit.AiUsageRecorder;
+import com.fastcms.ai.support.AiApiKeyCipher;
 import com.fastcms.ai.tool.AiToolCallbackProvider;
+import com.fastcms.ai.tool.AiToolPluginRegister;
 import com.fastcms.ai.tool.AiToolRegister;
 import com.fastcms.ai.tool.AiToolRegistry;
+import com.fastcms.plugin.FastcmsPluginManager;
 import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -66,6 +70,8 @@ public class FastcmsAiAutoConfiguration {
 
     public FastcmsAiAutoConfiguration(FastcmsAiProperties properties) {
         this.properties = properties;
+        // 启动即初始化 API Key 加密主密钥（配置项优先，否则密钥文件；见 AiApiKeyCipher）
+        AiApiKeyCipher.init(properties.getApiKeySecret());
     }
 
     /**
@@ -98,6 +104,17 @@ public class FastcmsAiAutoConfiguration {
     @ConditionalOnMissingBean
     public AiToolCallbackProvider aiToolCallbackProvider(AiToolRegistry aiToolRegistry) {
         return new AiToolCallbackProvider(aiToolRegistry);
+    }
+
+    /**
+     * 插件 AI 工具注册器：跟随插件安装/卸载生命周期注册与清理 @AiTool 工具。
+     * 注册为 Spring bean 后由 FastcmsPluginManager 在启动时自动收集（见其 onApplicationEvent）。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(FastcmsPluginManager.class)
+    public AiToolPluginRegister aiToolPluginRegister(AiToolRegistry aiToolRegistry, FastcmsPluginManager pluginManager) {
+        return new AiToolPluginRegister(pluginManager, aiToolRegistry);
     }
 
     /**

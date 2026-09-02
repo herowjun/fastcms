@@ -40,6 +40,13 @@ public interface TemplateService {
     void initialize() throws IOException;
 
     /**
+     * 运行时刷新静态资源映射（模板目录变化后调用，避免新模板的 /&lt;模板名&gt;/static/** 404 直到重启）。
+     * 默认空实现，由支持运行时刷新的实现覆盖。
+     */
+    default void refreshStaticMapping() throws Exception {
+    }
+
+    /**
      * 根据id获取模板
      * @param id
      * @return

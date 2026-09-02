@@ -28,6 +28,12 @@ import org.slf4j.LoggerFactory;
  * {@code fastcms.ai.daily-token-quota} 上限（0 = 不限）。
  * 配额数据基于 {@code ai_usage_log} 审计表按日聚合，无需单独的配额表。</p>
  *
+ * <p><b>已知限制（check-then-act 非原子）</b>：检查时用量未超限，实际消耗在调用结束后
+ * 才由 {@code AiUsageRecorder} 落库，同一用户并发发起的多个请求都可绕过检查，
+ * 导致当日实际用量小幅超出配额（超限量与并发请求数正相关）。token 只有调用后才知道消耗，
+ * 精确扣减需要配额预占表并处理失败回滚，当前按"事前软限制 + 事后审计"设计，
+ * 配额为防滥用阈值而非硬性计费边界，此误差可接受。</p>
+ *
  * @author wjun_java@163.com
  * @since 0.2.0
  */
