@@ -28,7 +28,7 @@ mvn -pl starters/plugin-starter -am compile -DskipTests
 # 本地运行 web 模块（连接本地 MySQL:3308/fastcms）
 cd web && mvn spring-boot:run
 
-# 验证插件加载必须用 deploytest profile（dev 模式 PF4J 只扫描目录不加载 jar）
+# 验证插件加载（dev/prod 均以 jar 形式加载，插件目录 ~/fastcms/plugins，dev 下界面安装/卸载可用）
 cd web && mvn spring-boot:run -Dspring-boot.run.profiles=deploytest
 ```
 
@@ -90,4 +90,4 @@ cd web && mvn spring-boot:run -Dspring-boot.run.profiles=deploytest
 
 - Git 仓库主分支托管于 gitee（xjd2020/fastcms），许可证 LGPL-3.0
 - 提交前至少执行：`mvn -pl <改动模块> -am compile -DskipTests` 验证编译
-- 涉及插件系统、Security 配置的改动，必须用 `deploytest` profile 启动并实际验证插件端点（如 `/fastcms/plugin/hello/say` 返回 200 且无需认证）
+- 涉及插件系统、Security 配置的改动，必须实际启动并验证插件端点（如 `/fastcms/plugin/hello/say` 返回 200 且无需认证）；dev 与 prod 均以 jar 形式加载插件（目录 ~/fastcms/plugins），界面安装/卸载在 dev 下同样可用

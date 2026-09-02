@@ -16,24 +16,42 @@
  */
 package com.fastcms.plugin.autoconfigure;
 
-import org.pf4j.RuntimeMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
+ * 插件目录与运行模式配置（默认无需配置）：
+ * - path：插件根目录，默认 ~/fastcms/plugins（FASTCMS_HOME 可覆盖）
+ * - mode：PF4J 运行模式，默认 DEPLOYMENT（jar 形式加载）；
+ *         测试/调试场景可配 DEVELOPMENT，直接从插件工程源码目录加载（免打包），
+ *         典型配置见 web/src/test/resources/application.yml：
+ *           fastcms.plugin.path: ../plugins
+ *           fastcms.plugin.mode: DEVELOPMENT
  * @author： wjun_java@163.com
  * @date： 2021/9/14
  * @description：
  * @modifiedBy：
  * @version: 1.0
  */
-@ConfigurationProperties(prefix = PluginProperties.PLUGIN_PREFIX)
+@ConfigurationProperties(prefix = "fastcms.plugin")
 public class PluginProperties {
 
-    public static final String PLUGIN_PREFIX = "plugin";
-
-    private String mode = RuntimeMode.DEVELOPMENT.name();
-
+    /**
+     * 插件根目录；不配置时使用 ~/fastcms/plugins
+     */
     private String path;
+
+    /**
+     * PF4J 运行模式：DEVELOPMENT（目录形式，调试用）/ DEPLOYMENT（jar 形式，默认）
+     */
+    private String mode;
+
+    public String getPath() {
+        return path;
+    }
+
+    public void setPath(String path) {
+        this.path = path;
+    }
 
     public String getMode() {
         return mode;
@@ -43,11 +61,4 @@ public class PluginProperties {
         this.mode = mode;
     }
 
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
 }

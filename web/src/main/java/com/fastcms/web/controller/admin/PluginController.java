@@ -29,7 +29,6 @@ import com.fastcms.common.utils.StrUtils;
 import com.fastcms.core.mybatis.PageModel;
 import com.fastcms.plugin.PluginBase;
 import com.fastcms.plugin.PluginManagerService;
-import com.fastcms.utils.ApplicationUtils;
 import com.fastcms.utils.I18nUtils;
 import org.apache.commons.lang.StringUtils;
 import org.pf4j.Plugin;
@@ -81,10 +80,6 @@ public class PluginController {
     @Secured(name = RESOURCE_NAME_PLUGIN_INSTALL, resource = "plugin:install", action = ActionTypes.WRITE)
     public Object install(@RequestParam("file") MultipartFile file) throws Exception {
 
-        if (ApplicationUtils.isDevelopment()) {
-            return RestResultUtils.failed(I18nUtils.getMessage(PLUGIN_DEV_NOT_ALLOW_INSTALL));
-        }
-
         String suffixName = FileUtils.getSuffix(file.getOriginalFilename());
 
         //检查文件格式是否合法
@@ -121,10 +116,6 @@ public class PluginController {
     @PostMapping("unInstall/{pluginId}")
     @Secured(name = RESOURCE_NAME_PLUGIN_UNINSTALL, resource = "plugin:unInstall", action = ActionTypes.WRITE)
     public Object unInstall(@PathVariable(name = "pluginId") String pluginId) throws Exception {
-
-        if (ApplicationUtils.isDevelopment()) {
-            return RestResultUtils.failed(I18nUtils.getMessage(PLUGIN_DEV_NOT_ALLOW_UNINSTALL));
-        }
 
         pluginManagerService.unInstallPlugin(pluginId);
         return RestResultUtils.success();

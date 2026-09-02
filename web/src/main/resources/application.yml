@@ -24,9 +24,6 @@ mybatis-plus:
     banner: false
   mapper-locations: classpath*:/mapper/*Mapper.xml
 
-plugin:
-  path: ./plugins
-
 fastcms:
   auth:
     token:

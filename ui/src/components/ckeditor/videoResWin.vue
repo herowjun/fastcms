@@ -64,7 +64,7 @@ import { AttachApi } from '/@/api/attach/index';
 import { ClientAttachApi } from '/@/api/attach/client';
 import { ElMessage } from 'element-plus';
 import { Local } from '/@/utils/storage';
-import { insertMedia } from '@ckeditor/ckeditor5-media-embed/src/utils';
+import insertVideo from "./videoPlugin/insertVideo";
 import connect from "./videoPlugin/connect";
 
 
@@ -163,8 +163,8 @@ const onHandleCurrentChange = (val: number) => {
 };
 
 const onSubmit = () => {
-	//把选中的视频插入编辑器（media 模型元素，由 fastcms-video provider 渲染为 video 标签）
-	state.checkedObjs.forEach((item: any) => insertMedia(connect.editorObj.model, item.path));
+	//把选中的视频插入编辑器（videoBlock 模型元素，可缩放、可拖动的视频部件）
+	state.checkedObjs.forEach((item: any) => insertVideo(connect.editorObj.model, item.path));
 	closeDialog();
 };
 

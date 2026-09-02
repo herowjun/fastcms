@@ -9,10 +9,10 @@ REM del fastcms-dist
 rmdir .dist /s /q
 
 REM create fastcms-dist
+REM upload 附件目录已固定在 ~/fastcms/upload（FASTCMS_HOME 可覆盖），不再随包分发
 mkdir .dist
 mkdir .dist\config
 mkdir .dist\plugins
-mkdir .dist\upload
 mkdir .dist\htmls
 mkdir .dist\logs
 

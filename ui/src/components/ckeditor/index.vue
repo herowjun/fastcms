@@ -361,6 +361,34 @@ watch(() => props.modelValue, val => {
     border: #bbb 1px solid;
   }
   .CKEditor { position: relative; }
+  /* 视频部件（与图片同款的可选中/拖动/缩放体验）：
+     视频区域不响应鼠标，点击与拖动均作用于外层 widget；
+     视频按容器宽度自适应、保持自然宽高比 */
+  .ck.ck-content figure.video {
+    margin: .9em 0;
+    padding: 0;
+  }
+  .ck.ck-content figure.video video {
+    display: block;
+    margin: 0 auto;
+    width: 100%;
+    height: auto;
+    background: #000;
+    pointer-events: none;
+  }
+  /* 视频对齐（与图片 imageStyle 对齐一致的浮动/居中表现） */
+  .ck.ck-content figure.video.video-align-left {
+    float: left;
+    margin: .9em 1.5em .9em 0;
+  }
+  .ck.ck-content figure.video.video-align-right {
+    float: right;
+    margin: .9em 0 .9em 1.5em;
+  }
+  .ck.ck-content figure.video.video-align-center {
+    clear: both;
+    margin: .9em auto;
+  }
   .ck-ai-bar {
     position: absolute;
     z-index: 1000;

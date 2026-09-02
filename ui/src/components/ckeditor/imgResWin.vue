@@ -101,6 +101,8 @@ const state = reactive({
 		param: {
 			pageNum: 1,
 			pageSize: 10,
+			// 图片选择弹窗只展示图片类型附件（后端按 fileType 精确过滤）
+			fileType: 'image',
 		},
 	},
 });

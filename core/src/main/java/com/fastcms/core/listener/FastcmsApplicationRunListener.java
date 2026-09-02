@@ -33,7 +33,13 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
     private final String[] args;
 
     private static File workDir;
-    final static String [] dirNames = { "upload", "plugins", "htmls", "lucene" };
+
+    /**
+     * 运行时数据根目录（默认 ~/fastcms），Docker 等场景可通过 FASTCMS_HOME 环境变量覆盖
+     */
+    static final String FASTCMS_HOME_ENV = "FASTCMS_HOME";
+
+    final static String [] dirNames = { "htmls", "lucene" };
 
     private Boolean isDev = false;
 
@@ -109,12 +115,41 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
 
     }
 
+    /**
+     * 附件上传目录固定在用户主目录下的 fastcms 数据目录（~/fastcms/upload），
+     * 与 classpath 解耦，mvn clean / IDEA rebuild 不会误删用户上传文件；
+     * Docker 等工作目录与数据目录分离的场景可用 FASTCMS_HOME 指定数据根目录
+     */
     String getUploadDir() {
-        return workDir.getAbsolutePath() + File.separator + dirNames[0] + File.separator;
+        String home = System.getenv(FASTCMS_HOME_ENV);
+        if (home == null || home.isBlank()) {
+            home = System.getProperty("user.home") + File.separator + "fastcms";
+        }
+        String uploadDir = home + File.separator + "upload" + File.separator;
+        File dir = new File(uploadDir);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return uploadDir;
     }
 
+    /**
+     * 插件目录固定在用户主目录下的 fastcms 数据目录（~/fastcms/plugins），
+     * 与 classpath 解耦：mvn clean / IDEA rebuild 不会误删已安装插件，
+     * dev 与 prod 行为一致（均以 jar 形式安装/加载插件）；
+     * Docker 等场景可用 FASTCMS_HOME 覆盖数据根目录
+     */
     String getPluginDir() {
-        return workDir.getAbsolutePath() + File.separator + dirNames[1] + File.separator;
+        String home = System.getenv(FASTCMS_HOME_ENV);
+        if (home == null || home.isBlank()) {
+            home = System.getProperty("user.home") + File.separator + "fastcms";
+        }
+        String pluginDir = home + File.separator + "plugins" + File.separator;
+        File dir = new File(pluginDir);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return pluginDir;
     }
 
     String getTemplateDir() {
@@ -147,11 +182,11 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
                 }
             }
         }
-        return workDir.getAbsolutePath() + File.separator + dirNames[2] + File.separator;
+        return workDir.getAbsolutePath() + File.separator + dirNames[0] + File.separator;
     }
 
     String getLuceneDir() {
-        return workDir.getAbsolutePath() + File.separator + dirNames[3] + File.separator;
+        return workDir.getAbsolutePath() + File.separator + dirNames[1] + File.separator;
     }
 
 }

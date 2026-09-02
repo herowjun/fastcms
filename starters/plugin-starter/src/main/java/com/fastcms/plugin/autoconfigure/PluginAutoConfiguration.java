@@ -16,21 +16,18 @@
  */
 package com.fastcms.plugin.autoconfigure;
 
-import com.fastcms.common.constants.FastcmsConstants;
+import com.fastcms.common.utils.DirUtils;
 import com.fastcms.plugin.FastcmsPluginManager;
 import com.fastcms.plugin.PluginPermitAllManager;
 import org.pf4j.AbstractPluginManager;
 import org.pf4j.DefaultPluginManager;
 import org.pf4j.RuntimeMode;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
 
-import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
@@ -45,37 +42,32 @@ import java.nio.file.Paths;
 @EnableConfigurationProperties(PluginProperties.class)
 public class PluginAutoConfiguration {
 
-    @Autowired
-    Environment environment;
-
-    private final PluginProperties properties;
-
-    public PluginAutoConfiguration(PluginProperties properties) {
-        this.properties = properties;
-    }
-
+    /**
+     * 插件目录与运行模式：
+     * - 默认（不配置）：DEPLOYMENT 模式 + ~/fastcms/plugins（FASTCMS_HOME 可覆盖），
+     *   dev/prod 一致以 jar 形式加载，界面安装/卸载均可用
+     * - 测试/调试：配置 fastcms.plugin.mode=DEVELOPMENT + fastcms.plugin.path 指向插件工程目录，
+     *   直接从源码目录加载插件（免打包），见 web/src/test/resources/application.yml
+     */
     @Bean
     @ConditionalOnMissingBean(FastcmsPluginManager.class)
-    public FastcmsPluginManager fastcmsPluginManager() {
+    public FastcmsPluginManager fastcmsPluginManager(PluginProperties properties) {
 
-        if(FastcmsConstants.DEV_MODE.equals(getProfile())) {
-            System.setProperty(AbstractPluginManager.MODE_PROPERTY_NAME, RuntimeMode.DEVELOPMENT.toString());
+        if (properties.getMode() != null && !properties.getMode().isBlank()) {
+            System.setProperty(AbstractPluginManager.MODE_PROPERTY_NAME, properties.getMode());
         }
 
-        Path pluginPath = Paths.get(properties.getPath());
-        FastcmsPluginManager fastcmsPluginManager = new FastcmsPluginManager(pluginPath);
-        return fastcmsPluginManager;
+        String path = (properties.getPath() != null && !properties.getPath().isBlank())
+                ? properties.getPath()
+                : DirUtils.getPluginDir();
+
+        return new FastcmsPluginManager(Paths.get(path));
     }
 
     @Bean
     @ConditionalOnMissingBean(PluginPermitAllManager.class)
     public PluginPermitAllManager pluginPermitAllManager() {
         return new PluginPermitAllManager();
-    }
-
-    String getProfile() {
-        String[] activeProfiles = environment.getActiveProfiles();
-        return activeProfiles == null || activeProfiles.length <=0 ? FastcmsConstants.DEV_MODE : activeProfiles[0];
     }
 
 }

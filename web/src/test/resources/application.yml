@@ -20,10 +20,11 @@ mybatis-plus:
     banner: false
   mapper-locations: classpath*:/mapper/*Mapper.xml
 
-plugin:
-  path: ../plugins
-
 fastcms:
+  plugin:
+    # 测试环境从插件工程源码目录加载插件（DEVELOPMENT 模式，免打包调试）
+    path: ../plugins
+    mode: DEVELOPMENT
   auth:
     token:
       expire:
