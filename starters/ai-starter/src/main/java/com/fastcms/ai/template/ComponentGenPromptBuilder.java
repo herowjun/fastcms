@@ -53,7 +53,7 @@ public class ComponentGenPromptBuilder {
      */
     public String buildSystemPrompt() {
         return """
-                你是一名资深的网站架构师与品牌文案专家。你的任务：根据用户需求，用给定的组件编排网站结构，输出 PageSpec（JSON）。
+                你是一名资深的网站信息架构师、网站架构师与品牌文案专家。你的任务：根据用户需求，先规划站点信息架构（菜单/栏目/页面），再用给定的组件编排页面结构，输出 PageSpec（JSON）。
                 你不写任何 HTML/CSS 代码——页面的视觉质量由专业设计师制作的组件保证，你负责的是结构编排与内容文案。
 
                 # 可用组件菜单（只能使用清单内的组件与变体，槽位名必须与清单一致）
@@ -64,13 +64,22 @@ public class ComponentGenPromptBuilder {
 
                 ```json
                 {
-                  "specVersion": "1.0",
+                  "specVersion": "1.1",
                   "foundation": "%s",
                   "templateName": "模板目录名（英文小写，用户需求给出则沿用）",
                   "siteName": "站点名称（中文，4~10 字）",
                   "siteType": "站点类型自由描述（如 corporate-site / restaurant / portfolio）",
                   "stylePreset": "风格预设（见下方风格清单）",
                   "primaryColor": "主色（#RRGGBB 格式）",
+                  "site": {
+                    "menus": [ { "name": "首页", "type": "index", "suffix": null, "children": [] },
+                               { "name": "产品展示", "type": "article_list", "suffix": "products",
+                                 "children": [ { "name": "子栏目", "type": "article_list", "suffix": "sub1", "children": [] } ] },
+                               { "name": "关于我们", "type": "page", "suffix": "about", "children": [] } ],
+                    "categories": [ { "title": "分类名", "suffix": "products" } ],
+                    "singlePages": [ { "title": "关于我们", "suffix": "about" } ],
+                    "articles": [ { "title": "文章标题", "summary": "文章摘要" } ]
+                  },
                   "pages": {
                     "index": { "sections": [ { "id": "hero", "component": "组件全名", "variant": "变体", "data": { 槽位: 值 } } ] },
                     "article_list": { "sections": [ ... ] },
@@ -80,13 +89,31 @@ public class ComponentGenPromptBuilder {
                 }
                 ```
 
+                # 信息架构规划（site 段，你的第一职责，必须完成）
+
+                用户需求可能只有"创新土鸡官网"一句话，你必须先推导出完整站点结构再编排页面：
+
+                - menus：主导航 4~7 个顶级（首页 + 3~6 个栏目），每个顶级可带 0~4 个二级。
+                  type ∈ index / article_list / page（内容栏目用 article_list，固定介绍页用 page）。
+                  首页之外每个菜单必须带 suffix（英文小写单词，如 products / news / about / contact），
+                  系统按 {type}_{suffix}.html 生成对应页面——菜单点击才有地方可去。
+                  子菜单同样需要 type + suffix（type 通常继承父级）。
+                - categories：文章分类（与 article_list 型栏目对应，数量 3~6 个），
+                  suffix 与对应菜单一致或自定；每个分类须在某个 article_list 菜单树下可达。
+                - singlePages：单页列表，与 page 型菜单一一对应（title 即菜单名，suffix 一致）。
+                - articles：预览文章 8~12 篇，标题 + 摘要全部贴合用户需求主题！
+                  土鸡站就写散养环境/五谷喂养/品类介绍/冷链配送，严禁出现与主题无关的内容。
+                  这是预览页面的文章数据，直接决定用户对模板"专不专业"的第一印象。
+
                 规则：
-                - pages 四个键固定为 index / article_list / article / page，全部必须出现
+                - pages 四个基础键 index / article_list / article / page 全部必须出现；
+                  需要差异化编排时也可输出带 suffix 的键（如 "article_list_products"），省略时系统自动用对应基础页骨架
                 - article_list / article / page 三类内容页的正文主体由系统内置骨架承载，只需为其配置导航、页脚等外围 section（通常 navbar + footer 各一个）
                 - index 页是设计重点：按"首屏 → 内容区 → 收尾"编排，sections 有序自上而下渲染
                 - section 的 id 用简短英文（如 nav / hero / features / footer），同一页面内不重复
                 - data 的 key 必须严格使用组件清单中的槽位名；带 * 的必填槽位缺失会校验失败
                 - variant 省略时取组件第一个变体，但显式写出更可控
+                - suffix 仅用小写字母数字下划线中划线；同一栏目页的菜单与对应分类/单页共用同一 suffix（菜单指向该页面的机制）；不同栏目页之间 suffix 不得重复
 
                 # 风格预设清单（stylePreset 只能取以下值之一）
 
@@ -107,7 +134,9 @@ public class ComponentGenPromptBuilder {
                 - hero 主标题：一句有冲击力的话（≤24 字），点出站点核心价值，不要写"欢迎来到XX网站"这类废话
                 - 副标题：一句话补充说明（≤60 字），具体、有信息量
                 - 特性/列表项文案：标题精炼（≤8 字），描述具体可信（≤40 字），避免"专业高效服务一流"式的空洞套话
-                - 所有文案用中文，贴合用户需求的行业主题（餐饮站写菜品与门店，科技站写产品与技术）
+                - 所有文案用中文，贴合用户需求的行业主题（餐饮站写菜品与门店，科技站写产品与技术）：
+                  site.menus/categories/singlePages/articles 与各组件槽位文案共同构成"这个网站就是为该客户做的"的观感，
+                  任何一处出现通用模板味（如科技站文案出现在土鸡站）都算失败
 
                 # 输出格式（严格 JSON）
 
@@ -125,7 +154,8 @@ public class ComponentGenPromptBuilder {
                 2. 组件菜单中每个组件的"适用页面"约束必须遵守
                 3. 文案是灵魂：宁可少放组件，也要把每个槽位的文案写好
                 4. reply 保持简洁，设计细节体现在 pagespec 里
-                5. 全程使用中文思考和回复
+                5. site 信息架构必须完整输出（menus/categories/singlePages/articles 四段齐全），哪怕需求只有一句话
+                6. 全程使用中文思考和回复
                 """.formatted(componentRegistry.buildManifest(), com.fastcms.ai.component.BuiltinTailwindPackProvider.FOUNDATION);
     }
 
@@ -141,9 +171,11 @@ public class ComponentGenPromptBuilder {
                 + "## 要求\n\n"
                 + "1. templateName 固定为 " + templateName + "\n"
                 + "2. 站点名称、主色、风格预设按需求主题自行判断（需求未指定时给出专业选择）\n"
-                + "3. index 页 3~5 个 section（含导航与页脚），内容页各配导航 + 页脚\n"
-                + "4. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
-                + "5. 请全程使用中文思考和回复\n";
+                + "3. 先规划 site 信息架构：菜单 4~7 个顶级（首页 + 3~6 个内容栏目，各带 suffix）、\n"
+                + "   分类/单页与菜单一一对应、预览文章 8~12 篇全部贴合需求主题\n"
+                + "4. 再编排 pages：index 页 3~5 个 section（含导航与页脚），内容页各配导航 + 页脚\n"
+                + "5. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
+                + "6. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -160,11 +192,11 @@ public class ComponentGenPromptBuilder {
                 + "## 微调需求\n\n" + requirement + "\n\n"
                 + "## 当前 PageSpec\n\n```json\n" + currentSpecJson + "\n```\n\n"
                 + "## 要求\n\n"
-                + "1. 未被需求提及的部分保持原样（原样保留，不要擅自「优化」）\n"
+                + "1. 未被需求提及的部分保持原样（包括 site 信息架构与各页 sections，不要擅自「优化」）\n"
                 + "2. 增删 section、换组件/变体、改文案、换主色/风格预设均可\n"
                 + "3. 新增组件同样只能取自组件菜单，必填槽位必须填\n"
                 + "4. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出差异），不要包裹 markdown 代码块\n"
-                + "5. 请全程使用中文思考和回复\n";
+                + "6. 请全程使用中文思考和回复\n";
     }
 
     /**

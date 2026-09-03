@@ -438,16 +438,52 @@ final class AiTemplatePreviewMockSupport {
         }
 
         if (name.startsWith("article_list")) {
-            model.put("category", category(ctx, config));
+            model.put("category", categoryFor(suffixOfFileName(name), ctx, config));
             model.put("articleVoPage", articleVoPage(ctx, config));
         } else if (name.startsWith("article")) {
             model.put("article", articleDetail(ctx, config));
         } else if (name.startsWith("page")) {
-            model.put("singlePage", singlePageDetail(ctx, config));
+            model.put("singlePage", singlePageDetail(suffixOfFileName(name), ctx, config));
         }
         return model;
     }
 
+    /**
+     * 从模板文件名提取 suffix：article_list_products.html → "products"；
+     * 基础页（article_list.html）返回 null
+     */
+    private static String suffixOfFileName(String name) {
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        int idx;
+        if (base.startsWith("article_list_")) {
+            idx = "article_list_".length();
+        } else if (base.startsWith("article_")) {
+            idx = "article_".length();
+        } else if (base.startsWith("page_")) {
+            idx = "page_".length();
+        } else {
+            return null;
+        }
+        return base.substring(idx);
+    }
+
+    /**
+     * article_list_{suffix}.html 页面的当前分类：优先匹配配置中 suffix 相同的分类，
+     * 匹配不到（基础页或未配置）回退默认取第 3 项逻辑
+     */
+    private static Map<String, Object> categoryFor(String suffix, PreviewContext ctx, PreviewDataConfig config) {
+        List<ItemConfig> items = config == null ? null : config.categories();
+        if (suffix != null && items != null) {
+            for (int i = 0; i < items.size(); i++) {
+                if (suffix.equals(items.get(i).suffix())) {
+                    return category((long) (i + 1), items.get(i).title(),
+                            resolveUrl(ctx, "article_list", items.get(i).suffix()));
+                }
+            }
+        }
+        return category(ctx, config);
+    }
     // ==================== 指令协议 ====================
 
     /**
@@ -724,9 +760,16 @@ final class AiTemplatePreviewMockSupport {
     /**
      * 单页详情 mock（page.html 页面上下文）：标题/URL 取配置的首个单页，否则默认
      */
-    private static Map<String, Object> singlePageDetail(PreviewContext ctx, PreviewDataConfig config) {
+    private static Map<String, Object> singlePageDetail(String suffix, PreviewContext ctx, PreviewDataConfig config) {
         List<ItemConfig> items = config == null ? null : config.singlePages();
-        ItemConfig first = items == null || items.isEmpty() ? null : items.get(0);
+        ItemConfig first = null;
+        if (suffix != null && items != null) {
+            // page_{suffix}.html：优先取配置中 suffix 相同的单页
+            first = items.stream().filter(i -> suffix.equals(i.suffix())).findFirst().orElse(null);
+        }
+        if (first == null && items != null && !items.isEmpty()) {
+            first = items.get(0);
+        }
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("id", 1L);
         s.put("title", first != null ? first.title() : "关于我们");

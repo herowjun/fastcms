@@ -853,13 +853,6 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private static final int MAX_SPEC_FIX_ATTEMPTS = 2;
 
     /**
-     * 组件化渲染产物的四个页面文件（渲染校验对象）
-     */
-    private static final List<String> COMPONENT_PAGE_FILES = List.of(
-            AiTemplateConstants.FILE_INDEX, AiTemplateConstants.FILE_ARTICLE_LIST,
-            AiTemplateConstants.FILE_ARTICLE, AiTemplateConstants.FILE_PAGE);
-
-    /**
      * 会话工作目录是否已存在 PageSpec（组件化会话判定）
      */
     private boolean hasComponentSpec(AiTemplateSession session) {
@@ -1017,7 +1010,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 && !session.getTemplateName().equals(spec.safeTemplateName())) {
             spec = new com.fastcms.ai.component.PageSpec(spec.specVersion(), spec.foundation(),
                     session.getTemplateName(), spec.siteName(), spec.siteType(),
-                    spec.stylePreset(), spec.primaryColor(), spec.pages());
+                    spec.stylePreset(), spec.primaryColor(), spec.safeSite(), spec.pages());
         }
         com.fastcms.ai.component.PageSpecRenderer.RenderResult renderResult;
         try {
@@ -1049,7 +1042,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
 
         // ===== 渲染校验（与预览同管线）：组件已预校验，此处兜底组件包自身的回归问题 =====
-        List<String> renderErrors = previewRenderer.checkRenderedFiles(workDir, COMPONENT_PAGE_FILES);
+        // 渲染校验覆盖全部 html 产物（基础页 + site 信息架构的 suffix 专属页）
+        List<String> pageFiles = renderResult.writtenFiles().stream()
+                .filter(f -> f.endsWith(".html")).toList();
+        List<String> renderErrors = previewRenderer.checkRenderedFiles(workDir, pageFiles);
 
         // ===== 收尾：落库 + 推送 =====
         String reasoningText = allReasoning.length() > 0 ? allReasoning.toString() : null;

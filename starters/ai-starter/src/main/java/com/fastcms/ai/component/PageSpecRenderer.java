@@ -27,6 +27,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -43,11 +45,14 @@ import java.util.Map;
  * {targetDir}/
  * ├── _pagespec.json          ← spec 落盘（微调/重渲染的事实源）
  * ├── _template.properties    ← 模板注册信息
- * ├── _preview_data.json      ← 预览演示数据（站点名）
+ * ├── _preview_data.json      ← 预览演示数据（menus/categories/singlePages/articles/seo 全量）
  * ├── index.html              ← sections 顺序组装
  * ├── article_list.html       ← 外围 sections + 内置列表正文（footer 类 section 前）
  * ├── article.html            ← 外围 sections + 内置文章正文
  * ├── page.html               ← 外围 sections + 内置单页正文
+ * ├── article_list_xxx.html   ← site 信息架构中带 suffix 的栏目页（自动生成，
+ * │                              spec.pages 显式编排时用编排结果）
+ * └── page_xxx.html           ← 同上（单页专属页）
  * └── static/css/
  *     ├── pack.css            ← 组件包地基（provider 资产复制）
  *     ├── tokens.css          ← TokenEngine 按主色+风格预设生成
@@ -117,22 +122,37 @@ public class PageSpecRenderer {
     // ==================== 页面组装 ====================
 
     /**
-     * 组装 index / article_list / article / page 四类页面文件
+     * 组装页面文件：4 个基础页 + spec.pages 显式编排的 suffix 页 + site 信息架构
+     * 要求但未显式编排的 suffix 页（克隆对应基础页的外围 section，保证菜单链接全部可达）
      */
     private void writePages(PageSpec spec, Path targetDir, List<String> written) throws IOException {
-        writePage(spec, targetDir, PageSpec.PAGE_INDEX, written);
-        writePage(spec, targetDir, PageSpec.PAGE_ARTICLE_LIST, written);
-        writePage(spec, targetDir, PageSpec.PAGE_ARTICLE, written);
-        writePage(spec, targetDir, PageSpec.PAGE_PAGE, written);
+        LinkedHashSet<String> pageKeys = new LinkedHashSet<>(List.of(
+                PageSpec.PAGE_INDEX, PageSpec.PAGE_ARTICLE_LIST,
+                PageSpec.PAGE_ARTICLE, PageSpec.PAGE_PAGE));
+        if (spec.pages() != null) {
+            spec.pages().keySet().forEach(pageKeys::add);
+        }
+        if (spec.safeSite() != null) {
+            for (String key : spec.safeSite().allSuffixedPageKeys()) {
+                pageKeys.add(key);
+            }
+        }
+        for (String pageKey : pageKeys) {
+            writePage(spec, targetDir, pageKey, written);
+        }
     }
 
     private void writePage(PageSpec spec, Path targetDir, String pageKey, List<String> written) throws IOException {
-        List<SectionSpec> sections = spec.sectionsOf(pageKey);
-        if (sections.isEmpty() && !PageSpec.PAGE_INDEX.equals(pageKey)) {
-            // 内容页 spec 未配置任何 section（如 navbar/footer）也保留默认骨架，
-            // 否则模板缺文件；index 空 sections 属于校验问题，此处同样兜底输出空页面
+        String base = PageSpec.basePageKeyOf(pageKey);
+        if (base == null) {
+            throw new IllegalArgumentException("未知页面 key: " + pageKey + "（应为 index/article_list/article/page 或带 suffix 的变体）");
         }
-        String html = buildPageHtml(spec, pageKey, sections);
+        // site 要求但 spec.pages 未编排的 suffix 页：克隆对应基础页的 section 编排
+        List<SectionSpec> sections = spec.sectionsOf(pageKey);
+        if (sections.isEmpty() && !spec.sectionsOf(base).isEmpty()) {
+            sections = spec.sectionsOf(base);
+        }
+        String html = buildPageHtml(spec, pageKey, base, sections);
         Path file = targetDir.resolve(pageKey + ".html");
         Files.createDirectories(file.getParent());
         Files.writeString(file, html, StandardCharsets.UTF_8);
@@ -141,24 +161,27 @@ public class PageSpecRenderer {
 
     /**
      * 单页面 HTML：head + sections 顺序组装（内容页在首个 footer 类 section 前插入内置正文）
+     *
+     * @param pageKey 页面 key（可为带 suffix 的变体，如 article_list_products）
+     * @param base    基础页类型（决定正文骨架与标题表达式）
      */
-    private String buildPageHtml(PageSpec spec, String pageKey, List<SectionSpec> sections) {
+    private String buildPageHtml(PageSpec spec, String pageKey, String base, List<SectionSpec> sections) {
         StringBuilder body = new StringBuilder();
 
         boolean contentInserted = false;
         for (SectionSpec section : sections) {
-            if (!contentInserted && isContentPage(pageKey) && isFooterSection(section)) {
-                body.append(contentSkeleton(pageKey));
+            if (!contentInserted && isContentPage(base) && isFooterSection(section)) {
+                body.append(contentSkeleton(base));
                 contentInserted = true;
             }
             body.append(renderSection(section));
         }
         // 内容页无 footer section 时正文追加在末尾
-        if (isContentPage(pageKey) && !contentInserted) {
-            body.append(contentSkeleton(pageKey));
+        if (isContentPage(base) && !contentInserted) {
+            body.append(contentSkeleton(base));
         }
 
-        String title = pageTitle(spec, pageKey);
+        String title = pageTitle(spec, base);
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html>\n");
         html.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
@@ -278,10 +301,78 @@ public class PageSpecRenderer {
     }
 
     private void writePreviewData(PageSpec spec, Path targetDir, List<String> written) throws IOException {
-        // 预览演示数据：站点名写入 SEO，其余回退内置默认（菜单/文章等）
-        String json = "{\"seo\":{\"website_title\":" + jsonString(spec.safeSiteName()) + "}}\n";
-        Files.writeString(targetDir.resolve("_preview_data.json"), json, StandardCharsets.UTF_8);
+        // 预览演示数据：site 信息架构全量落盘（menus/categories/singlePages/articles/seo），
+        // 预览渲染不再回退内置默认（SpringBoot 演示数据）——菜单/文章与用户主题一致
+        Map<String, Object> root = new LinkedHashMap<>();
+        Map<String, String> seo = new LinkedHashMap<>();
+        seo.put("website_title", spec.safeSiteName());
+        root.put("seo", seo);
+
+        SiteContentSpec site = spec.safeSite();
+        if (site != null) {
+            List<Map<String, Object>> menus = new ArrayList<>();
+            for (SiteContentSpec.NavItem item : site.safeMenus()) {
+                menus.add(navItemJson(item));
+            }
+            if (!menus.isEmpty()) {
+                root.put("menus", menus);
+            }
+            List<Map<String, String>> categories = new ArrayList<>();
+            for (SiteContentSpec.CatalogItem item : site.safeCategories()) {
+                categories.add(itemJson(item.title(), item.suffix()));
+            }
+            if (!categories.isEmpty()) {
+                root.put("categories", categories);
+            }
+            List<Map<String, String>> singlePages = new ArrayList<>();
+            for (SiteContentSpec.CatalogItem item : site.safeSinglePages()) {
+                singlePages.add(itemJson(item.title(), item.suffix()));
+            }
+            if (!singlePages.isEmpty()) {
+                root.put("singlePages", singlePages);
+            }
+            if (!site.safeArticles().isEmpty()) {
+                Map<String, Object> articles = new LinkedHashMap<>();
+                articles.put("titles", site.safeArticles().stream()
+                        .map(SiteContentSpec.PreviewArticle::title).toList());
+                articles.put("summaries", site.safeArticles().stream()
+                        .map(SiteContentSpec.PreviewArticle::summary).toList());
+                root.put("articles", articles);
+            }
+        }
+
+        StringWriter sw = new StringWriter();
+        MAPPER.writerWithDefaultPrettyPrinter().writeValue(sw, root);
+        Files.writeString(targetDir.resolve("_preview_data.json"), sw.toString() + "\n", StandardCharsets.UTF_8);
         written.add("_preview_data.json");
+    }
+
+    private Map<String, Object> navItemJson(SiteContentSpec.NavItem item) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", item.name());
+        m.put("type", item.safeType());
+        if (item.suffix() != null && !item.suffix().isBlank()) {
+            m.put("suffix", item.suffix());
+        }
+        if (item.safeChildren().isEmpty()) {
+            m.put("children", List.of());
+        } else {
+            List<Map<String, Object>> children = new ArrayList<>();
+            for (SiteContentSpec.NavItem child : item.safeChildren()) {
+                children.add(navItemJson(child));
+            }
+            m.put("children", children);
+        }
+        return m;
+    }
+
+    private Map<String, String> itemJson(String title, String suffix) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("title", title);
+        if (suffix != null && !suffix.isBlank()) {
+            m.put("suffix", suffix);
+        }
+        return m;
     }
 
     // ==================== 工具 ====================
@@ -378,9 +469,6 @@ public class PageSpecRenderer {
                 .replace(">", "&gt;").replace("\"", "&quot;");
     }
 
-    private static String jsonString(String s) {
-        return MAPPER.writeValueAsString(s);
-    }
 
     /**
      * 内容页正文排版样式（富文本 contentHtml 无 Tailwind 类可用，手写基础排版）
