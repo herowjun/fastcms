@@ -1,0 +1,60 @@
+<#import '_layout.html' as layout>
+<@layout.header '免费插件 - FastCMS插件中心'>
+<style>
+.free-hero{padding:56px0;background:linear-gradient(180deg,#022c220%,#064e3b100%);color:#fff;text-align:center}
+.free-hero h1{font-size:32px;margin:0010px;font-weight:800}
+.free-hero p{color:#a7f3d0;margin:0;font-size:15px}
+.free-list-section{padding:48px0;background:#f8fafc}
+.free-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.free-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:24px;transition:all .2s;display:block;text-decoration:none}
+.free-card:hover{transform:translateY(-3px);box-shadow:010px30px rgba(15,23,42,.08);border-color:#6ee7b7}
+.free-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.free-card-name{font-size:16px;font-weight:700;color:#0f172a}
+.free-card-badge{font-size:11px;padding:3px10px;border-radius:999px;background:#d1fae5;color:#059669;font-weight:600}
+.free-card-desc{color:#64748b;font-size:13px;line-height:1.6;margin:0014px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.free-card-meta{display:flex;justify-content:space-between;color:#94a3b8;font-size:12px;border-top:1px solid #f1f5f9;padding-top:12px}
+.empty-state{text-align:center;padding:60px0;color:#64748b}
+.pagination{display:flex;justify-content:center;gap:8px;margin-top:40px;flex-wrap:wrap}
+.page-link{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:014px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#334155;text-decoration:none;font-size:14px}
+.page-link:hover{border-color:#059669;color:#059669}
+@media(max-width:900px){.free-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.free-grid{grid-template-columns:1fr}}
+</style>
+</@layout.header>
+<@layout.body>
+<section class='free-hero'>
+<div class='container'>
+<h1>🆓免费插件</h1>
+<p>全部免费开源，支持社区共建，即装即用</p>
+</div>
+</section>
+<section class='free-list-section'>
+<div class='container'>
+<#assign hasList = articleVoPage?? && articleVoPage.records?? && articleVoPage.records?has_content>
+<#if hasList>
+<div class='free-grid'>
+<#list articleVoPage.records as item>
+<a class='free-card' href='${(item.url)!''}'>
+<div class='free-card-top'>
+<span class='free-card-name'>${(item.title)!''}</span>
+<span class='free-card-badge'>免费</span>
+</div>
+<p class='free-card-desc'>${(item.summary)!''}</p>
+<div class='free-card-meta'>
+<span><@formatTime value=(item.created)! format='yyyy-MM-dd'/></span>
+<span>${(item.viewCount)!0}次安装</span>
+</div>
+</a>
+</#list>
+</div>
+<#else>
+<div class='empty-state'>
+<p>暂无免费插件</p>
+<p>请稍后再来查看。</p>
+</div>
+</#if>
+<@layout._articlePage/>
+</div>
+</section>
+</@layout.body>
+<@layout.script></@layout.script>

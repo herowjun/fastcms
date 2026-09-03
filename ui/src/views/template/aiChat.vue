@@ -23,7 +23,7 @@
 			</el-button>
 			<el-tag v-if="mode === 'adjust'" size="small" type="warning">直接修改正式模板</el-tag>
 		<el-tag v-if="mode === 'generate' && isApplied" size="small" type="success">已应用（仅回看）</el-tag>
-		<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
+			<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
 		<!-- 对话区域 -->
@@ -113,7 +113,12 @@
 					<el-button v-if="mode === 'adjust'" size="small" text type="danger" @click="onRollback" :loading="state.rollingBack">
 						<el-icon><ele-RefreshLeft /></el-icon>回滚最近一次修改
 					</el-button>
-					<el-button size="small" text @click="onPreviewTemplate">
+						<!-- 旧模板确定性升级：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉 -->
+						<el-button v-if="state.legacyUpgradable && !state.chatting && !isApplied" size="small"
+							type="warning" :loading="state.upgrading" @click="onUpgradeLegacy">
+							<el-icon><ele-MagicStick /></el-icon>升级为组件版
+						</el-button>
+						<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
 					</el-button>
 					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
@@ -261,6 +266,9 @@ const state = reactive({
 	loadingFiles: false,
 	applying: false,
 	rollingBack: false,
+	// 旧模板确定性升级：探测结果（目录有 html 无 _pagespec.json）与执行中状态
+	legacyUpgradable: false,
+	upgrading: false,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
@@ -304,10 +312,13 @@ const loadSessionData = async () => {
 	if (!props.session?.sessionId) return;
 	state.loading = true;
 	try {
-		const [messagesRes, filesRes] = await Promise.all([
+		const [messagesRes, filesRes, legacyRes] = await Promise.all([
 			templateApi.listMessages(props.session.sessionId),
 			templateApi.listFiles(props.session.sessionId),
+			// 旧模板探测：决定文件区"升级为组件版"按钮显隐；接口异常时静默降级为不显示
+			templateApi.legacyStatus(props.session.sessionId).catch(() => null),
 		]);
+		state.legacyUpgradable = legacyRes?.data === true;
 		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）；
 		// content 经 cleanHistoryContent 清洗（兜底旧版本存库的原始 JSON 全文）
 		if (messagesRes.data) {
@@ -707,6 +718,39 @@ const onApplyTemplate = () => {
 	}).catch(() => {});
 };
 
+/**
+ * 旧模板确定性升级为组件化模板（不经 AI）
+ *
+ * 后端从 _preview_data.json 提取站点名等内容资产 → 默认 PageSpec（导航+首屏+文章流+页脚）
+ * → 校验 → 旧文本文件备份（同级 _legacy_backup_时间戳 目录）→ 渲染 → 清理。
+ * 升级后进入组件化闭环：直接对话即可微调（换主色/加组件/改文案）。
+ */
+const onUpgradeLegacy = () => {
+	if (!props.session?.sessionId) return;
+	ElMessageBox.confirm(
+		'将把此模板升级为组件化版本：保留站点名、菜单与预览数据，用组件库重新生成页面视觉；原文件自动备份，图片等资源保留。是否继续？',
+		'升级为组件版',
+		{ confirmButtonText: '升 级', cancelButtonText: '取 消', type: 'warning' }
+	).then(async () => {
+		state.upgrading = true;
+		try {
+			const res = await templateApi.upgradeLegacy(props.session.sessionId);
+			if (res.data) {
+				ElMessage.success(res.data);
+				state.legacyUpgradable = false;
+				// 刷新消息（升级留痕消息）与文件列表（旧文件清理 + 组件化产物），通知父组件刷新文件树
+				await loadSessionData();
+				emit('files-changed');
+			} else if (res.msg) {
+				ElMessage.error(res.msg);
+			}
+		} catch (e: any) {
+			ElMessage.error(e?.message || '升级失败');
+		} finally {
+			state.upgrading = false;
+		}
+	}).catch(() => {});
+};
 const onPreviewTemplate = () => {
 	if (!props.session?.templateName) return;
 	// 调整型会话工作目录即正式模板目录，直接预览首页；

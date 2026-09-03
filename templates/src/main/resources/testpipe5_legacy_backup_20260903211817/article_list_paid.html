@@ -1,0 +1,62 @@
+<#import '_layout.html' as layout>
+<@layout.header '付费插件 - FastCMS插件中心'>
+<style>
+.paid-hero{padding:56px0;background:linear-gradient(180deg,#451a030%,#78350f100%);color:#fff;text-align:center}
+.paid-hero h1{font-size:32px;margin:0010px;font-weight:800}
+.paid-hero p{color:#fde68a;margin:0;font-size:15px}
+.paid-list-section{padding:48px0;background:#fffbeb}
+.paid-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.paid-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:24px;transition:all .2s;display:block;text-decoration:none;position:relative;overflow:hidden}
+.paid-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#f59e0b,#d97706)}
+.paid-card:hover{transform:translateY(-3px);box-shadow:010px30px rgba(15,23,42,.1);border-color:#fcd34d}
+.paid-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.paid-card-name{font-size:16px;font-weight:700;color:#0f172a}
+.paid-card-badge{font-size:11px;padding:3px10px;border-radius:999px;background:#fef3c7;color:#d97706;font-weight:600}
+.paid-card-desc{color:#64748b;font-size:13px;line-height:1.6;margin:0014px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.paid-card-meta{display:flex;justify-content:space-between;align-items:center;color:#94a3b8;font-size:12px;border-top:1px solid #f1f5f9;padding-top:12px}
+.paid-card-price{color:#d97706;font-weight:700;font-size:14px}
+.empty-state{text-align:center;padding:60px0;color:#64748b}
+.pagination{display:flex;justify-content:center;gap:8px;margin-top:40px;flex-wrap:wrap}
+.page-link{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:014px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#334155;text-decoration:none;font-size:14px}
+.page-link:hover{border-color:#d97706;color:#d97706}
+@media(max-width:900px){.paid-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.paid-grid{grid-template-columns:1fr}}
+</style>
+</@layout.header>
+<@layout.body>
+<section class='paid-hero'>
+<div class='container'>
+<h1>💎付费插件</h1>
+<p>专业级插件，提供企业级技术支持与 SLA保障</p>
+</div>
+</section>
+<section class='paid-list-section'>
+<div class='container'>
+<#assign hasList = articleVoPage?? && articleVoPage.records?? && articleVoPage.records?has_content>
+<#if hasList>
+<div class='paid-grid'>
+<#list articleVoPage.records as item>
+<a class='paid-card' href='${(item.url)!''}'>
+<div class='paid-card-top'>
+<span class='paid-card-name'>${(item.title)!''}</span>
+<span class='paid-card-badge'>付费</span>
+</div>
+<p class='paid-card-desc'>${(item.summary)!''}</p>
+<div class='paid-card-meta'>
+<span><@formatTime value=(item.created)! format='yyyy-MM-dd'/></span>
+<span class='paid-card-price'>联系报价</span>
+</div>
+</a>
+</#list>
+</div>
+<#else>
+<div class='empty-state'>
+<p>暂无付费插件</p>
+<p>请稍后再来查看。</p>
+</div>
+</#if>
+<@layout._articlePage/>
+</div>
+</section>
+</@layout.body>
+<@layout.script></@layout.script>

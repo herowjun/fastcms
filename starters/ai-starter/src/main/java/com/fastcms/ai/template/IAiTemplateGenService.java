@@ -134,5 +134,28 @@ public interface IAiTemplateGenService {
      * @return 回滚结果描述（含恢复的文件列表）
      */
     String rollbackLast(String sessionId);
+    /**
+     * 会话对应模板是否为可升级的旧模板（有 html 页面且无 _pagespec.json）
+     *
+     * <p>前端据此决定是否展示「升级为组件版」按钮。</p>
+     */
+    boolean isLegacyTemplate(String sessionId);
+
+    /**
+     * 旧模板确定性升级为组件化模板（不经 AI，前端按钮触发）
+     *
+     * <p>升级流程（LegacyTemplateUpgrader）：
+     * 从 _preview_data.json 提取站点名/副标题等内容资产 → 构建默认 PageSpec
+     * （navbar + hero + article-list + footer）→ 校验 → 旧文本文件备份 → 渲染 →
+     * 清理旧文本文件（二进制资源保留）→ 同步 ai_template_file 记录。
+     * 旧预览数据（菜单/文章 mock）回写保留，保证升级后预览效果完整。</p>
+     *
+     * <p>升级成功后会话进入组件化闭环：后续对话微调 = PageSpec 往返
+     * （换主色/加组件/改文案一次输出全量生效）。</p>
+     *
+     * @param sessionId 会话 ID
+     * @return 升级结果描述（文件数、备份位置）
+     */
+    String upgradeLegacyTemplate(String sessionId);
 
 }

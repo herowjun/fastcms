@@ -1,123 +1,81 @@
-<#import '_layout.html' as layout>
-<#assign article=article!{}>
-<@layout.header (article.title!'文章详情')>
- <meta property='og:title' content='${article.title!''}'>
- <meta property='og:description' content='${article.summary!''}'>
- <#if article.thumbnail?? && article.thumbnail?has_content>
- <meta property='og:image' content='${article.thumbnail}'>
- </#if>
- <style>
- .article-detail{padding:48px064px;background:linear-gradient(180deg,#f8fafc0%,#ffffff100%)}
- .article-inner{display:grid;grid-template-columns:minmax(0,1fr)320px;gap:32px;align-items:start}
- .article-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:012px30px rgba(15,23,42,.06);padding:32px}
- .article-title{margin:0016px;font-size:32px;line-height:1.3;color:#0f172a}
- .article-meta{display:flex;flex-wrap:wrap;gap:16px;color:#64748b;font-size:14px;margin-bottom:20px}
- .article-cover{width:100%;height:auto;border-radius:12px;margin-bottom:20px}
- .article-summary{background:#f1f5f9;border-left:4px solid #2563eb;padding:16px;color:#334155;line-height:1.8;border-radius:8px;margin:0020px}
- .article-content{font-size:16px;line-height:1.9;color:#1f2937}
- .article-content img{max-width:100%;height:auto;border-radius:8px}
- .article-content p{margin:0016px}
- .article-content h2,.article-content h3{margin:24px012px;color:#0f172a}
- .article-content ul,.article-content ol{padding-left:24px;margin:0016px}
- .article-content blockquote{margin:0016px;padding:16px;background:#f8fafc;border-left:4px solid #94a3b8;color:#475569}
- .article-content table{width:100%;border-collapse:collapse;margin:0016px}
- .article-content th,.article-content td{border:1px solid #e2e8f0;padding:10px12px;text-align:left}
- .article-footer{margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;display:grid;grid-template-columns:1fr1fr;gap:16px}
- .article-nav{display:block;font-size:14px;color:#64748b;text-decoration:none}
- .article-nav strong{display:block;margin-top:4px;color:#0f172a;font-size:15px;line-height:1.5}
- .article-nav.next{text-align:right}
- .sidebar-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:012px30px rgba(15,23,42,.06);padding:24px;margin-bottom:24px}
- .sidebar-card h2{margin:0016px;font-size:18px;color:#0f172a}
- .related-list{list-style:none;margin:0;padding:0}
- .related-list li{margin:0012px}
- .related-list a{color:#334155;text-decoration:none;line-height:1.6}
- .related-list a:hover{color:#2563eb}
- .sidebar-empty{color:#64748b;font-size:14px;margin:0}
- @media(max-width:960px){.article-inner{grid-template-columns:1fr}.article-title{font-size:26px}.article-card{padding:24px}.article-footer{grid-template-columns:1fr}.article-nav.next{text-align:left}}
- </style>
-</@layout.header>
-<@layout.body>
- <section class='article-detail'>
- <div class='container article-inner'>
- <article class='article-card'>
- <header class='article-header'>
- <h1 class='article-title'>${article.title!'文章详情'}</h1>
- <div class='article-meta'>
- <time><@formatTime value=(article.created)! format='yyyy-MM-dd'/></time>
- <span>浏览 ${article.viewCount!0}次</span>
- </div>
- </header>
- <#if article.thumbnail?? && article.thumbnail?has_content>
- <img class='article-cover' src='${article.thumbnail}' alt='${article.title!''}'>
- </#if>
- <#if article.summary?? && article.summary?has_content>
- <p class='article-summary'>${article.summary}</p>
- </#if>
- <div class='article-content'>
- ${article.contentHtml!''}
- </div>
- <footer class='article-footer'>
- <#if article.id??>
- <@prevArticleTag articleId=article.id>
- <#if data?? && data?is_hash && (data.title)??>
- <a class='article-nav prev' href='${(data.url)!''}'>上一篇<strong>${(data.title)!''}</strong></a>
- <#else>
- <span class='article-nav prev'>上一篇<strong>暂无上一篇</strong></span>
- </#if>
- </@prevArticleTag>
- <@nextArticleTag articleId=article.id>
- <#if data?? && data?is_hash && (data.title)??>
- <a class='article-nav next' href='${(data.url)!''}'>下一篇<strong>${(data.title)!''}</strong></a>
- <#else>
- <span class='article-nav next'>下一篇<strong>暂无下一篇</strong></span>
- </#if>
- </@nextArticleTag>
- <#else>
- <span class='article-nav prev'>上一篇<strong>暂无上一篇</strong></span>
- <span class='article-nav next'>下一篇<strong>暂无下一篇</strong></span>
- </#if>
- </footer>
- </article>
- <aside class='article-sidebar'>
- <section class='sidebar-card'>
- <h2>相关文章</h2>
- <#if article.id??>
- <@relatedArticleList articleId=article.id count=5>
- <#if data?? && data?is_sequence && (data?size >0)>
- <ul class='related-list'>
- <#list data as item>
- <#if item?? && item?is_hash>
- <li><a href='${(item.url)!''}'>${(item.title)!''}</a></li>
- </#if>
- </#list>
- </ul>
- <#else>
- <p class='sidebar-empty'>暂无相关文章</p>
- </#if>
- </@relatedArticleList>
- <#else>
- <p class='sidebar-empty'>暂无相关文章</p>
- </#if>
- </section>
- <section class='sidebar-card'>
- <h2>快速导航</h2>
- <@menuTag>
- <#if data?? && data?is_sequence && (data?size >0)>
- <ul class='related-list'>
- <#list data as item>
- <#if item?? && item?is_hash>
- <li><a href='${(item.url)!''}'>${(item.menuName)!''}</a></li>
- </#if>
- </#list>
- </ul>
- <#else>
- <p class='sidebar-empty'>暂无栏目</p>
- </#if>
- </@menuTag>
- </section>
- </aside>
- </div>
- </section>
-</@layout.body>
-<@layout.script>
-</@layout.script>
+<!DOCTYPE html>
+<html lang="zh-CN" class="bg-white text-slate-900 antialiased">
+<head>
+<meta charset="utf-8">
+<title>${(article.title)!"FastCMS -现代化内容管理系统"}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="keywords" content="FastCMS -现代化内容管理系统">
+<meta name="description" content="${seoTag("website_sub_title")!""}">
+<link rel="stylesheet" href="${ctx()}/css/pack.css">
+<link rel="stylesheet" href="${ctx()}/css/tokens.css">
+<link rel="stylesheet" href="${ctx()}/css/site.css">
+</head>
+<body class="font-sans">
+<#assign comp = {"brand": "FastCMS -现代化内容管理系统"}>
+<#-- 导航栏 / sticky 变体：品牌名 + CMS 菜单，吸顶悬浮 -->
+<section class="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur">
+  <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+    <a href="/" class="text-lg font-bold tracking-tight text-slate-900">${(comp.brand)!''}</a>
+    <nav aria-label="主导航">
+      <ul class="hidden items-center gap-8 md:flex">
+        <@menuTag>
+          <#if data??>
+            <#list data as item>
+              <#if item.menuName?? && item.menuName?has_content>
+                <li>
+                  <a href="${item.url!''}" target="${item.target!'_self'}"
+                     class="text-sm text-slate-600 transition-colors hover:text-primary-600">${item.menuName}</a>
+                </li>
+              </#if>
+            </#list>
+          </#if>
+        </@menuTag>
+      </ul>
+    </nav>
+  </div>
+</section>
+<#-- 文章详情页正文骨架（内容页内置模板，渲染引擎组装进 article.html） -->
+<article class="bg-white py-12">
+  <div class="mx-auto max-w-3xl px-4">
+    <header class="border-b border-slate-200 pb-8 text-center">
+      <h1 class="text-3xl font-bold leading-tight tracking-tight text-slate-900">${(article.title)!''}</h1>
+      <div class="mt-4 flex items-center justify-center gap-6 text-sm text-slate-500">
+        <time><@formatTime value=(article.created)! format="yyyy-MM-dd"/></time>
+        <span>${(article.viewCount)!0} 次阅读</span>
+      </div>
+    </header>
+    <div class="article-content mt-8">${(article.contentHtml)!''}</div>
+  </div>
+</article>
+<#assign comp = {"brand": "FastCMS -现代化内容管理系统"}>
+<#-- 页脚 / simple 变体：深色简洁横栏 -->
+<footer class="bg-slate-900 text-slate-400">
+  <div class="mx-auto max-w-6xl px-4 py-12">
+    <div class="flex flex-col items-center justify-between gap-6 md:flex-row">
+      <a href="/" class="text-lg font-bold text-white">${(comp.brand)!''}</a>
+      <nav aria-label="页脚导航">
+        <ul class="flex flex-wrap items-center justify-center gap-6">
+          <@menuTag>
+            <#if data??>
+              <#list data as item>
+                <#if item.menuName?? && item.menuName?has_content>
+                  <li>
+                    <a href="${item.url!''}" target="${item.target!'_self'}"
+                       class="text-sm transition-colors hover:text-white">${item.menuName}</a>
+                  </li>
+                </#if>
+              </#list>
+            </#if>
+          </@menuTag>
+        </ul>
+      </nav>
+    </div>
+    <#assign copyright = (comp.copyright)!''>
+    <#if !copyright?has_content>
+      <#assign copyright = ((comp.brand)!'FastCMS') + ' © ' + .now?string("yyyy")>
+    </#if>
+    <div class="mt-8 border-t border-slate-800 pt-6 text-center text-sm">${copyright}</div>
+  </div>
+</footer>
+</body>
+</html>

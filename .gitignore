@@ -42,3 +42,6 @@ build/
 /web/src/main/resources/static/doc/
 /**/.flattened-pom.xml
 /.flattened-pom.xml
+
+### Tailwind pack.css 构建目录（node_modules + 中间产物） ###
+.tailwind-build/

@@ -1,0 +1,14 @@
+{
+  "id": "navbar",
+  "name": "导航栏",
+  "description": "站点顶部导航：品牌名 + CMS 菜单，吸顶悬浮",
+  "category": "structural",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "sticky", "description": "白色吸顶横栏，滚动时固定在顶部" }
+  ],
+  "slots": [
+    { "name": "brand", "type": "string", "required": true, "maxLength": 12, "desc": "品牌名（展示在导航左侧）" }
+  ],
+  "cmsBindings": ["menu"]
+}

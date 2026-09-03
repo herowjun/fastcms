@@ -1,0 +1,15 @@
+{
+  "id": "footer",
+  "name": "页脚",
+  "description": "站点收尾：品牌名 + 菜单链接 + 版权信息",
+  "category": "footer",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "simple", "description": "深色简洁横栏" }
+  ],
+  "slots": [
+    { "name": "brand", "type": "string", "required": true, "maxLength": 12, "desc": "品牌名" },
+    { "name": "copyright", "type": "string", "required": false, "maxLength": 40, "desc": "版权文案，默认为 品牌 © 年份" }
+  ],
+  "cmsBindings": ["menu"]
+}
