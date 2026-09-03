@@ -1,0 +1,16 @@
+{
+  "id": "feature-grid",
+  "name": "特性网格",
+  "description": "三列特性卡片：图标 + 标题 + 描述，展示核心卖点",
+  "category": "content",
+  "appliesTo": ["index"],
+  "variants": [
+    { "id": "three-col", "description": "三列卡片，移动端自动单列" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：核心优势" },
+    { "name": "subtitle", "type": "string", "required": false, "maxLength": 40, "desc": "区块副标题" },
+    { "name": "items", "type": "list", "required": true, "desc": "特性列表（3-6 项），每项含 title(≤8字)/desc(≤40字)/icon(emoji)" }
+  ],
+  "cmsBindings": []
+}

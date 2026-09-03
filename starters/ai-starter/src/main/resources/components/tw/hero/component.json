@@ -1,0 +1,21 @@
+{
+  "id": "hero",
+  "name": "首屏",
+  "description": "页面第一屏：主标题 + 副标题 + 行动按钮，决定访客第一印象",
+  "category": "structural",
+  "appliesTo": ["index"],
+  "variants": [
+    { "id": "centered", "description": "居中大标题，适合品牌宣言" },
+    { "id": "split", "description": "左文右图分栏，适合产品介绍" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 24, "desc": "主标题" },
+    { "name": "subtitle", "type": "string", "required": false, "maxLength": 60, "desc": "副标题（一句话说明）" },
+    { "name": "ctaLabel", "type": "string", "required": false, "maxLength": 12, "desc": "主按钮文案，如：了解更多" },
+    { "name": "ctaHref", "type": "string", "required": false, "desc": "主按钮链接，如 /article/category/1" },
+    { "name": "ctaSecondaryLabel", "type": "string", "required": false, "maxLength": 12, "desc": "次按钮文案（可空）" },
+    { "name": "ctaSecondaryHref", "type": "string", "required": false, "desc": "次按钮链接" },
+    { "name": "image", "type": "media", "required": false, "desc": "配图地址（split 变体使用）" }
+  ],
+  "cmsBindings": []
+}

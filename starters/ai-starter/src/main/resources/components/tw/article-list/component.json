@@ -1,0 +1,15 @@
+{
+  "id": "article-list",
+  "name": "文章列表",
+  "description": "最新文章卡片流（自动绑定 CMS 文章数据，含缩略图/摘要/日期）",
+  "category": "content",
+  "appliesTo": ["index"],
+  "variants": [
+    { "id": "cards", "description": "三列图文卡片，移动端单列" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：最新动态" },
+    { "name": "count", "type": "number", "required": false, "desc": "展示文章数（默认 6）" }
+  ],
+  "cmsBindings": ["article"]
+}

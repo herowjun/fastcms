@@ -1,0 +1,55 @@
+{
+ "menus": [
+ { "name": "首页", "type": "index" },
+ { "name": "插件中心", "type": "article_list", "suffix": "plugins", "children": [
+ { "name": "免费插件", "type": "article_list", "suffix": "free" },
+ { "name": "付费插件", "type": "article_list", "suffix": "paid" }
+ ]},
+ { "name": "版本发布", "type": "article_list", "suffix": "releases" },
+ { "name": "开发文档", "type": "page", "suffix": "docs" },
+ { "name": "关于我们", "type": "page", "suffix": "about" },
+ { "name": "下载", "type": "page", "suffix": "download" }
+ ],
+ "categories": ["免费插件", "付费插件", "版本发布", "新闻动态"],
+ "tags": ["模板引擎", "插件开发", "SEO", "响应式", "性能优化"],
+ "singlePages": [
+ { "title": "关于我们", "suffix": "about" },
+ { "title": "开发文档", "suffix": "docs" },
+ { "title": "下载", "suffix": "download" }
+ ],
+ "articles": {
+ "titles": [
+ "FastCMS3.0正式发布：全新插件架构与性能飞跃",
+ "FastCMS2.9.1更新日志：安全修复与体验优化",
+ "SEO优化插件 -免费",
+ "多语言支持插件 -免费",
+ "电商支付插件 -付费",
+ "会员积分系统 -付费",
+ "FastCMS2.8更新日志：模板引擎升级",
+ "FastCMS2.7更新日志：新增标签指令",
+ "如何开发FastCMS插件：入门指南",
+ "FastCMS模板开发最佳实践",
+ "FastCMS性能优化指南",
+ "FastCMS3.0开发路线图"
+ ],
+ "summaries": [
+ "FastCMS3.0带来全新插件架构，性能提升200%，支持热加载与插件沙箱隔离。",
+ "本次更新修复了3个安全漏洞，优化了模板渲染性能，改进了移动端体验。",
+ "为FastCMS提供完整的SEO优化能力，包括sitemap生成、结构化数据、OG标签等。",
+ "支持多语言站点，提供i18n模板指令与语言包管理功能。",
+ "集成主流支付渠道，支持微信、支付宝、银联，提供订单管理与对账功能。",
+ "完整的会员积分体系，支持积分获取、消费、等级与权益配置。",
+ "模板引擎全面升级，支持宏继承、条件渲染与异步数据加载。",
+ "新增relatedArticleList、formatTime等指令，简化模板开发。",
+ "从零开始学习FastCMS插件开发，了解插件生命周期、配置与部署。",
+ "分享FastCMS模板开发中的最佳实践与常见陷阱。",
+ "从模板缓存、静态资源、数据库查询三个维度优化FastCMS性能。",
+ "FastCMS3.0的开发计划与里程碑，包括插件沙箱、热更新与AI辅助。"
+ ],
+ "suffixes": ["", "", "", "", "", "", "", "", "", "", "", ""]
+ },
+ "seo": {
+ "website_title": "FastCMS -现代化内容管理系统",
+ "website_sub_title": "致力于互联网内容应用开发"
+ }
+}

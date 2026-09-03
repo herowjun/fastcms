@@ -1,71 +1,130 @@
-<#import '_layout.html' as layout>
-<@layout.header "${(category.title)!'文章列表'}">
-<style>
-.container { width: min(1120px,92%); margin:0 auto; }
-.page-hero { background: linear-gradient(180deg, #f8fafc0%, #eef2ff100%); border-bottom:1px solid #e2e8f0; padding:48px0; }
-.page-title { margin:0010px; font-size:34px; color: #0f172a; }
-.page-subtitle { margin:0; color: #475569; }
-.news-section { padding:40px064px; }
-.news-grid { display: grid; grid-template-columns: repeat(3,1fr); gap:24px; }
-.news-card { background: #fff; border:1px solid #e2e8f0; border-radius:14px; overflow: hidden; display: flex; flex-direction: column; box-shadow:08px24px rgba(15,23,42, .04); transition: transform .2s ease, box-shadow .2s ease; }
-.news-card:hover { transform: translateY(-4px); box-shadow:014px30px rgba(15,23,42, .08); }
-.news-media { display: block; aspect-ratio:16 /9; background: #f1f5f9; overflow: hidden; }
-.news-media img { width:100%; height:100%; object-fit: cover; display: block; }
-.news-placeholder { display: flex; align-items: center; justify-content: center; width:100%; height:100%; color: #64748b; font-weight:700; letter-spacing: .12em; }
-.news-content { padding:20px; display: flex; flex-direction: column; flex:1; }
-.news-title { margin:0010px; font-size:18px; line-height:1.4; }
-.news-title a { color: #0f172a; text-decoration: none; }
-.news-title a:hover { color: #4f46e5; }
-.news-summary { margin:0016px; color: #475569; font-size:14px; line-height:1.7; flex:1; display: -webkit-box; -webkit-line-clamp:3; -webkit-box-orient: vertical; overflow: hidden; }
-.news-meta { display: flex; justify-content: space-between; gap:12px; color: #64748b; font-size:13px; border-top:1px solid #f1f5f9; padding-top:12px; }
-.empty-state { text-align: center; padding:60px0; color: #64748b; }
-.pagination { display: flex; justify-content: center; gap:8px; margin-top:40px; flex-wrap: wrap; }
-.page-link { display: inline-flex; align-items: center; justify-content: center; min-width:40px; height:40px; padding:014px; border-radius:10px; border:1px solid #e2e8f0; background: #fff; color: #334155; text-decoration: none; }
-.page-link:hover { border-color: #4f46e5; color: #4f46e5; }
-@media (max-width:900px) { .news-grid { grid-template-columns: repeat(2,1fr); } .page-title { font-size:28px; } }
-@media (max-width:600px) { .news-grid { grid-template-columns:1fr; } .page-hero { padding:36px0; } }
-</style>
-</@layout.header>
-<@layout.body>
-<section class='page-hero'>
-<div class='container'>
-<h1 class='page-title'>${(category.title)!'文章列表'}</h1>
-<p class='page-subtitle'>了解公司动态、行业资讯与解决方案更新</p>
-</div>
+<!DOCTYPE html>
+<html lang="zh-CN" class="bg-white text-slate-900 antialiased">
+<head>
+<meta charset="utf-8">
+<title>${(category.title)!"FastCMS -现代化内容管理系统"}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="keywords" content="FastCMS -现代化内容管理系统">
+<meta name="description" content="${seoTag("website_sub_title")!""}">
+<link rel="stylesheet" href="${ctx()}/css/pack.css">
+<link rel="stylesheet" href="${ctx()}/css/tokens.css">
+<link rel="stylesheet" href="${ctx()}/css/site.css">
+</head>
+<body class="font-sans">
+<#assign comp = {"brand": "FastCMS -现代化内容管理系统"}>
+<#-- 导航栏 / sticky 变体：品牌名 + CMS 菜单，吸顶悬浮 -->
+<section class="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur">
+  <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+    <a href="/" class="text-lg font-bold tracking-tight text-slate-900">${(comp.brand)!''}</a>
+    <nav aria-label="主导航">
+      <ul class="hidden items-center gap-8 md:flex">
+        <@menuTag>
+          <#if data??>
+            <#list data as item>
+              <#if item.menuName?? && item.menuName?has_content>
+                <li>
+                  <a href="${item.url!''}" target="${item.target!'_self'}"
+                     class="text-sm text-slate-600 transition-colors hover:text-primary-600">${item.menuName}</a>
+                </li>
+              </#if>
+            </#list>
+          </#if>
+        </@menuTag>
+      </ul>
+    </nav>
+  </div>
 </section>
-<section class='news-section'>
-<div class='container'>
-<#assign hasList = articleVoPage?? && articleVoPage.records?? && articleVoPage.records?has_content>
-<#if hasList>
-<div class='news-grid'>
-<#list articleVoPage.records as item>
-<article class='news-card'>
-<a class='news-media' href='${item.url!}' aria-label='${item.title!}'>
-<#if item.thumbnail?? && item.thumbnail?has_content>
-<img src='${item.thumbnail}' alt='${item.title!}'>
-<#else>
-<span class='news-placeholder'>NEWS</span>
-</#if>
-</a>
-<div class='news-content'>
-<h2 class='news-title'><a href='${item.url!}'>${item.title!}</a></h2>
-<p class='news-summary'>${item.summary!}</p>
-<div class='news-meta'>
-<span><@formatTime value=(item.created)! format='yyyy-MM-dd'/></span>
-<span>${(item.viewCount)!0}次浏览</span>
-</div>
-</div>
-</article>
-</#list>
-</div>
-<#else>
-<div class='empty-state'>
-<p>暂无内容</p>
-<p>请稍后再来查看最新动态。</p>
-</div>
-</#if>
-<@layout._articlePage/>
-</div>
+<#-- 文章列表页正文骨架（内容页内置模板，渲染引擎组装进 article_list.html） -->
+<section class="bg-white py-12">
+  <div class="mx-auto max-w-6xl px-4">
+    <header class="border-b border-slate-200 pb-8">
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">${(category.title)!'文章列表'}</h1>
+      <p class="mt-2 text-sm text-slate-500">${seoTag("website_sub_title")!''}</p>
+    </header>
+    <div class="mt-10 grid gap-8 md:grid-cols-3">
+      <#if articleVoPage?? && articleVoPage.records??>
+        <#list articleVoPage.records as item>
+          <article class="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white transition hover:border-primary-300 hover:shadow-lg">
+            <#if item.thumbnail?? && item.thumbnail != "">
+              <a href="${item.url!''}" class="block aspect-video overflow-hidden bg-slate-100">
+                <img src="${item.thumbnail}" alt="${item.title!''}" loading="lazy"
+                     class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105">
+              </a>
+            </#if>
+            <div class="flex flex-1 flex-col p-6">
+              <h2 class="font-semibold leading-snug text-slate-900">
+                <a href="${item.url!''}" class="transition-colors hover:text-primary-600">${item.title!''}</a>
+              </h2>
+              <#if (item.summary)?? && item.summary?has_content>
+                <p class="mt-2 flex-1 text-sm leading-relaxed text-slate-600">${item.summary}</p>
+              </#if>
+              <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-xs text-slate-400">
+                <time><@formatTime value=(item.created)! format="yyyy-MM-dd"/></time>
+                <span>${(item.viewCount)!0} 次阅读</span>
+              </div>
+            </div>
+          </article>
+        </#list>
+      </#if>
+    </div>
+    <@articlePageTag>
+      <#if data??>
+        <nav class="mt-12 flex flex-wrap items-center justify-center gap-2" aria-label="文章分页">
+          <#if data.prev?? && (data.prev.url)?? && ((data.prev.url)!'')?has_content>
+            <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+               href="${data.prev.url}">${(data.prev.text)!'上一页'}</a>
+          </#if>
+          <#if data.list?? && data.list?is_sequence>
+            <#list data.list as page>
+              <#if page?? && page?is_hash>
+                <#if (page.url)?? && ((page.url)!'')?has_content>
+                  <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+                     href="${page.url}">${(page.text)!}</a>
+                <#else>
+                  <span class="rounded-lg border border-primary-600 bg-primary-600 px-4 py-2 text-sm text-white"
+                        aria-current="page">${(page.text)!}</span>
+                </#if>
+              </#if>
+            </#list>
+          </#if>
+          <#if data.next?? && (data.next.url)?? && ((data.next.url)!'')?has_content>
+            <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+               href="${data.next.url}">${(data.next.text)!'下一页'}</a>
+          </#if>
+        </nav>
+      </#if>
+    </@articlePageTag>
+  </div>
 </section>
-</@layout.body>
-<@layout.script></@layout.script>
+<#assign comp = {"brand": "FastCMS -现代化内容管理系统"}>
+<#-- 页脚 / simple 变体：深色简洁横栏 -->
+<footer class="bg-slate-900 text-slate-400">
+  <div class="mx-auto max-w-6xl px-4 py-12">
+    <div class="flex flex-col items-center justify-between gap-6 md:flex-row">
+      <a href="/" class="text-lg font-bold text-white">${(comp.brand)!''}</a>
+      <nav aria-label="页脚导航">
+        <ul class="flex flex-wrap items-center justify-center gap-6">
+          <@menuTag>
+            <#if data??>
+              <#list data as item>
+                <#if item.menuName?? && item.menuName?has_content>
+                  <li>
+                    <a href="${item.url!''}" target="${item.target!'_self'}"
+                       class="text-sm transition-colors hover:text-white">${item.menuName}</a>
+                  </li>
+                </#if>
+              </#list>
+            </#if>
+          </@menuTag>
+        </ul>
+      </nav>
+    </div>
+    <#assign copyright = (comp.copyright)!''>
+    <#if !copyright?has_content>
+      <#assign copyright = ((comp.brand)!'FastCMS') + ' © ' + .now?string("yyyy")>
+    </#if>
+    <div class="mt-8 border-t border-slate-800 pt-6 text-center text-sm">${copyright}</div>
+  </div>
+</footer>
+</body>
+</html>

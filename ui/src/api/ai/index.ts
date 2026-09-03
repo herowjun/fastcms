@@ -175,6 +175,26 @@ export function AiTemplateApi() {
 				method: 'post'
 			});
 		},
+		/**
+		 * 旧模板升级状态（有 html 且无 _pagespec.json 时返回 true，前端据此展示升级按钮）
+		 */
+		legacyStatus(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/legacy-status',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 旧模板确定性升级为组件化模板（不经 AI，秒级完成：
+		 * 提取内容资产 → 默认 PageSpec → 备份 → 渲染 → 清理旧文件）
+		 */
+		upgradeLegacy(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/upgrade',
+				method: 'post'
+			});
+		},
 
 		/**
 		 * 构造 SSE 对话的 POST URL
