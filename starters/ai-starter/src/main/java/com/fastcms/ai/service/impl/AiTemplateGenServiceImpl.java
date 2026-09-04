@@ -440,7 +440,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // 会话消息流留痕（前端对话界面可见升级事件，衔接后续 AI 微调）
         String summary = "已升级为组件化模板：站点「" + result.siteName() + "」生成 " + fileCount + " 个文件"
                 + (result.removedFiles().isEmpty() ? "" : "，清理旧文件 " + result.removedFiles().size() + " 个")
-                + (result.backupDir() == null ? "" : "，原文件备份于 " + result.backupDir().getFileName())
+                + (result.backupDir() == null ? "" : "，原文件备份于 " + result.backupDir())
                 + "。现在可以直接对话微调：换主色、加组件、改文案都支持。";
         messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT, summary);
         log.info("旧模板升级完成: sessionId={}, siteName={}, written={}, removed={}",
@@ -1042,9 +1042,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
 
         // ===== 渲染校验（与预览同管线）：组件已预校验，此处兜底组件包自身的回归问题 =====
-        // 渲染校验覆盖全部 html 产物（基础页 + site 信息架构的 suffix 专属页）
+        // 渲染校验覆盖全部页面 html（基础页 + site 信息架构的 suffix 专属页；
+        // _layout.html 布局宏由页面 import 间接校验，不单独渲染）
         List<String> pageFiles = renderResult.writtenFiles().stream()
-                .filter(f -> f.endsWith(".html")).toList();
+                .filter(f -> f.endsWith(".html") && !f.startsWith("_")).toList();
         List<String> renderErrors = previewRenderer.checkRenderedFiles(workDir, pageFiles);
 
         // ===== 收尾：落库 + 推送 =====

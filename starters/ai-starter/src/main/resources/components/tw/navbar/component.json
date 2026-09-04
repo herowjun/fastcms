@@ -3,6 +3,7 @@
   "name": "导航栏",
   "description": "站点顶部导航：品牌名 + CMS 菜单，吸顶悬浮",
   "category": "structural",
+  "layoutScope": "header",
   "appliesTo": ["index", "article_list", "article", "page"],
   "variants": [
     { "id": "sticky", "description": "白色吸顶横栏，滚动时固定在顶部" }

@@ -16,16 +16,13 @@
  */
 package com.fastcms.core.template;
 
-import com.fastcms.common.constants.FastcmsConstants;
 import com.fastcms.common.utils.DirUtils;
 import freemarker.cache.TemplateLoader;
 import freemarker.ext.jsp.TaglibFactory;
 import freemarker.template.Configuration;
 import freemarker.template.TemplateException;
 import org.springframework.beans.factory.InitializingBean;
-import org.springframework.context.EnvironmentAware;
 import org.springframework.context.ResourceLoaderAware;
-import org.springframework.core.env.Environment;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.ui.freemarker.FreeMarkerConfigurationFactory;
@@ -47,13 +44,10 @@ import java.util.Properties;
  */
 @Component
 public class FastcmsTemplateFreeMarkerConfigurer extends FreeMarkerConfigurationFactory
-        implements FastcmsTemplateFreeMarkerConfig, InitializingBean, ResourceLoaderAware, ServletContextAware, EnvironmentAware {
+        implements FastcmsTemplateFreeMarkerConfig, InitializingBean, ResourceLoaderAware, ServletContextAware {
 
     @Nullable
     private Configuration configuration;
-
-    @Nullable
-    private Environment environment;
 
     /**
      * Set a preconfigured Configuration to use for the FreeMarker web config, e.g. a
@@ -87,14 +81,9 @@ public class FastcmsTemplateFreeMarkerConfigurer extends FreeMarkerConfiguration
             this.configuration = createConfiguration();
             this.configuration.setSetting("number_format", "0");
 
-            String[] activeProfiles = environment.getActiveProfiles();
-            String profile = activeProfiles == null || activeProfiles.length <=0 ? FastcmsConstants.DEV_MODE : activeProfiles[0];
-
-            if(FastcmsConstants.DEV_MODE.equals(profile)) {
-                this.configuration.setDirectoryForTemplateLoading(new File(DirUtils.getTemplateDir()));
-            }else {
-                this.configuration.setDirectoryForTemplateLoading(new File("./htmls"));
-            }
+            // 模板目录统一在 fastcms 数据目录（~/fastcms/templates，dev/prod 一致，
+            // 与 upload/plugins 同惯例；官方模板由启动 listener 首次 seed）
+            this.configuration.setDirectoryForTemplateLoading(new File(DirUtils.getTemplateDir()));
         }
     }
 
@@ -123,11 +112,6 @@ public class FastcmsTemplateFreeMarkerConfigurer extends FreeMarkerConfiguration
         properties.put("locale", "zh_CN");
         properties.put("url_escaping_charset", "UTF-8");
         config.setSettings(properties);
-    }
-
-    @Override
-    public void setEnvironment(Environment environment) {
-        this.environment = environment;
     }
 
 }

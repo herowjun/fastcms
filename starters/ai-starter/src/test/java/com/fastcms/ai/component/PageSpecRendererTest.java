@@ -115,13 +115,34 @@ class PageSpecRendererTest {
         Path dir = tempDir.resolve("demo-template");
         PageSpecRenderer.RenderResult result = renderer.render(sampleSpec(), dir);
 
-        // 产物齐全
+        // 产物齐全：页面 + 公共布局 + 共享组件源码 + 静态资产 + 元数据
         for (String file : List.of("index.html", "article_list.html", "article.html", "page.html",
+                "_layout.html",
+                "_components/tw__navbar__sticky.ftl",
+                "_components/tw__hero__centered.ftl",
+                "_components/tw__feature-grid__three-col.ftl",
+                "_components/tw__article-list__cards.ftl",
+                "_components/tw__footer__simple.ftl",
                 "static/css/pack.css", "static/css/tokens.css", "static/css/site.css",
                 "_pagespec.json", "_template.properties", "_preview_data.json")) {
             assertTrue(Files.isRegularFile(dir.resolve(file)), "缺少产物: " + file);
         }
-        assertEquals(10, result.writtenFiles().size());
+        assertEquals(16, result.writtenFiles().size());
+
+        // 公共布局：骨架 + 导航区（structural）+ 页脚区（footer）+ <#nested>
+        String layout = Files.readString(dir.resolve("_layout.html"));
+        assertTrue(layout.contains("<#macro page>"), "布局应定义 page 宏");
+        assertTrue(layout.contains("${pageTitle!''}"), "布局 head 应引用页面标题");
+        assertTrue(layout.contains("_components/tw__navbar__sticky.ftl"), "布局应包含导航区");
+        assertTrue(layout.contains("_components/tw__footer__simple.ftl"), "布局应包含页脚区");
+        assertTrue(layout.contains("<#nested>"), "布局应有页面内容占位");
+
+        // 页面：引用布局 + 本页专属 sections（导航/页脚不在页面内重复）
+        String index = Files.readString(dir.resolve("index.html"));
+        assertTrue(index.contains("<#import \"_layout.html\" as layout>"), "页面应引用公共布局");
+        assertTrue(index.contains("<@layout.page>"), "页面应使用布局宏");
+        assertTrue(index.contains("_components/tw__hero__centered.ftl"), "首页应含 hero 组件引用");
+        assertFalse(index.contains("_components/tw__navbar__sticky.ftl"), "页面不应内联导航（由布局提供）");
 
         // _pagespec.json 可回读（重渲染的事实源）
         tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
@@ -132,6 +153,72 @@ class PageSpecRendererTest {
         // 与预览同管线的 FreeMarker 渲染校验：四个页面全部通过
         List<String> errors = previewRenderer.checkRenderedFiles(dir, List.of(
                 "index.html", "article_list.html", "article.html", "page.html"));
+        assertEquals(List.of(), errors, "渲染校验应通过: " + errors);
+    }
+
+    /**
+     * 共享组件源码：手改 _components/ 下的组件文件（不重新渲染），
+     * 所有引用该组件的页面预览立即生效——"改一处全站生效"
+     */
+    @Test
+    void shouldShareComponentSourceAcrossPages() throws Exception {
+        Path dir = tempDir.resolve("shared-demo");
+        renderer.render(sampleSpec(), dir);
+
+        // 手改共享导航组件源码（模拟用户编辑公共文件，不走渲染管线）
+        Path navbar = dir.resolve("_components/tw__navbar__sticky.ftl");
+        String source = Files.readString(navbar);
+        Files.writeString(navbar, source + "\n<div data-testid=\"custom-navbar\">定制导航标记</div>\n");
+
+        // index 与 article 页预览渲染均出现该标记（include 运行期解析）
+        String indexHtml = previewRenderer.renderPage("/preview", dir, "index.html");
+        String articleHtml = previewRenderer.renderPage("/preview", dir, "article.html");
+        assertTrue(indexHtml.contains("定制导航标记"), "首页应反映共享组件修改");
+        assertTrue(articleHtml.contains("定制导航标记"), "文章页应反映共享组件修改");
+    }
+
+    /**
+     * standalone 页面：不使用公共布局，渲染完整 HTML（自带骨架与 navbar/footer）
+     */
+    @Test
+    void shouldRenderStandalonePage() throws Exception {
+        Map<String, Object> heroData = new LinkedHashMap<>();
+        heroData.put("title", "限时活动落地页");
+        heroData.put("subtitle", "独立设计，不带公共导航页脚");
+        PageSpec spec = new PageSpec(
+                PageSpec.SPEC_VERSION,
+                BuiltinTailwindPackProvider.FOUNDATION,
+                "standalone-demo",
+                "演示站点",
+                "corporate-site",
+                "minimal",
+                "#2563eb",
+                null,
+                Map.of(
+                        PageSpec.PAGE_INDEX, new PageSpecPage(List.of(
+                                new SectionSpec("nav", "tw:navbar", "sticky", Map.of("brand", "Demo")),
+                                new SectionSpec("hero", "tw:hero", "centered", heroData),
+                                new SectionSpec("footer", "tw:footer", "simple", Map.of("brand", "Demo")))),
+                        "page_landing", new PageSpecPage(List.of(
+                                new SectionSpec("nav", "tw:navbar", "sticky", Map.of("brand", "Demo")),
+                                new SectionSpec("hero", "tw:hero", "centered", heroData),
+                                new SectionSpec("footer", "tw:footer", "simple", Map.of("brand", "Demo"))), true)));
+
+        Path dir = tempDir.resolve("standalone-template");
+        renderer.render(spec, dir);
+
+        String landing = Files.readString(dir.resolve("page_landing.html"));
+        assertTrue(landing.contains("<!DOCTYPE html>"), "standalone 页应是完整 HTML");
+        assertTrue(landing.contains("_components/tw__navbar__sticky.ftl"), "standalone 页自带导航");
+        assertFalse(landing.contains("<@layout.page>"), "standalone 页不应使用公共布局");
+
+        // 普通页面照常走公共布局
+        String index = Files.readString(dir.resolve("index.html"));
+        assertTrue(index.contains("<@layout.page>"), "普通页面应使用公共布局");
+
+        // 渲染校验通过
+        List<String> errors = previewRenderer.checkRenderedFiles(dir, List.of(
+                "index.html", "page_landing.html"));
         assertEquals(List.of(), errors, "渲染校验应通过: " + errors);
     }
 
@@ -216,12 +303,17 @@ class PageSpecRendererTest {
         assertEquals(2, preview.path("articles").path("titles").size());
         assertTrue(preview.path("articles").path("titles").get(0).asString().contains("土鸡"));
 
-        // 全部 html（含 suffix 页）通过预览同管线渲染校验
+        // 全部页面 html（含 suffix 页）通过预览同管线渲染校验；_layout.html 为布局宏文件不算页面
         List<String> htmlFiles = result.writtenFiles().stream()
-                .filter(p -> p.endsWith(".html")).toList();
+                .filter(p -> p.endsWith(".html") && !p.startsWith("_")).toList();
         assertEquals(expectedPages.size(), htmlFiles.size());
         List<String> errors = previewRenderer.checkRenderedFiles(dir, htmlFiles);
         assertEquals(List.of(), errors, "渲染校验应通过: " + errors);
+
+        // 公共布局存在且包含导航/页脚区
+        String layout = Files.readString(dir.resolve("_layout.html"));
+        assertTrue(layout.contains("_components/tw__navbar__sticky.ftl"), "布局应含导航区");
+        assertTrue(layout.contains("_components/tw__footer__simple.ftl"), "布局应含页脚区");
     }
 
     /**

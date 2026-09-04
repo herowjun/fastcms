@@ -51,7 +51,9 @@ import java.util.stream.Stream;
  *         兜底 _template.properties 的 template.name，UTF-8 读取）</li>
  *     <li>构建 PageSpec：navbar + hero + article-list + footer（默认主色与 minimal 风格）
  *         + site 信息架构（旧菜单/文章数据，渲染器据此产出全量预览数据与专属页面）</li>
- *     <li>校验 + 渲染前备份：旧文本文件复制到同级 _legacy_backup_时间戳 目录</li>
+ *     <li>校验 + 渲染前备份：旧文本文件复制到数据目录
+ *         {@code <备份根>/<模板名>_legacy_backup_<时间戳>}（默认 ~/fastcms/template-backups，
+ *         可配 fastcms.ai.template.backup-root 覆盖；不落在模板目录，避免污染源码资源目录）</li>
  *     <li>渲染 + 清理：渲染产物落盘，旧文本文件删除（二进制资源保留：可能是用户素材）</li>
  * </ol>
  *
@@ -113,9 +115,19 @@ public class LegacyTemplateUpgrader {
 
     private final PageSpecRenderer renderer;
 
-    public LegacyTemplateUpgrader(PageSpecValidator validator, PageSpecRenderer renderer) {
+    /**
+     * 备份根目录（默认 ~/fastcms/template-backups，可配 fastcms.ai.template.backup-root）
+     */
+    private final Path backupRoot;
+
+    public LegacyTemplateUpgrader(PageSpecValidator validator, PageSpecRenderer renderer,
+                                  @org.springframework.beans.factory.annotation.Value(
+                                          "${fastcms.ai.template.backup-root:}") String backupRootConfig) {
         this.validator = validator;
         this.renderer = renderer;
+        this.backupRoot = (backupRootConfig == null || backupRootConfig.isBlank())
+                ? Path.of(System.getProperty("user.home"), "fastcms", "template-backups")
+                : Path.of(backupRootConfig);
     }
 
     /**
@@ -162,7 +174,7 @@ public class LegacyTemplateUpgrader {
 
         // 3. 备份旧文本文件（渲染前执行；渲染失败时原目录不受影响，备份目录无害）
         List<Path> legacyTextFiles = listLegacyTextFiles(workDir);
-        Path backupDir = backupLegacyFiles(workDir, legacyTextFiles);
+        Path backupDir = backupLegacyFiles(workDir, name, legacyTextFiles);
 
         // 3. 渲染（spec.site 完整承载旧预览数据，渲染器产出全量 _preview_data.json）
         PageSpecRenderer.RenderResult renderResult = renderer.render(spec, workDir);
@@ -407,17 +419,22 @@ public class LegacyTemplateUpgrader {
     }
 
     /**
-     * 备份旧文本文件到同级目录 {@code <模板名>_legacy_backup_<时间戳>}
+     * 备份旧文本文件到数据目录 {@code <备份根>/<模板名>_legacy_backup_<时间戳>}
      *
+     * <p>备份不在模板目录内/同级——dev 模式模板目录是源码资源目录
+     * （templates/src/main/resources），落备份会污染源码树并被 git 跟踪；
+     * 统一放数据目录（默认 ~/fastcms/template-backups，与 plugins/upload 同惯例），
+     * mvn clean / IDE rebuild 均不影响。</p>
+     *
+     * @param name 模板名（备份目录前缀）
      * @return 备份目录；无文件可备份时返回 null
      */
-    private Path backupLegacyFiles(Path workDir, List<Path> files) throws IOException {
+    private Path backupLegacyFiles(Path workDir, String name, List<Path> files) throws IOException {
         if (files.isEmpty()) {
             return null;
         }
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        Path backupDir = workDir.resolveSibling(
-                workDir.getFileName() + "_legacy_backup_" + timestamp);
+        Path backupDir = backupRoot.resolve(name + "_legacy_backup_" + timestamp);
         for (Path file : files) {
             Path target = backupDir.resolve(workDir.relativize(file));
             Files.createDirectories(target.getParent());

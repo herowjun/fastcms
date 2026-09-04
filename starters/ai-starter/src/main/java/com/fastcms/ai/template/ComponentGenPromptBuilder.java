@@ -84,7 +84,8 @@ public class ComponentGenPromptBuilder {
                     "index": { "sections": [ { "id": "hero", "component": "组件全名", "variant": "变体", "data": { 槽位: 值 } } ] },
                     "article_list": { "sections": [ ... ] },
                     "article": { "sections": [ ... ] },
-                    "page": { "sections": [ ... ] }
+                    "page": { "sections": [ ... ] },
+                    "page_landing": { "standalone": true, "sections": [ ... ] }
                   }
                 }
                 ```
@@ -108,7 +109,12 @@ public class ComponentGenPromptBuilder {
                 规则：
                 - pages 四个基础键 index / article_list / article / page 全部必须出现；
                   需要差异化编排时也可输出带 suffix 的键（如 "article_list_products"），省略时系统自动用对应基础页骨架
-                - article_list / article / page 三类内容页的正文主体由系统内置骨架承载，只需为其配置导航、页脚等外围 section（通常 navbar + footer 各一个）
+                - 公共布局：导航（navbar）与页脚（footer）section 只需在 index 页编排一次，
+                  系统自动抽取到全站共享的 _layout.html，其余页面自动获得相同导航与页脚，无需重复编排；
+                  内容页也可直接给空 sections 列表（正文由系统内置骨架承载）
+                - 个别页面需要完全独立设计（不要公共导航/页脚）时，在该页加 "standalone": true，
+                  并为其编排完整 sections（含自己的 navbar/footer）
+                - article_list / article / page 三类内容页的正文主体由系统内置骨架承载，无需为其规划正文 section
                 - index 页是设计重点：按"首屏 → 内容区 → 收尾"编排，sections 有序自上而下渲染
                 - section 的 id 用简短英文（如 nav / hero / features / footer），同一页面内不重复
                 - data 的 key 必须严格使用组件清单中的槽位名；带 * 的必填槽位缺失会校验失败

@@ -3,6 +3,7 @@
   "name": "页脚",
   "description": "站点收尾：品牌名 + 菜单链接 + 版权信息",
   "category": "footer",
+  "layoutScope": "footer",
   "appliesTo": ["index", "article_list", "article", "page"],
   "variants": [
     { "id": "simple", "description": "深色简洁横栏" }

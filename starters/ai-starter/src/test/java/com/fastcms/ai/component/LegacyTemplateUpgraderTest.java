@@ -41,18 +41,25 @@ class LegacyTemplateUpgraderTest {
     Path tempDir;
 
     /**
-     * 旧模板目录（模拟 testpipe5：_preview_data.json + _template.properties + html/css + 图片）
+     * 独立于模板目录的备份根（模拟 ~/fastcms/template-backups 数据目录）
      */
-    private Path legacyDir;
+    private Path backupRoot;
 
     @BeforeEach
     void setUp() {
         ComponentRegistry registry = new ComponentRegistry(
                 List.of(new BuiltinTailwindPackProvider()));
+        backupRoot = tempDir.resolve("template-backups");
         upgrader = new LegacyTemplateUpgrader(
-                new PageSpecValidator(registry), new PageSpecRenderer(registry, new TokenEngine()));
+                new PageSpecValidator(registry), new PageSpecRenderer(registry, new TokenEngine()),
+                backupRoot.toString());
         legacyDir = tempDir.resolve("testpipe5");
     }
+
+    /**
+     * 旧模板目录（模拟 testpipe5：_preview_data.json + _template.properties + html/css + 图片）
+     */
+    private Path legacyDir;
 
     private void createLegacyTemplate() throws IOException {
         Files.createDirectories(legacyDir);
@@ -100,10 +107,16 @@ class LegacyTemplateUpgraderTest {
         assertTrue(Files.isRegularFile(legacyDir.resolve("index.html")));
         assertTrue(Files.isRegularFile(legacyDir.resolve("article.html")));
 
-        // 旧文本文件被清理
-        assertFalse(Files.exists(legacyDir.resolve("_layout.html")));
+        // 旧文本文件被清理（渲染产物之外的）
         assertFalse(Files.exists(legacyDir.resolve("static/css/base.css")));
-        assertTrue(result.removedFiles().contains("_layout.html"));
+        assertTrue(result.removedFiles().contains("static/css/base.css"));
+
+        // _layout.html 被渲染产物覆盖为新的公共布局（旧布局内容只存在于备份）
+        String layout = Files.readString(legacyDir.resolve("_layout.html"));
+        assertTrue(layout.contains("<#macro page>"), "升级后应为组件版公共布局");
+        assertFalse(layout.contains("旧布局"), "旧布局内容不应残留");
+        assertTrue(Files.isRegularFile(legacyDir.resolve("_components/tw__navbar__sticky.ftl")),
+                "升级后应产出共享组件源码");
 
         // 二进制资源保留
         assertTrue(Files.exists(legacyDir.resolve("logo.png")));
@@ -113,9 +126,13 @@ class LegacyTemplateUpgraderTest {
         assertTrue(previewData.contains("旧文章标题"));
         assertTrue(previewData.contains("现代化内容管理系统"));
 
-        // 备份目录存在且含旧布局
+        // 备份目录存在且含旧布局（位于备份根目录下，不在模板目录同级）
         assertTrue(result.backupDir() != null && Files.isDirectory(result.backupDir()));
         assertTrue(Files.exists(result.backupDir().resolve("_layout.html")));
+        assertTrue(result.backupDir().getParent().equals(backupRoot),
+                "备份应在备份根目录下: " + result.backupDir());
+        assertFalse(result.backupDir().getParent().equals(legacyDir.getParent()),
+                "备份不应落在模板目录同级（避免污染源码资源目录）");
 
         // 升级后目录已组件化（幂等保护生效依据）
         assertFalse(upgrader.isLegacy(legacyDir));
