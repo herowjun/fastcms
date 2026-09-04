@@ -24,6 +24,10 @@ import java.util.List;
  * <p>元数据是给 AI 看的"菜单"——AI 据此选择组件与变体、填充槽位数据；
  * 组件 FTL 源码永远不进入 AI 上下文（质量由预打磨组件保证，不由 AI 复述保证）。</p>
  *
+ * <p>{@code layoutScope}（1.2 新增）：组件是否属于公共布局（全站共享的站点级 chrome）。
+ * header = 头部区（导航类），footer = 尾部区；null = 页面级内容组件（hero/feature-grid 等，
+ * 虽然分类同属 structural，但只出现在编排它的页面，不进入 _layout.html）。</p>
+ *
  * @author wjun_java@163.com
  * @since 0.2.0
  */
@@ -32,6 +36,7 @@ public record ComponentDescriptor(
         String name,
         String description,
         String category,
+        String layoutScope,
         List<String> appliesTo,
         List<ComponentVariant> variants,
         List<ComponentSlot> slots,
@@ -45,6 +50,12 @@ public record ComponentDescriptor(
     public static final String CATEGORY_SOCIAL_PROOF = "social-proof";
     public static final String CATEGORY_CONVERSION = "conversion";
     public static final String CATEGORY_FOOTER = "footer";
+
+    /**
+     * 公共布局区：头部（站点级导航）/ 尾部（站点级页脚）
+     */
+    public static final String LAYOUT_SCOPE_HEADER = "header";
+    public static final String LAYOUT_SCOPE_FOOTER = "footer";
 
     public boolean hasVariant(String variantId) {
         return variants != null && variants.stream().anyMatch(v -> v.id().equals(variantId));

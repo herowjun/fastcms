@@ -44,6 +44,10 @@ import java.util.Set;
 @Component
 public class PageSpecValidator {
 
+    private static final int MAX_TOP_MENUS = 8;
+    private static final int MAX_MENU_CHILDREN = 6;
+    private static final int MAX_ARTICLES = 12;
+
     private final ComponentRegistry registry;
 
     public PageSpecValidator(ComponentRegistry registry) {
@@ -61,11 +65,97 @@ public class PageSpecValidator {
         }
 
         validateTheme(spec, errors);
+        validateSite(spec, errors);
         validatePages(spec, errors);
         return errors;
     }
 
-    private void validateTheme(PageSpec spec, List<String> errors) {
+    /**
+     * suffix 合法字符（与 PageSpec.suffixedPageKey 一致）
+     */
+    private static final String SUFFIX_PATTERN = "[a-zA-Z0-9_-]+";
+
+    /**
+     * site 信息架构校验：菜单数量、type 合法性、suffix 格式与同类条目内唯一性。
+     * 菜单与分类/单页共享同一 suffix 是预期设计（菜单指向对应栏目页，见提示词契约），不算重复；
+     * 报重复的是同列表内两个条目指向同一页面（两个菜单同一 suffix、两个分类同一 suffix 等）。
+     */
+    private void validateSite(PageSpec spec, List<String> errors) {
+        SiteContentSpec site = spec.safeSite();
+        if (site == null) {
+            return;
+        }
+        List<SiteContentSpec.NavItem> menus = site.safeMenus();
+        if (menus.size() > MAX_TOP_MENUS) {
+            errors.add("site.menus 顶级菜单 " + menus.size() + " 个超上限 " + MAX_TOP_MENUS);
+        }
+        Set<String> menuPageKeys = new HashSet<>();
+        for (SiteContentSpec.NavItem menu : menus) {
+            validateNavItem(menu, menuPageKeys, errors);
+        }
+        Set<String> categorySuffixes = new HashSet<>();
+        for (SiteContentSpec.CatalogItem item : site.safeCategories()) {
+            validateCatalogSuffix("site.categories", item, categorySuffixes, errors);
+        }
+        Set<String> singlePageSuffixes = new HashSet<>();
+        for (SiteContentSpec.CatalogItem item : site.safeSinglePages()) {
+            validateCatalogSuffix("site.singlePages", item, singlePageSuffixes, errors);
+        }
+        if (site.safeArticles().size() > MAX_ARTICLES) {
+            errors.add("site.articles " + site.safeArticles().size() + " 篇超上限 " + MAX_ARTICLES);
+        }
+    }
+
+    private void validateNavItem(SiteContentSpec.NavItem menu, Set<String> menuPageKeys,
+                                 List<String> errors) {
+        if (menu.name() == null || menu.name().isBlank()) {
+            errors.add("site.menus 存在空菜单名");
+        }
+        String type = menu.safeType();
+        if (!SiteContentSpec.NavItem.TYPE_INDEX.equals(type)
+                && !SiteContentSpec.NavItem.TYPE_ARTICLE_LIST.equals(type)
+                && !SiteContentSpec.NavItem.TYPE_ARTICLE.equals(type)
+                && !SiteContentSpec.NavItem.TYPE_PAGE.equals(type)) {
+            errors.add("site.menus[" + menu.name() + "] type 非法: " + type);
+        }
+        if (SiteContentSpec.NavItem.TYPE_INDEX.equals(type)) {
+            // 首页菜单忽略 suffix
+        } else if (menu.suffix() == null || menu.suffix().isBlank()) {
+            errors.add("site.menus[" + menu.name() + "] 缺少 suffix（非首页菜单必须带 suffix 才能生成对应页面）");
+        } else if (!menu.suffix().matches(SUFFIX_PATTERN)) {
+            errors.add("site.menus[" + menu.name() + "] suffix 非法: " + menu.suffix()
+                    + "（仅允许字母数字下划线中划线）");
+        } else if (!menuPageKeys.add(type + ":" + menu.suffix())) {
+            errors.add("site.menus[" + menu.name() + "] 与其他菜单指向同一页面: " + type + "_"
+                    + menu.suffix() + "（菜单 suffix 不得重复）");
+        }
+        if (menu.safeChildren().size() > MAX_MENU_CHILDREN) {
+            errors.add("site.menus[" + menu.name() + "] 子菜单超上限 " + MAX_MENU_CHILDREN);
+        }
+        for (SiteContentSpec.NavItem child : menu.safeChildren()) {
+            validateNavItem(child, menuPageKeys, errors);
+        }
+    }
+
+    /**
+     * 分类/单页条目 suffix 校验：格式 + 同列表内唯一（跨列表与菜单共享是预期设计）
+     */
+    private void validateCatalogSuffix(String location, SiteContentSpec.CatalogItem item,
+                                       Set<String> usedSuffixes, List<String> errors) {
+        String suffix = item.suffix();
+        if (suffix == null || suffix.isBlank()) {
+            return;
+        }
+        if (!suffix.matches(SUFFIX_PATTERN)) {
+            errors.add(location + "[" + item.title() + "] suffix 非法: " + suffix
+                    + "（仅允许字母数字下划线中划线）");
+            return;
+        }
+        if (!usedSuffixes.add(suffix)) {
+            errors.add(location + "[" + item.title() + "] suffix 与同列表其他条目重复: " + suffix);
+        }
+    }
+private void validateTheme(PageSpec spec, List<String> errors) {
         if (spec.primaryColor() != null && !spec.primaryColor().isBlank()
                 && !TokenEngine.isValidColor(spec.primaryColor())) {
             errors.add("primaryColor 非法: \"" + spec.primaryColor() + "\"，需 #RRGGBB 格式，如 #2563eb");
@@ -104,6 +194,12 @@ public class PageSpecValidator {
             errors.add("页面 " + pageKey + " 内容为空");
             return;
         }
+        // 页面 key 必须是基础页或合法的 suffix 变体（article_list_products 等）
+        if (PageSpec.basePageKeyOf(pageKey) == null) {
+            errors.add("页面 key 非法: " + pageKey
+                    + "（应为 index/article_list/article/page 或 article_list_{suffix} 等变体）");
+            return;
+        }
         List<SectionSpec> sections = page.safeSections();
         if (sections.isEmpty()) {
             // index 页必须有序列内容；内容页允许只有外围 section，但完全为空也视为可疑
@@ -113,6 +209,7 @@ public class PageSpecValidator {
             return;
         }
         for (int i = 0; i < sections.size(); i++) {
+            // appliesTo 适用性按基础页类型判定（suffix 页与基础页共享同一套适用性）
             validateSection(pageKey, i, sections.get(i), foundations, errors);
         }
     }
@@ -138,9 +235,10 @@ public class PageSpecValidator {
         ComponentDescriptor descriptor = rc.descriptor();
         foundations.add(rc.provider().getFoundation());
 
+        String basePageKey = PageSpec.basePageKeyOf(pageKey);
         if (descriptor.safeAppliesTo() != null && !descriptor.safeAppliesTo().isEmpty()
-                && !descriptor.safeAppliesTo().contains(pageKey)) {
-            errors.add(location + " 组件 " + fullId + " 不适用于 " + pageKey
+                && basePageKey != null && !descriptor.safeAppliesTo().contains(basePageKey)) {
+            errors.add(location + " 组件 " + fullId + " 不适用于 " + basePageKey
                     + " 页（适用: " + String.join("/", descriptor.safeAppliesTo()) + "）");
         }
 

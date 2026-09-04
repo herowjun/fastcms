@@ -96,6 +96,12 @@ public class AiTemplatePreviewRenderer {
             if (relPath == null || !relPath.toLowerCase().endsWith(".html")) {
                 continue;
             }
+            // _ 前缀文件（_layout.html 布局宏等）为片段文件，由页面 import/include 间接校验，
+            // 不直接渲染（渲染宏定义文件输出为空，且占用校验文件数额度）
+            String name = relPath.substring(relPath.lastIndexOf('/') + 1);
+            if (name.startsWith("_")) {
+                continue;
+            }
             checked++;
             try {
                 renderPage(CHECK_URL_PREFIX, workDir, relPath);
@@ -241,13 +247,17 @@ public class AiTemplatePreviewRenderer {
     /**
      * 扫描工作目录下所有模板文件中出现的自定义指令名
      *
-     * <p>不止扫描当前渲染的文件：<#import>/<#include> 引入的 _layout.html、_articlePage.html
-     * 中的指令同样会在渲染时执行。</p>
+     * <p>不止扫描当前渲染的文件：<#import>/<#include> 引入的 _layout.html、
+     * _components/*.ftl 共享组件中的指令同样会在渲染时执行，
+     * 扫描范围覆盖 .html 与 .ftl 两种模板文件。</p>
      */
     private Set<String> scanDirectiveNames(Path workDir) {
         Set<String> names = new HashSet<>();
         try (Stream<Path> stream = Files.walk(workDir)) {
-            stream.filter(p -> p.toString().toLowerCase().endsWith(".html") && Files.isRegularFile(p))
+            stream.filter(p -> {
+                String lower = p.toString().toLowerCase();
+                return (lower.endsWith(".html") || lower.endsWith(".ftl")) && Files.isRegularFile(p);
+            })
                     .forEach(p -> {
                         try {
                             String content = Files.readString(p, StandardCharsets.UTF_8);

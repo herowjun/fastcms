@@ -47,11 +47,14 @@ import java.util.stream.Stream;
  * <ol>
  *     <li>识别：目录有 .html 且无 _pagespec.json（组件化模板的标志物）</li>
  *     <li>提取内容资产：_preview_data.json 的 seo.website_title / website_sub_title
- *         （兜底 _template.properties 的 template.name，UTF-8 读取）</li>
- *     <li>构建 PageSpec：navbar + hero + article-list + footer（默认主色与 minimal 风格）</li>
- *     <li>校验 + 渲染前备份：旧文本文件复制到同级 _legacy_backup_时间戳 目录</li>
+ *         + menus/categories/singlePages/articles（完整转入 spec.site，
+ *         兜底 _template.properties 的 template.name，UTF-8 读取）</li>
+ *     <li>构建 PageSpec：navbar + hero + article-list + footer（默认主色与 minimal 风格）
+ *         + site 信息架构（旧菜单/文章数据，渲染器据此产出全量预览数据与专属页面）</li>
+ *     <li>校验 + 渲染前备份：旧文本文件复制到数据目录
+ *         {@code <备份根>/<模板名>_legacy_backup_<时间戳>}（默认 ~/fastcms/template-backups，
+ *         可配 fastcms.ai.template.backup-root 覆盖；不落在模板目录，避免污染源码资源目录）</li>
  *     <li>渲染 + 清理：渲染产物落盘，旧文本文件删除（二进制资源保留：可能是用户素材）</li>
- *     <li>预览数据回写：保留旧 _preview_data.json（菜单/文章 mock 数据，预览质量依赖它）</li>
  * </ol>
  *
  * @author wjun_java@163.com
@@ -112,9 +115,19 @@ public class LegacyTemplateUpgrader {
 
     private final PageSpecRenderer renderer;
 
-    public LegacyTemplateUpgrader(PageSpecValidator validator, PageSpecRenderer renderer) {
+    /**
+     * 备份根目录（默认 ~/fastcms/template-backups，可配 fastcms.ai.template.backup-root）
+     */
+    private final Path backupRoot;
+
+    public LegacyTemplateUpgrader(PageSpecValidator validator, PageSpecRenderer renderer,
+                                  @org.springframework.beans.factory.annotation.Value(
+                                          "${fastcms.ai.template.backup-root:}") String backupRootConfig) {
         this.validator = validator;
         this.renderer = renderer;
+        this.backupRoot = (backupRootConfig == null || backupRootConfig.isBlank())
+                ? Path.of(System.getProperty("user.home"), "fastcms", "template-backups")
+                : Path.of(backupRootConfig);
     }
 
     /**
@@ -151,8 +164,9 @@ public class LegacyTemplateUpgrader {
         String siteName = extractSiteName(workDir, previewData, name);
         String subTitle = extractSubTitle(previewData);
 
-        // 2. 构建 PageSpec（升级版编排：导航 + 首屏 + 最新文章 + 页脚）
-        PageSpec spec = buildSpec(name, siteName, subTitle);
+        // 2. 构建 PageSpec（升级版编排：导航 + 首屏 + 最新文章 + 页脚 + site 信息架构）
+        SiteContentSpec site = buildSiteContent(previewData);
+        PageSpec spec = buildSpec(name, siteName, subTitle, site);
         List<String> errors = validator.validate(spec);
         if (!errors.isEmpty()) {
             throw new IllegalStateException("升级 PageSpec 校验失败: " + String.join("；", errors));
@@ -160,21 +174,12 @@ public class LegacyTemplateUpgrader {
 
         // 3. 备份旧文本文件（渲染前执行；渲染失败时原目录不受影响，备份目录无害）
         List<Path> legacyTextFiles = listLegacyTextFiles(workDir);
-        Path backupDir = backupLegacyFiles(workDir, legacyTextFiles);
+        Path backupDir = backupLegacyFiles(workDir, name, legacyTextFiles);
 
-        // 4. 保留旧预览数据（菜单/文章 mock，渲染器会重写该文件，渲染后回写）
-        byte[] previewDataBytes = previewData != null
-                ? Files.readAllBytes(workDir.resolve(PREVIEW_DATA_FILE)) : null;
-
-        // 5. 渲染
+        // 3. 渲染（spec.site 完整承载旧预览数据，渲染器产出全量 _preview_data.json）
         PageSpecRenderer.RenderResult renderResult = renderer.render(spec, workDir);
 
-        // 6. 回写旧预览数据（覆盖渲染器的最小版，保住菜单/文章 mock；无旧数据时保留渲染器输出）
-        if (previewDataBytes != null) {
-            Files.write(workDir.resolve(PREVIEW_DATA_FILE), previewDataBytes);
-        }
-
-        // 7. 清理旧文本文件（渲染产物之外的；二进制资源保留）
+        // 4. 清理旧文本文件（渲染产物之外的；二进制资源保留）
         List<String> removed = cleanupLegacyFiles(workDir, renderResult.writtenFiles());
 
         log.info("旧模板升级完成: dir={}, siteName={}, written={}, removed={}, backup={}",
@@ -245,7 +250,8 @@ public class LegacyTemplateUpgrader {
      * article-list（运行期走 articleListTag）。feature-grid 这类需要创作文案的
      * 组件不放——那是 AI 微调的活，确定性升级不硬造。</p>
      */
-    private PageSpec buildSpec(String templateName, String siteName, String subTitle) {
+    private PageSpec buildSpec(String templateName, String siteName, String subTitle,
+                               SiteContentSpec site) {
         java.util.Map<String, Object> navData = java.util.Map.of("brand", siteName);
         java.util.Map<String, Object> footerData = java.util.Map.of("brand", siteName);
 
@@ -278,11 +284,124 @@ public class LegacyTemplateUpgrader {
                 null,
                 DEFAULT_STYLE_PRESET,
                 DEFAULT_PRIMARY_COLOR,
+                site,
                 java.util.Map.of(
                         PageSpec.PAGE_INDEX, new PageSpecPage(indexSections),
                         PageSpec.PAGE_ARTICLE_LIST, new PageSpecPage(frameSections),
                         PageSpec.PAGE_ARTICLE, new PageSpecPage(frameSections),
                         PageSpec.PAGE_PAGE, new PageSpecPage(frameSections)));
+    }
+
+    /**
+     * 旧 _preview_data.json → SiteContentSpec：菜单/分类/单页/文章全量转入 spec.site，
+     * 渲染器据此重新产出全量预览数据（替代升级前的"渲染后回写"，单一事实源更干净）。
+     * 旧数据缺失或非法的段落返回 null（渲染器回退内置默认）。
+     */
+    private SiteContentSpec buildSiteContent(JsonNode previewData) {
+        if (previewData == null) {
+            return null;
+        }
+        List<SiteContentSpec.NavItem> menus = parseMenus(previewData.get("menus"));
+        List<SiteContentSpec.CatalogItem> categories = parseItems(previewData.get("categories"));
+        List<SiteContentSpec.CatalogItem> singlePages = parseItems(previewData.get("singlePages"));
+        List<SiteContentSpec.PreviewArticle> articles = parseArticles(previewData.get("articles"));
+        if (menus == null && categories == null && singlePages == null && articles == null) {
+            return null;
+        }
+        return new SiteContentSpec(
+                menus == null ? List.of() : menus,
+                categories == null ? List.of() : categories,
+                singlePages == null ? List.of() : singlePages,
+                articles == null ? List.of() : articles);
+    }
+
+    private List<SiteContentSpec.NavItem> parseMenus(JsonNode node) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<SiteContentSpec.NavItem> list = new ArrayList<>();
+        for (JsonNode elem : node) {
+            SiteContentSpec.NavItem item = parseNavItem(elem);
+            if (item != null) {
+                list.add(item);
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private SiteContentSpec.NavItem parseNavItem(JsonNode elem) {
+        if (elem == null || !elem.isObject()) {
+            return null;
+        }
+        String name = firstText(elem, "name", "menuName", "title");
+        if (name == null) {
+            return null;
+        }
+        String type = firstText(elem, "type");
+        String suffix = normalizedSuffix(elem.get("suffix"));
+        List<SiteContentSpec.NavItem> children = parseMenus(elem.get("children"));
+        return new SiteContentSpec.NavItem(name, type, suffix, children == null ? List.of() : children);
+    }
+
+    private List<SiteContentSpec.CatalogItem> parseItems(JsonNode node) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<SiteContentSpec.CatalogItem> list = new ArrayList<>();
+        for (JsonNode elem : node) {
+            if (elem.isTextual() && !elem.asString().isBlank()) {
+                list.add(new SiteContentSpec.CatalogItem(elem.asString().trim(), null));
+            } else if (elem.isObject()) {
+                String title = firstText(elem, "title", "name");
+                if (title != null) {
+                    list.add(new SiteContentSpec.CatalogItem(title, normalizedSuffix(elem.get("suffix"))));
+                }
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private List<SiteContentSpec.PreviewArticle> parseArticles(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        JsonNode titles = node.get("titles");
+        if (titles == null || !titles.isArray() || titles.isEmpty()) {
+            return null;
+        }
+        JsonNode summaries = node.get("summaries");
+        List<SiteContentSpec.PreviewArticle> list = new ArrayList<>();
+        for (int i = 0; i < titles.size(); i++) {
+            JsonNode title = titles.get(i);
+            if (!title.isTextual() || title.asString().isBlank()) {
+                continue;
+            }
+            String summary = summaries != null && i < summaries.size() && summaries.get(i).isTextual()
+                    ? summaries.get(i).asString() : null;
+            list.add(new SiteContentSpec.PreviewArticle(title.asString().trim(), summary));
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private String firstText(JsonNode node, String... keys) {
+        for (String key : keys) {
+            JsonNode v = node.get(key);
+            if (v != null && v.isTextual() && !v.asString().isBlank()) {
+                return v.asString().trim();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * suffix 规范化：仅保留合法字符（与 PageSpec.suffixedPageKey 一致），非法置 null
+     */
+    private String normalizedSuffix(JsonNode node) {
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String s = node.asString().trim();
+        return s.matches("[a-zA-Z0-9_-]+") ? s : null;
     }
 
     // ==================== 备份与清理 ====================
@@ -300,17 +419,22 @@ public class LegacyTemplateUpgrader {
     }
 
     /**
-     * 备份旧文本文件到同级目录 {@code <模板名>_legacy_backup_<时间戳>}
+     * 备份旧文本文件到数据目录 {@code <备份根>/<模板名>_legacy_backup_<时间戳>}
      *
+     * <p>备份不在模板目录内/同级——dev 模式模板目录是源码资源目录
+     * （templates/src/main/resources），落备份会污染源码树并被 git 跟踪；
+     * 统一放数据目录（默认 ~/fastcms/template-backups，与 plugins/upload 同惯例），
+     * mvn clean / IDE rebuild 均不影响。</p>
+     *
+     * @param name 模板名（备份目录前缀）
      * @return 备份目录；无文件可备份时返回 null
      */
-    private Path backupLegacyFiles(Path workDir, List<Path> files) throws IOException {
+    private Path backupLegacyFiles(Path workDir, String name, List<Path> files) throws IOException {
         if (files.isEmpty()) {
             return null;
         }
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        Path backupDir = workDir.resolveSibling(
-                workDir.getFileName() + "_legacy_backup_" + timestamp);
+        Path backupDir = backupRoot.resolve(name + "_legacy_backup_" + timestamp);
         for (Path file : files) {
             Path target = backupDir.resolve(workDir.relativize(file));
             Files.createDirectories(target.getParent());

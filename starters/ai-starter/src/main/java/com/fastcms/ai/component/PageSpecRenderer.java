@@ -27,6 +27,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -34,20 +36,37 @@ import java.util.Map;
  * PageSpec 渲染引擎：spec → 自包含的 fastcms 模板目录
  *
  * <p>渲染是纯确定性过程（无 AI 参与）：组件 FTL 源码从 {@link ComponentRegistry} 取出，
- * 连同槽位数据（转为 {@code <#assign comp = {...}>}）内联进页面文件；
+ * 槽位数据（转为 {@code <#assign comp = {...}>}）留在页面/布局中；
  * CMS 绑定指令（menuTag/articleListTag 等）原样保留，由真实站点/预览 mock 在渲染期执行。
  * 因此同一个 spec 在预览环境与生产环境产出一致结构。</p>
+ *
+ * <p><b>公共布局（1.2）</b>：页面公共部分抽取到全站共享文件，改一处全站生效——</p>
+ * <ul>
+ *     <li>{@code _layout.html}：HTML 骨架（head/body）+ 导航区 + 页脚区，以 {@code <#macro page>}
+ *         定义，页面通过 {@code <#import "_layout.html" as layout>} + {@code <@layout.page>} 使用；
+ *         导航（structural 类）/页脚（footer 类）section 取自首个编排它们的页面（通常 index）</li>
+ *     <li>{@code _components/*.ftl}：组件 FTL 源码全站共享，页面/布局以
+ *         {@code <#include "_components/tw__navbar__sticky.ftl">} 引用（include 为运行期解析，
+ *         手改组件源码即刻全站生效，无需重新渲染）；槽位数据（assign）留在引用处，支持每页差异化</li>
+ *     <li>页面级 {@code standalone: true}：不走公共布局，渲染完整 HTML（自带骨架与 navbar/footer）</li>
+ * </ul>
  *
  * <p>产物布局（对齐 fastcms 模板规范）：</p>
  * <pre>
  * {targetDir}/
  * ├── _pagespec.json          ← spec 落盘（微调/重渲染的事实源）
  * ├── _template.properties    ← 模板注册信息
- * ├── _preview_data.json      ← 预览演示数据（站点名）
- * ├── index.html              ← sections 顺序组装
- * ├── article_list.html       ← 外围 sections + 内置列表正文（footer 类 section 前）
- * ├── article.html            ← 外围 sections + 内置文章正文
- * ├── page.html               ← 外围 sections + 内置单页正文
+ * ├── _preview_data.json      ← 预览演示数据（menus/categories/singlePages/articles/seo 全量）
+ * ├── _layout.html            ← 公共布局宏（骨架 + 导航区 + 页脚区）
+ * ├── index.html              ← 引用布局 + 本页专属 sections
+ * ├── article_list.html       ← 引用布局 + 内置列表正文
+ * ├── article.html            ← 引用布局 + 内置文章正文
+ * ├── page.html               ← 引用布局 + 内置单页正文
+ * ├── article_list_xxx.html   ← site 信息架构中带 suffix 的栏目页（自动生成，
+ * │                              spec.pages 显式编排时用编排结果）
+ * ├── page_xxx.html           ← 同上（单页专属页）
+ * ├── _components/
+ * │   └── tw__navbar__sticky.ftl  ← 组件源码（每组件变体一份，全站共享）
  * └── static/css/
  *     ├── pack.css            ← 组件包地基（provider 资产复制）
  *     ├── tokens.css          ← TokenEngine 按主色+风格预设生成
@@ -76,6 +95,11 @@ public class PageSpecRenderer {
      */
     private static final String PAGE_SKELETON_PREFIX = "pages/";
 
+    /**
+     * 共享组件源码目录（模板内相对路径）
+     */
+    private static final String COMPONENTS_DIR = "_components";
+
     private final ComponentRegistry registry;
 
     private final TokenEngine tokenEngine;
@@ -92,6 +116,13 @@ public class PageSpecRenderer {
     }
 
     /**
+     * 公共布局区：头部（导航类 section）与尾部（页脚类 section），
+     * 均取自首个编排它们的非 standalone 页面（通常 index）
+     */
+    private record LayoutZones(List<SectionSpec> header, List<SectionSpec> footer) {
+    }
+
+    /**
      * 渲染 PageSpec 到目标模板目录（已存在的同名文件被覆盖，多余文件不清理——
      * 微调场景由上层负责目录状态管理）
      *
@@ -104,8 +135,13 @@ public class PageSpecRenderer {
         }
         List<String> written = new ArrayList<>();
 
+        LinkedHashSet<String> pageKeys = collectPageKeys(spec);
+        LayoutZones zones = extractLayoutZones(spec, pageKeys);
+
         writeStaticAssets(spec, targetDir, written);
-        writePages(spec, targetDir, written);
+        writeComponentSources(spec, targetDir, pageKeys, zones, written);
+        writeLayout(spec, targetDir, zones, written);
+        writePages(spec, targetDir, pageKeys, zones, written);
         writePagespec(spec, targetDir, written);
         writeTemplateProperties(spec, targetDir, written);
         writePreviewData(spec, targetDir, written);
@@ -114,25 +150,215 @@ public class PageSpecRenderer {
         return new RenderResult(List.copyOf(written));
     }
 
-    // ==================== 页面组装 ====================
+    // ==================== 页面清单与布局抽取 ====================
 
     /**
-     * 组装 index / article_list / article / page 四类页面文件
+     * 组装页面清单：4 个基础页 + spec.pages 显式编排的 suffix 页 + site 信息架构
+     * 要求但未显式编排的 suffix 页（克隆对应基础页的外围 section，保证菜单链接全部可达）
      */
-    private void writePages(PageSpec spec, Path targetDir, List<String> written) throws IOException {
-        writePage(spec, targetDir, PageSpec.PAGE_INDEX, written);
-        writePage(spec, targetDir, PageSpec.PAGE_ARTICLE_LIST, written);
-        writePage(spec, targetDir, PageSpec.PAGE_ARTICLE, written);
-        writePage(spec, targetDir, PageSpec.PAGE_PAGE, written);
+    private LinkedHashSet<String> collectPageKeys(PageSpec spec) {
+        LinkedHashSet<String> pageKeys = new LinkedHashSet<>(List.of(
+                PageSpec.PAGE_INDEX, PageSpec.PAGE_ARTICLE_LIST,
+                PageSpec.PAGE_ARTICLE, PageSpec.PAGE_PAGE));
+        if (spec.pages() != null) {
+            spec.pages().keySet().forEach(pageKeys::add);
+        }
+        if (spec.safeSite() != null) {
+            for (String key : spec.safeSite().allSuffixedPageKeys()) {
+                pageKeys.add(key);
+            }
+        }
+        return pageKeys;
     }
 
-    private void writePage(PageSpec spec, Path targetDir, String pageKey, List<String> written) throws IOException {
+    /**
+     * 页面的生效 section 编排：spec.pages 显式编排优先，未编排的 suffix 页克隆对应基础页
+     */
+    private List<SectionSpec> effectiveSections(PageSpec spec, String pageKey) {
+        String base = PageSpec.basePageKeyOf(pageKey);
         List<SectionSpec> sections = spec.sectionsOf(pageKey);
-        if (sections.isEmpty() && !PageSpec.PAGE_INDEX.equals(pageKey)) {
-            // 内容页 spec 未配置任何 section（如 navbar/footer）也保留默认骨架，
-            // 否则模板缺文件；index 空 sections 属于校验问题，此处同样兜底输出空页面
+        if (sections.isEmpty() && base != null && !spec.sectionsOf(base).isEmpty()) {
+            sections = spec.sectionsOf(base);
         }
-        String html = buildPageHtml(spec, pageKey, sections);
+        return sections;
+    }
+
+    private boolean isStandalone(PageSpec spec, String pageKey) {
+        PageSpecPage page = spec.pages() == null ? null : spec.pages().get(pageKey);
+        return page != null && page.safeStandalone();
+    }
+
+    /**
+     * 抽取公共布局区：按页面写入顺序扫描（index 最前），首个含导航/页脚 section 的
+     * 非 standalone 页面贡献布局区；standalone 页面不参与公共布局
+     */
+    private LayoutZones extractLayoutZones(PageSpec spec, LinkedHashSet<String> pageKeys) {
+        List<SectionSpec> header = null;
+        List<SectionSpec> footer = null;
+        for (String pageKey : pageKeys) {
+            if (isStandalone(spec, pageKey)) {
+                continue;
+            }
+            if (header != null && footer != null) {
+                break;
+            }
+            for (SectionSpec section : effectiveSections(spec, pageKey)) {
+                if (header == null && isHeaderSection(section)) {
+                    header = new ArrayList<>();
+                }
+                if (footer == null && isFooterSection(section)) {
+                    footer = new ArrayList<>();
+                }
+                if (header != null && isHeaderSection(section)) {
+                    header.add(section);
+                } else if (footer != null && isFooterSection(section)) {
+                    footer.add(section);
+                }
+            }
+        }
+        return new LayoutZones(
+                header == null ? List.of() : List.copyOf(header),
+                footer == null ? List.of() : List.copyOf(footer));
+    }
+
+    // ==================== 共享组件源码 ====================
+
+    /**
+     * 组件源码落盘到 _components/：每个（组件, 变体）一份，页面与布局通过 include 引用。
+     * 同一组件变体被多个 section 引用时只写一次（源码全站共享的基础）
+     */
+    private void writeComponentSources(PageSpec spec, Path targetDir,
+                                        LinkedHashSet<String> pageKeys, LayoutZones zones,
+                                        List<String> written) throws IOException {
+        Path dir = targetDir.resolve(COMPONENTS_DIR);
+        Files.createDirectories(dir);
+        LinkedHashSet<String> writtenRels = new LinkedHashSet<>();
+        for (String pageKey : pageKeys) {
+            for (SectionSpec section : effectiveSections(spec, pageKey)) {
+                writeComponentFile(section, dir, writtenRels, written);
+            }
+        }
+        for (SectionSpec section : zones.header()) {
+            writeComponentFile(section, dir, writtenRels, written);
+        }
+        for (SectionSpec section : zones.footer()) {
+            writeComponentFile(section, dir, writtenRels, written);
+        }
+    }
+
+    private void writeComponentFile(SectionSpec section, Path dir,
+                                     LinkedHashSet<String> writtenRels, List<String> written) throws IOException {
+        String fileName = componentFileName(section);
+        String rel = COMPONENTS_DIR + "/" + fileName;
+        if (!writtenRels.add(rel)) {
+            return;
+        }
+        String source = componentSource(section);
+        Files.writeString(dir.resolve(fileName), source, StandardCharsets.UTF_8);
+        written.add(rel);
+    }
+
+    /**
+     * 共享组件文件名：组件全名中的 ':' 换 '__' + 变体 id，如 tw:navbar/sticky → tw__navbar__sticky.ftl
+     */
+    private String componentFileName(SectionSpec section) {
+        return section.component().replace(":", "__") + "__" + resolveVariantId(section) + ".ftl";
+    }
+
+    /**
+     * section 引用（布局与页面统一）：槽位数据 assign（留在引用处，支持每页差异化）+ include 共享源码
+     */
+    private String renderSection(SectionSpec section) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<#assign comp = ").append(toFtlLiteral(section.safeData())).append(">\n");
+        sb.append("<#include \"").append(COMPONENTS_DIR).append("/")
+                .append(componentFileName(section)).append("\">\n");
+        return sb.toString();
+    }
+
+    /**
+     * 组件源码（缺省变体取第一个），缺失即抛异常（调用前应已通过校验器）
+     */
+    private String componentSource(SectionSpec section) {
+        return registry.getTemplateSource(section.component(), resolveVariantId(section));
+    }
+
+    /**
+     * 解析 section 的具体变体 id：显式指定优先，缺省取组件第一个变体
+     */
+    private String resolveVariantId(SectionSpec section) {
+        ComponentRegistry.RegisteredComponent rc = registry.find(section.component())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "组件不存在: " + section.component() + "（渲染前应先通过 PageSpecValidator）"));
+        String variantId = section.variant();
+        if (variantId == null || variantId.isBlank()) {
+            List<ComponentVariant> variants = rc.descriptor().variants();
+            variantId = (variants == null || variants.isEmpty()) ? "default" : variants.get(0).id();
+        }
+        return variantId;
+    }
+
+    // ==================== 公共布局 ====================
+
+    /**
+     * 公共布局 _layout.html：HTML 骨架 + 导航区 + <#nested> 页面内容 + 页脚区
+     */
+    private void writeLayout(PageSpec spec, Path targetDir, LayoutZones zones,
+                             List<String> written) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<#-- 公共布局：HTML 骨架 + 导航区 + 页脚区，全站共享，修改本文件即刻全站生效 -->\n");
+        sb.append("<#-- 页面用法：<#import \"_layout.html\" as layout> + <@layout.page>...页面内容...</@layout.page> -->\n");
+        sb.append("<#-- 页面标题由页面在 import 后 <#assign pageTitle> 提供；standalone 页面不经过本文件 -->\n");
+        sb.append("<#macro page>\n");
+        sb.append("<!DOCTYPE html>\n");
+        sb.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
+        sb.append("<head>\n");
+        sb.append("<meta charset=\"utf-8\">\n");
+        sb.append("<title>${pageTitle!''}</title>\n");
+        sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+        sb.append("<meta name=\"keywords\" content=\"").append(escapeAttr(spec.safeSiteName())).append("\">\n");
+        sb.append("<meta name=\"description\" content=\"${seoTag(\"website_sub_title\")!\"\"}\">\n");
+        sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/pack.css\">\n");
+        sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/tokens.css\">\n");
+        sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/site.css\">\n");
+        sb.append("</head>\n");
+        sb.append("<body class=\"font-sans\">\n");
+        sb.append("<#-- 头部区（structural 类组件，取自首个编排页面） -->\n");
+        for (SectionSpec section : zones.header()) {
+            sb.append(renderSection(section));
+        }
+        sb.append("<#-- 页面专属内容 -->\n");
+        sb.append("<#nested>\n");
+        sb.append("<#-- 尾部区（页脚类组件，取自首个编排页面） -->\n");
+        for (SectionSpec section : zones.footer()) {
+            sb.append(renderSection(section));
+        }
+        sb.append("</body>\n");
+        sb.append("</html>\n");
+        sb.append("</#macro>\n");
+        Files.writeString(targetDir.resolve("_layout.html"), sb.toString(), StandardCharsets.UTF_8);
+        written.add("_layout.html");
+    }
+
+    // ==================== 页面组装 ====================
+
+    private void writePages(PageSpec spec, Path targetDir, LinkedHashSet<String> pageKeys,
+                            LayoutZones zones, List<String> written) throws IOException {
+        for (String pageKey : pageKeys) {
+            writePage(spec, targetDir, pageKey, zones, written);
+        }
+    }
+
+    private void writePage(PageSpec spec, Path targetDir, String pageKey,
+                           LayoutZones zones, List<String> written) throws IOException {
+        String base = PageSpec.basePageKeyOf(pageKey);
+        if (base == null) {
+            throw new IllegalArgumentException("未知页面 key: " + pageKey + "（应为 index/article_list/article/page 或带 suffix 的变体）");
+        }
+        List<SectionSpec> sections = effectiveSections(spec, pageKey);
+        String html = isStandalone(spec, pageKey)
+                ? buildStandaloneHtml(spec, pageKey, base, sections)
+                : buildLayoutPageHtml(spec, pageKey, base, sections);
         Path file = targetDir.resolve(pageKey + ".html");
         Files.createDirectories(file.getParent());
         Files.writeString(file, html, StandardCharsets.UTF_8);
@@ -140,33 +366,64 @@ public class PageSpecRenderer {
     }
 
     /**
-     * 单页面 HTML：head + sections 顺序组装（内容页在首个 footer 类 section 前插入内置正文）
+     * 布局页面：引用 _layout.html，正文只含本页专属 sections（布局区 section 由布局提供）
+     *
+     * @param pageKey 页面 key（可为带 suffix 的变体，如 article_list_products）
+     * @param base    基础页类型（决定正文骨架与标题表达式）
      */
-    private String buildPageHtml(PageSpec spec, String pageKey, List<SectionSpec> sections) {
+    private String buildLayoutPageHtml(PageSpec spec, String pageKey, String base, List<SectionSpec> sections) {
+        StringBuilder body = new StringBuilder();
+        for (SectionSpec section : sections) {
+            if (isLayoutSection(section)) {
+                continue; // 导航/页脚由 _layout.html 统一提供
+            }
+            body.append(renderSection(section));
+        }
+        // 内容页正文骨架：布局页脚区位于 <#nested> 之后，正文追加在内容末尾即位于页脚前
+        if (isContentPage(base)) {
+            body.append(contentSkeleton(base));
+        }
+
+        StringBuilder html = new StringBuilder();
+        html.append("<#import \"_layout.html\" as layout>\n");
+        html.append("<#-- 页面标题（布局 head 中引用） -->\n");
+        html.append("<#assign pageTitle>").append(pageTitle(spec, base)).append("</#assign>\n");
+        html.append("<@layout.page>\n");
+        html.append(body);
+        html.append("</@layout.page>\n");
+        return html.toString();
+    }
+
+    /**
+     * 独立页面（standalone）：完整 HTML，自带骨架与全部 sections（含 navbar/footer）
+     *
+     * @param pageKey 页面 key（可为带 suffix 的变体，如 page_landing）
+     * @param base    基础页类型（决定正文骨架与标题表达式）
+     */
+    private String buildStandaloneHtml(PageSpec spec, String pageKey, String base, List<SectionSpec> sections) {
         StringBuilder body = new StringBuilder();
 
         boolean contentInserted = false;
         for (SectionSpec section : sections) {
-            if (!contentInserted && isContentPage(pageKey) && isFooterSection(section)) {
-                body.append(contentSkeleton(pageKey));
+            if (!contentInserted && isContentPage(base) && isFooterSection(section)) {
+                body.append(contentSkeleton(base));
                 contentInserted = true;
             }
             body.append(renderSection(section));
         }
         // 内容页无 footer section 时正文追加在末尾
-        if (isContentPage(pageKey) && !contentInserted) {
-            body.append(contentSkeleton(pageKey));
+        if (isContentPage(base) && !contentInserted) {
+            body.append(contentSkeleton(base));
         }
 
-        String title = pageTitle(spec, pageKey);
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html>\n");
         html.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
         html.append("<head>\n");
         html.append("<meta charset=\"utf-8\">\n");
-        html.append("<title>").append(title).append("</title>\n");
+        html.append("<title>").append(pageTitle(spec, base)).append("</title>\n");
         html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
-        html.append("<meta name=\"keywords\" content=\"").append(spec.safeSiteName()).append("\">\n");
+        html.append("<meta name=\"keywords\" content=\"").append(escapeAttr(spec.safeSiteName())).append("\">\n");
         html.append("<meta name=\"description\" content=\"${seoTag(\"website_sub_title\")!\"\"}\">\n");
         html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/pack.css\">\n");
         html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/tokens.css\">\n");
@@ -182,28 +439,13 @@ public class PageSpecRenderer {
     /**
      * 页面 title 的 FTL 表达式（运行期取 CMS 数据，静态兜底用 spec 站点名）
      */
-    private String pageTitle(PageSpec spec, String pageKey) {
-        return switch (pageKey) {
+    private String pageTitle(PageSpec spec, String base) {
+        return switch (base) {
             case PageSpec.PAGE_INDEX -> "${seoTag(\"website_title\")!\"" + escapeAttr(spec.safeSiteName()) + "\"}";
             case PageSpec.PAGE_ARTICLE_LIST -> "${(category.title)!\"" + escapeAttr(spec.safeSiteName()) + "\"}";
             case PageSpec.PAGE_ARTICLE -> "${(article.title)!\"" + escapeAttr(spec.safeSiteName()) + "\"}";
             default -> "${(singlePage.title)!\"" + escapeAttr(spec.safeSiteName()) + "\"}";
         };
-    }
-
-    /**
-     * 单个 section：槽位数据转 FTL assign + 组件 FTL 源码内联
-     *
-     * <p>组件源码原样嵌入（保留 menuTag 等运行期指令），槽位数据以
-     * {@code <#assign comp = {...}>} 注入——同一文件内后续 section 重复赋值，
-     * 各组件只读取自己关心的字段，互不干扰。</p>
-     */
-    private String renderSection(SectionSpec section) {
-        String source = resolveTemplateSource(section);
-        StringBuilder sb = new StringBuilder();
-        sb.append("<#assign comp = ").append(toFtlLiteral(section.safeData())).append(">\n");
-        sb.append(source.strip()).append("\n");
-        return sb.toString();
     }
 
     /**
@@ -278,10 +520,78 @@ public class PageSpecRenderer {
     }
 
     private void writePreviewData(PageSpec spec, Path targetDir, List<String> written) throws IOException {
-        // 预览演示数据：站点名写入 SEO，其余回退内置默认（菜单/文章等）
-        String json = "{\"seo\":{\"website_title\":" + jsonString(spec.safeSiteName()) + "}}\n";
-        Files.writeString(targetDir.resolve("_preview_data.json"), json, StandardCharsets.UTF_8);
+        // 预览演示数据：site 信息架构全量落盘（menus/categories/singlePages/articles/seo），
+        // 预览渲染不再回退内置默认（SpringBoot 演示数据）——菜单/文章与用户主题一致
+        Map<String, Object> root = new LinkedHashMap<>();
+        Map<String, String> seo = new LinkedHashMap<>();
+        seo.put("website_title", spec.safeSiteName());
+        root.put("seo", seo);
+
+        SiteContentSpec site = spec.safeSite();
+        if (site != null) {
+            List<Map<String, Object>> menus = new ArrayList<>();
+            for (SiteContentSpec.NavItem item : site.safeMenus()) {
+                menus.add(navItemJson(item));
+            }
+            if (!menus.isEmpty()) {
+                root.put("menus", menus);
+            }
+            List<Map<String, String>> categories = new ArrayList<>();
+            for (SiteContentSpec.CatalogItem item : site.safeCategories()) {
+                categories.add(itemJson(item.title(), item.suffix()));
+            }
+            if (!categories.isEmpty()) {
+                root.put("categories", categories);
+            }
+            List<Map<String, String>> singlePages = new ArrayList<>();
+            for (SiteContentSpec.CatalogItem item : site.safeSinglePages()) {
+                singlePages.add(itemJson(item.title(), item.suffix()));
+            }
+            if (!singlePages.isEmpty()) {
+                root.put("singlePages", singlePages);
+            }
+            if (!site.safeArticles().isEmpty()) {
+                Map<String, Object> articles = new LinkedHashMap<>();
+                articles.put("titles", site.safeArticles().stream()
+                        .map(SiteContentSpec.PreviewArticle::title).toList());
+                articles.put("summaries", site.safeArticles().stream()
+                        .map(SiteContentSpec.PreviewArticle::summary).toList());
+                root.put("articles", articles);
+            }
+        }
+
+        StringWriter sw = new StringWriter();
+        MAPPER.writerWithDefaultPrettyPrinter().writeValue(sw, root);
+        Files.writeString(targetDir.resolve("_preview_data.json"), sw.toString() + "\n", StandardCharsets.UTF_8);
         written.add("_preview_data.json");
+    }
+
+    private Map<String, Object> navItemJson(SiteContentSpec.NavItem item) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", item.name());
+        m.put("type", item.safeType());
+        if (item.suffix() != null && !item.suffix().isBlank()) {
+            m.put("suffix", item.suffix());
+        }
+        if (item.safeChildren().isEmpty()) {
+            m.put("children", List.of());
+        } else {
+            List<Map<String, Object>> children = new ArrayList<>();
+            for (SiteContentSpec.NavItem child : item.safeChildren()) {
+                children.add(navItemJson(child));
+            }
+            m.put("children", children);
+        }
+        return m;
+    }
+
+    private Map<String, String> itemJson(String title, String suffix) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("title", title);
+        if (suffix != null && !suffix.isBlank()) {
+            m.put("suffix", suffix);
+        }
+        return m;
     }
 
     // ==================== 工具 ====================
@@ -292,31 +602,22 @@ public class PageSpecRenderer {
                 || PageSpec.PAGE_PAGE.equals(pageKey);
     }
 
-    private boolean isFooterSection(SectionSpec section) {
-        ComponentRegistry.RegisteredComponent rc = registry.find(section.component()).orElse(null);
-        return rc != null && ComponentDescriptor.CATEGORY_FOOTER.equals(rc.descriptor().category());
+    /**
+     * 布局区 section：组件声明 layoutScope（header/footer 站点级 chrome），
+     * 由 _layout.html 统一提供；页面级组件（hero/feature-grid 等）不属于布局区
+     */
+    private boolean isLayoutSection(SectionSpec section) {
+        return isHeaderSection(section) || isFooterSection(section);
     }
 
-    /**
-     * 取组件变体源码（缺省变体取第一个），缺失即抛异常（调用前应已通过校验器）
-     */
-    private String resolveTemplateSource(SectionSpec section) {
-        ComponentRegistry.RegisteredComponent rc = registry.find(section.component())
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "组件不存在: " + section.component() + "（渲染前应先通过 PageSpecValidator）"));
-        String variantId = section.variant();
-        if (variantId == null || variantId.isBlank()) {
-            List<ComponentVariant> variants = rc.descriptor().variants();
-            if (variants != null && !variants.isEmpty()) {
-                variantId = variants.get(0).id();
-            }
-        }
-        String source = registry.getTemplateSource(section.component(), variantId);
-        if (source == null) {
-            throw new IllegalArgumentException(
-                    "组件变体不存在: " + section.component() + "/" + variantId);
-        }
-        return source;
+    private boolean isHeaderSection(SectionSpec section) {
+        ComponentRegistry.RegisteredComponent rc = registry.find(section.component()).orElse(null);
+        return rc != null && ComponentDescriptor.LAYOUT_SCOPE_HEADER.equals(rc.descriptor().layoutScope());
+    }
+
+    private boolean isFooterSection(SectionSpec section) {
+        ComponentRegistry.RegisteredComponent rc = registry.find(section.component()).orElse(null);
+        return rc != null && ComponentDescriptor.LAYOUT_SCOPE_FOOTER.equals(rc.descriptor().layoutScope());
     }
 
     /**
@@ -378,9 +679,6 @@ public class PageSpecRenderer {
                 .replace(">", "&gt;").replace("\"", "&quot;");
     }
 
-    private static String jsonString(String s) {
-        return MAPPER.writeValueAsString(s);
-    }
 
     /**
      * 内容页正文排版样式（富文本 contentHtml 无 Tailwind 类可用，手写基础排版）

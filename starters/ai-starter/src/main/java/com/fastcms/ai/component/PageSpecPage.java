@@ -19,18 +19,33 @@ package com.fastcms.ai.component;
 import java.util.List;
 
 /**
- * PageSpec 中单个页面的描述：该页的 section 有序列表
+ * PageSpec 中单个页面的描述：该页的 section 有序列表 + 是否使用公共布局
  *
  * <p>渲染时自上而下依次渲染各 section；内容页（article_list / article / page）
- * 的正文主体由渲染引擎内置模板承载，spec 中通常只配置 navbar / footer 等外围 section。</p>
+ * 的正文主体由渲染引擎内置模板承载。</p>
+ *
+ * <p>{@code standalone}（1.2 新增）为 true 时该页不使用公共布局 _layout.html，
+ * 渲染为包含完整 HTML 骨架与自有 navbar/footer 的独立页面（特殊落地页等场景）；
+ * 缺省 null/false = 使用公共布局（navbar/footer 由布局统一提供）。</p>
  *
  * @author wjun_java@163.com
  * @since 0.2.0
  */
-public record PageSpecPage(List<SectionSpec> sections) {
+public record PageSpecPage(List<SectionSpec> sections, Boolean standalone) {
+
+    public PageSpecPage(List<SectionSpec> sections) {
+        this(sections, null);
+    }
 
     public List<SectionSpec> safeSections() {
         return sections == null ? List.of() : sections;
+    }
+
+    /**
+     * 是否独立页面（不走公共布局，渲染完整 HTML）
+     */
+    public boolean safeStandalone() {
+        return Boolean.TRUE.equals(standalone);
     }
 
 }
