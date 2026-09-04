@@ -76,6 +76,15 @@ public class PageSpecValidator {
     private static final String SUFFIX_PATTERN = "[a-zA-Z0-9_-]+";
 
     /**
+     * 内容页：正文占位组件 tw:content-body 的适用页面类型
+     */
+    private static boolean isContentPage(String basePageKey) {
+        return PageSpec.PAGE_ARTICLE_LIST.equals(basePageKey)
+                || PageSpec.PAGE_ARTICLE.equals(basePageKey)
+                || PageSpec.PAGE_PAGE.equals(basePageKey);
+    }
+
+    /**
      * site 信息架构校验：菜单数量、type 合法性、suffix 格式与同类条目内唯一性。
      * 菜单与分类/单页共享同一 suffix 是预期设计（菜单指向对应栏目页，见提示词契约），不算重复；
      * 报重复的是同列表内两个条目指向同一页面（两个菜单同一 suffix、两个分类同一 suffix 等）。
@@ -195,7 +204,8 @@ private void validateTheme(PageSpec spec, List<String> errors) {
             return;
         }
         // 页面 key 必须是基础页或合法的 suffix 变体（article_list_products 等）
-        if (PageSpec.basePageKeyOf(pageKey) == null) {
+        String basePageKey = PageSpec.basePageKeyOf(pageKey);
+        if (basePageKey == null) {
             errors.add("页面 key 非法: " + pageKey
                     + "（应为 index/article_list/article/page 或 article_list_{suffix} 等变体）");
             return;
@@ -208,13 +218,24 @@ private void validateTheme(PageSpec spec, List<String> errors) {
             }
             return;
         }
+        // 正文占位：仅内容页可用，每页至多一个
+        int contentBodyCount = 0;
+        for (SectionSpec section : sections) {
+            if (section != null && PageSpec.CONTENT_BODY_SECTION.equals(section.component())) {
+                contentBodyCount++;
+            }
+        }
+        if (contentBodyCount > 1) {
+            errors.add("页面 " + pageKey + " 的 " + PageSpec.CONTENT_BODY_SECTION
+                    + " 出现 " + contentBodyCount + " 次（每页至多一个）");
+        }
         for (int i = 0; i < sections.size(); i++) {
             // appliesTo 适用性按基础页类型判定（suffix 页与基础页共享同一套适用性）
-            validateSection(pageKey, i, sections.get(i), foundations, errors);
+            validateSection(pageKey, basePageKey, i, sections.get(i), foundations, errors);
         }
     }
 
-    private void validateSection(String pageKey, int index, SectionSpec section,
+    private void validateSection(String pageKey, String basePageKey, int index, SectionSpec section,
                                  Set<String> foundations, List<String> errors) {
         String location = "pages." + pageKey + ".sections[" + index + "]";
         if (section == null) {
@@ -226,6 +247,14 @@ private void validateTheme(PageSpec spec, List<String> errors) {
             errors.add(location + " 缺少 component 字段");
             return;
         }
+        // 正文占位（虚拟组件）：仅内容页可用，无变体/槽位校验
+        if (PageSpec.CONTENT_BODY_SECTION.equals(fullId)) {
+            if (!isContentPage(basePageKey)) {
+                errors.add(location + " " + fullId
+                        + " 只能用于内容页（article_list/article/page 及其 suffix 变体）");
+            }
+            return;
+        }
         ComponentRegistry.RegisteredComponent rc = registry.find(fullId).orElse(null);
         if (rc == null) {
             errors.add(location + " 组件不存在: " + fullId + "，候选: "
@@ -235,7 +264,6 @@ private void validateTheme(PageSpec spec, List<String> errors) {
         ComponentDescriptor descriptor = rc.descriptor();
         foundations.add(rc.provider().getFoundation());
 
-        String basePageKey = PageSpec.basePageKeyOf(pageKey);
         if (descriptor.safeAppliesTo() != null && !descriptor.safeAppliesTo().isEmpty()
                 && basePageKey != null && !descriptor.safeAppliesTo().contains(basePageKey)) {
             errors.add(location + " 组件 " + fullId + " 不适用于 " + basePageKey

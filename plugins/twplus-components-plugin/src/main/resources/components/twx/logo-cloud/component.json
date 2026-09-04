@@ -1,0 +1,15 @@
+{
+  "id": "logo-cloud",
+  "name": "品牌客户云",
+  "description": "合作伙伴/客户名称一排展示，横向流式排布，建立背书信任",
+  "category": "social-proof",
+  "appliesTo": [],
+  "variants": [
+    { "id": "default", "description": "浅灰底横条，客户名胶囊标签" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": false, "maxLength": 16, "desc": "区块标题，如：他们都在使用" },
+    { "name": "items", "type": "list", "required": true, "desc": "客户/品牌名列表（4-8 项，每项 ≤12 字）" }
+  ],
+  "cmsBindings": []
+}

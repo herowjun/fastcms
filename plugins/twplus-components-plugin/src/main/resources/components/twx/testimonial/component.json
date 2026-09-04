@@ -1,0 +1,16 @@
+{
+  "id": "testimonial",
+  "name": "客户评价",
+  "description": "客户引述卡片：引文 + 署名 + 头像占位，口碑背书",
+  "category": "social-proof",
+  "appliesTo": [],
+  "variants": [
+    { "id": "cards", "description": "三列引述卡片（默认）" },
+    { "id": "single", "description": "居中大引述，适合页面唯一强调" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：客户怎么说" },
+    { "name": "items", "type": "list", "required": true, "desc": "评价列表（1-3 项），每项含 quote(≤80字)/author(≤8字)/role(≤12字)" }
+  ],
+  "cmsBindings": []
+}

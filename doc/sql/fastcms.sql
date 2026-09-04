@@ -819,6 +819,7 @@ CREATE TABLE `ai_template_session` (
   `work_dir` varchar(512) DEFAULT NULL COMMENT '会话工作目录绝对路径',
   `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
   `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）',
+  `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）',
   `created` datetime DEFAULT NULL,
   `updated` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -829,6 +830,8 @@ CREATE TABLE `ai_template_session` (
 
 -- 已有环境升级（0.2.x → 0.3.x）：为 ai_template_session 增加规划清单字段
 -- ALTER TABLE `ai_template_session` ADD COLUMN `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）' AFTER `template_id`;
+-- 已有环境升级（0.3.x）：为 ai_template_session 增加移动端适配选项字段
+-- ALTER TABLE `ai_template_session` ADD COLUMN `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）' AFTER `plan_files`;
 
 -- AI 模板生成对话消息表
 DROP TABLE IF EXISTS `ai_template_message`;

@@ -145,6 +145,9 @@
                     <el-input v-model="state.createDialog.requirement" type="textarea" :rows="4"
                               placeholder="描述模板需求，例如：企业官网模板，蓝色调，响应式设计" />
                 </el-form-item>
+                <el-form-item label="移动端适配">
+                    <el-checkbox v-model="state.createDialog.mobileAdaptive">生成响应式布局（多端断点 + 移动端汉堡菜单）</el-checkbox>
+                </el-form-item>
             </el-form>
             <template v-else>
                 <el-table :data="state.createDialog.sessions" v-loading="state.createDialog.historyLoading" stripe size="small"
@@ -243,6 +246,8 @@ const state = reactive({
         view: 'create' as 'create' | 'history',
         templateName: '',
         requirement: '',
+        // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
+        mobileAdaptive: true,
         loading: false,
         // 历史生成型会话列表（未绑定 templateId，含已应用/未应用）
         sessions: [] as any[],
@@ -385,6 +390,7 @@ const onOpenAiCreate = () => {
     state.createDialog.view = 'create';
     state.createDialog.templateName = '';
     state.createDialog.requirement = '';
+    state.createDialog.mobileAdaptive = true;
     state.createDialog.visible = true;
 };
 
@@ -446,7 +452,7 @@ const onCreateConfirm = async () => {
     }
     state.createDialog.loading = true;
     try {
-        const res = await aiApi.createSession({ templateName: name, requirement });
+        const res = await aiApi.createSession({ templateName: name, requirement, mobileAdaptive: state.createDialog.mobileAdaptive });
         if (!res.data) {
             ElMessage.error(res.msg || '创建会话失败');
             return;

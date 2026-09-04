@@ -57,8 +57,15 @@ public class ComponentGenPromptBuilder {
                 你不写任何 HTML/CSS 代码——页面的视觉质量由专业设计师制作的组件保证，你负责的是结构编排与内容文案。
 
                 # 可用组件菜单（只能使用清单内的组件与变体，槽位名必须与清单一致）
+                组件清单由系统装配（内置包 + 已安装的插件组件包），不同环境可用组件不同，一律以上方清单为准。
 
                 %s
+
+                # 内置正文占位（虚拟组件，不在上述清单，内容页编排必用）
+
+                tw:content-body — 正文占位：渲染时替换为该页真实正文（文章列表/文章详情/单页正文），无变体无槽位。
+                每个内容页（article_list / article / page 及其 suffix 变体）在 sections 序列中放一个 content-body
+                标记正文位置，前后可自由叠加其他组件，实现"栏目横幅 → 正文 → 底部转化区"等完整页面结构。
 
                 # PageSpec 格式（JSON Schema 说明）
 
@@ -110,13 +117,16 @@ public class ComponentGenPromptBuilder {
                 - pages 四个基础键 index / article_list / article / page 全部必须出现；
                   需要差异化编排时也可输出带 suffix 的键（如 "article_list_products"），省略时系统自动用对应基础页骨架
                 - 公共布局：导航（navbar）与页脚（footer）section 只需在 index 页编排一次，
-                  系统自动抽取到全站共享的 _layout.html，其余页面自动获得相同导航与页脚，无需重复编排；
-                  内容页也可直接给空 sections 列表（正文由系统内置骨架承载）
+                  系统自动抽取到全站共享的 _layout.html，其余页面自动获得相同导航与页脚，无需重复编排
                 - 个别页面需要完全独立设计（不要公共导航/页脚）时，在该页加 "standalone": true，
                   并为其编排完整 sections（含自己的 navbar/footer）
-                - article_list / article / page 三类内容页的正文主体由系统内置骨架承载，无需为其规划正文 section
-                - index 页是设计重点：按"首屏 → 内容区 → 收尾"编排，sections 有序自上而下渲染
-                - section 的 id 用简短英文（如 nav / hero / features / footer），同一页面内不重复
+                - 每个页面都是设计重点，不是只有首页！内容页的编排范式（除导航页脚外）：
+                    栏目横幅（如 %s）开场 → tw:content-body 正文 → 补充组件（如 %s 常见问题 / %s 转化区）收尾；
+                    同一页面 content-body 至多一个，未放置时正文追加在页面末尾
+                - 各页面编排必须差异化：产品页突出产品卖点，新闻页突出资讯，关于页突出团队/历程/联系；
+                  不同页面选不同组件与不同文案，严禁所有页面除正文外长得一模一样
+                - index 页按"首屏 → 内容区 → 收尾"编排，通常 4~6 个 section；内容页通常 2~4 个 section（不含导航页脚）
+                - section 的 id 用简短英文（如 nav / hero / features / faq / footer），同一页面内不重复
                 - data 的 key 必须严格使用组件清单中的槽位名；带 * 的必填槽位缺失会校验失败
                 - variant 省略时取组件第一个变体，但显式写出更可控
                 - suffix 仅用小写字母数字下划线中划线；同一栏目页的菜单与对应分类/单页共用同一 suffix（菜单指向该页面的机制）；不同栏目页之间 suffix 不得重复
@@ -162,7 +172,21 @@ public class ComponentGenPromptBuilder {
                 4. reply 保持简洁，设计细节体现在 pagespec 里
                 5. site 信息架构必须完整输出（menus/categories/singlePages/articles 四段齐全），哪怕需求只有一句话
                 6. 全程使用中文思考和回复
-                """.formatted(componentRegistry.buildManifest(), com.fastcms.ai.component.BuiltinTailwindPackProvider.FOUNDATION);
+                """.formatted(componentRegistry.buildManifest(),
+                exampleFullId("page-hero"), exampleFullId("faq"), exampleFullId("cta-banner"),
+                com.fastcms.ai.component.BuiltinTailwindPackProvider.FOUNDATION);
+    }
+
+    /**
+     * 组件 id → 当前注册表中的实际全名（提示词示例用）：
+     * 插件组件包装载时返回 pack 前缀全名（如 twx:faq），未装载时回退裸 id（提示词示例自然降级）
+     */
+    private String exampleFullId(String componentId) {
+        return componentRegistry.listComponents().stream()
+                .map(ComponentRegistry.RegisteredComponent::fullId)
+                .filter(fullId -> fullId.endsWith(":" + componentId))
+                .findFirst()
+                .orElse(componentId);
     }
 
     /**
@@ -179,7 +203,9 @@ public class ComponentGenPromptBuilder {
                 + "2. 站点名称、主色、风格预设按需求主题自行判断（需求未指定时给出专业选择）\n"
                 + "3. 先规划 site 信息架构：菜单 4~7 个顶级（首页 + 3~6 个内容栏目，各带 suffix）、\n"
                 + "   分类/单页与菜单一一对应、预览文章 8~12 篇全部贴合需求主题\n"
-                + "4. 再编排 pages：index 页 3~5 个 section（含导航与页脚），内容页各配导航 + 页脚\n"
+                + "4. 再编排 pages（全部页面精心设计，不是只有首页）：\n"
+                + "   index 页 4~6 个 section（含导航与页脚）；每个内容页用「栏目横幅 → tw:content-body →\n"
+                + "   补充组件（常见问题/转化区等）」范式，各页面选不同组件与文案，体现页面差异化\n"
                 + "5. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
                 + "6. 请全程使用中文思考和回复\n";
     }

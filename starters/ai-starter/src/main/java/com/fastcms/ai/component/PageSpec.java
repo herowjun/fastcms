@@ -55,6 +55,13 @@ public record PageSpec(
     public static final String PAGE_PAGE = "page";
 
     /**
+     * 正文占位组件（虚拟组件，不在组件包清单中）：AI 编排内容页时用它标记正文位置，
+     * 渲染时替换为该页真实正文骨架（文章列表/文章详情/单页正文）。
+     * 使 AI 能为内容页设计"横幅 → 正文 → 转化区"等完整结构。
+     */
+    public static final String CONTENT_BODY_SECTION = "tw:content-body";
+
+    /**
      * 首选 specVersion（向后兼容旧 spec 时按版本分支）
      */
     public String safeSpecVersion() {

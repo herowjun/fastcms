@@ -92,6 +92,11 @@ public class AiTemplateSession implements Serializable {
      */
     private String planFiles;
 
+    /**
+     * 是否适配移动端（null 视为 true）：开启时生成响应式布局（多端断点 + 移动端汉堡菜单）
+     */
+    private Boolean mobileAdaptive;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime created;
 
@@ -127,6 +132,9 @@ public class AiTemplateSession implements Serializable {
 
     public String getPlanFiles() { return planFiles; }
     public void setPlanFiles(String planFiles) { this.planFiles = planFiles; }
+
+    public Boolean getMobileAdaptive() { return mobileAdaptive; }
+    public void setMobileAdaptive(Boolean mobileAdaptive) { this.mobileAdaptive = mobileAdaptive; }
 
     public LocalDateTime getCreated() { return created; }
     public void setCreated(LocalDateTime created) { this.created = created; }

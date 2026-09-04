@@ -1,0 +1,18 @@
+{
+  "id": "contact",
+  "name": "联系区块",
+  "description": "联系方式卡片组：地址/电话/邮箱/营业时间信息项，适合页尾联络",
+  "category": "conversion",
+  "appliesTo": [],
+  "variants": [
+    { "id": "default", "description": "浅灰底卡片，四项信息两列排布" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：联系我们" },
+    { "name": "address", "type": "string", "required": false, "maxLength": 40, "desc": "地址" },
+    { "name": "phone", "type": "string", "required": false, "maxLength": 20, "desc": "联系电话" },
+    { "name": "email", "type": "string", "required": false, "maxLength": 30, "desc": "联系邮箱" },
+    { "name": "hours", "type": "string", "required": false, "maxLength": 30, "desc": "营业/服务时间" }
+  ],
+  "cmsBindings": []
+}

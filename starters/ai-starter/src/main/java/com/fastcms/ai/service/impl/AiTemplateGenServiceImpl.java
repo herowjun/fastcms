@@ -296,6 +296,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         AiTemplateSession session = new AiTemplateSession();
         session.setSessionId(UUID.randomUUID().toString().replace("-", ""));
         session.setRequirement(request.getRequirement());
+        // 移动端适配选项：null 视为 true（兼容旧客户端与调整型会话）
+        session.setMobileAdaptive(request.getMobileAdaptive() == null || request.getMobileAdaptive());
         session.setStatus(AiTemplateConstants.STATUS_ACTIVE);
         session.setUserId(userId);
 
@@ -329,6 +331,13 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Override
     public AiTemplateSession getSession(String sessionId) {
         return sessionService.getBySessionId(sessionId);
+    }
+
+    /**
+     * 会话的移动端适配选项：null 视为 true（旧会话/调整型会话未设置时保持响应式默认）
+     */
+    private boolean isMobileAdaptive(AiTemplateSession session) {
+        return session.getMobileAdaptive() == null || session.getMobileAdaptive();
     }
 
     @Override
@@ -612,7 +621,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // 5. 单轮路径（调整型会话 / 生成型微调）：构造消息列表。
         //    调整/微调对话需要模型推理（定位问题、多约束权衡），不注入 /no_think
         List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(session.getTemplateName())));
+        messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(session.getTemplateName(), isMobileAdaptive(session))));
 
         // 加入历史消息（保持上下文）；失败标记消息（"生成失败："前缀）对模型是无意义
         // 上下文，跳过注入（仅用于前端展示与失败态判定）
@@ -1014,7 +1023,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
         com.fastcms.ai.component.PageSpecRenderer.RenderResult renderResult;
         try {
-            renderResult = pageSpecRenderer.render(spec, workDir);
+            renderResult = pageSpecRenderer.render(spec, workDir, isMobileAdaptive(session));
         } catch (Exception e) {
             log.warn("PageSpec 渲染失败: sessionId={}", session.getSessionId(), e);
             messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
@@ -1128,7 +1137,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private void runBatchPipeline(AiTemplateSession session, AiModelConfig modelConfig, ChatClient chatClient,
                                   String userInput, SseChannel channel,
                                   org.springframework.ai.chat.metadata.Usage[] usageOut) {
-        String systemPrompt = promptBuilder.buildSystemPrompt(session.getTemplateName());
+        String systemPrompt = promptBuilder.buildSystemPrompt(session.getTemplateName(), isMobileAdaptive(session));
         long[] usageAgg = new long[3];
         // 全流程思考过程（各轮拼接，落库后刷新页面仍可回看）
         StringBuilder allReasoning = new StringBuilder();
@@ -1217,7 +1226,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n📄 正在生成 " + path + " …");
 
             String existingContext = buildGenContext(generatedFiles, layoutContent);
-            String filePrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext, null);
+            String filePrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext, null,
+                    isMobileAdaptive(session));
             AiTemplateFileDto fileDto = generateSingleFile(chatClient, systemPrompt, filePrompt,
                     path, channel, allReasoning, usageAgg, modelConfig, null);
 
@@ -1236,7 +1246,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（" + path + " 输出异常，正在重试…）");
                 String retryPrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext,
-                        "上一次输出被截断或格式非法。请务必压缩篇幅：删除全部注释、精简样式与结构，确保 JSON 完整且 content 为完整文件内容。");
+                        "上一次输出被截断或格式非法。请务必压缩篇幅：删除全部注释、精简样式与结构，确保 JSON 完整且 content 为完整文件内容。",
+                        isMobileAdaptive(session));
                 Integer retryMaxTokens = modelConfig.getMaxTokens() != null
                         ? Math.max(modelConfig.getMaxTokens() * 2, 32768) : null;
                 fileDto = generateSingleFile(chatClient, systemPrompt, retryPrompt,

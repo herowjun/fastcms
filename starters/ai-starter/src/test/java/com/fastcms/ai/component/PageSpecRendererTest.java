@@ -123,7 +123,7 @@ class PageSpecRendererTest {
                 "_components/tw__feature-grid__three-col.ftl",
                 "_components/tw__article-list__cards.ftl",
                 "_components/tw__footer__simple.ftl",
-                "static/css/pack.css", "static/css/tokens.css", "static/css/site.css",
+                "static/css/pack-tw.css", "static/css/tokens.css", "static/css/site.css",
                 "_pagespec.json", "_template.properties", "_preview_data.json")) {
             assertTrue(Files.isRegularFile(dir.resolve(file)), "缺少产物: " + file);
         }

@@ -741,20 +741,63 @@ final class AiTemplatePreviewMockSupport {
      */
     private static Map<String, Object> articleDetail(PreviewContext ctx, PreviewDataConfig config) {
         Map<String, Object> a = article(0, ctx, config == null ? null : config.articles());
-        a.put("contentHtml",
-                "<p>这是一篇用于模板预览的演示文章。正式应用模板后，此处将展示站点的真实文章内容，"
-                        + "支持富文本、图文混排等常见排版元素。</p>"
-                        + "<h2>为什么需要演示数据</h2>"
-                        + "<p>模板在正式使用前，需要一套稳定的演示数据来检验列表、详情、分页、菜单等区块的"
-                        + "渲染效果，避免因数据缺失导致的误判。</p>"
-                        + "<h2>预览说明</h2>"
-                        + "<ul><li>当前页面所有动态内容均为演示数据</li>"
-                        + "<li>菜单、文章、分类、标签、单页均可点击跳转预览</li>"
-                        + "<li>分页、上一篇下一篇为演示导航</li></ul>"
-                        + "<p>如需调整样式或布局，可回到 AI 对话中继续描述修改需求。</p>");
+        a.put("contentHtml", mockArticleBody(
+                (String) a.get("title"), (String) a.get("summary"), config));
         a.put("seoKeywords", "FastCMS,演示文章,模板预览");
         a.put("seoDescription", "这是用于模板预览的演示文章内容。");
         return a;
+    }
+
+    /**
+     * 主题感知的演示正文：结构固定（导语 → 小节 → 引述 → 收尾），
+     * 素材取 AI 规划的文章标题与摘要（天然贴合站点主题，土鸡站即土鸡文案），
+     * 配置缺失（旧模板/null config）时回退通用演示文案
+     */
+    private static String mockArticleBody(String title, String summary, PreviewDataConfig config) {
+        ArticleConfig cfg = config == null ? null : config.articles();
+        List<String> titles = cfg != null && cfg.titles() != null ? cfg.titles() : List.of();
+        List<String> summaries = cfg != null && cfg.summaries() != null ? cfg.summaries() : List.of();
+        if (titles.size() >= 2 && summaries.size() >= 2) {
+            StringBuilder body = new StringBuilder();
+            // 导语：本篇摘要
+            body.append("<p>").append(escapeHtml(summary)).append("</p>\n");
+            // 两个小节：标题取站点其他文章（主题一致），正文取对应摘要
+            for (int i = 0; i < 2; i++) {
+                int idx = (i + 1) % titles.size();
+                body.append("<h2>").append(escapeHtml(titles.get(idx))).append("</h2>\n")
+                        .append("<p>").append(escapeHtml(summaries.get(idx))).append("</p>\n");
+            }
+            // 引述 + 收尾
+            body.append("<blockquote><p>")
+                    .append(escapeHtml(summaries.get(0)))
+                    .append("</p></blockquote>\n")
+                    .append("<p>以上内容由演示数据提供，正式应用模板后将展示站点真实文章。</p>");
+            return body.toString();
+        }
+        // 回退：无站点级文章配置时的通用演示文案
+        return "<p>这是一篇用于模板预览的演示文章。正式应用模板后，此处将展示站点的真实文章内容，"
+                + "支持富文本、图文混排等常见排版元素。</p>"
+                + "<h2>为什么需要演示数据</h2>"
+                + "<p>模板在正式使用前，需要一套稳定的演示数据来检验列表、详情、分页、菜单等区块的"
+                + "渲染效果，避免因数据缺失导致的误判。</p>"
+                + "<h2>预览说明</h2>"
+                + "<ul><li>当前页面所有动态内容均为演示数据</li>"
+                + "<li>菜单、文章、分类、标签、单页均可点击跳转预览</li>"
+                + "<li>分页、上一篇下一篇为演示导航</li></ul>"
+                + "<p>如需调整样式或布局，可回到 AI 对话中继续描述修改需求。</p>";
+    }
+
+    /**
+     * HTML 文本转义（演示正文素材来自 AI 输出，防意外的标签注入破坏预览）
+     */
+    private static String escapeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     /**
@@ -772,12 +815,13 @@ final class AiTemplatePreviewMockSupport {
         }
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("id", 1L);
-        s.put("title", first != null ? first.title() : "关于我们");
+        String pageTitle = first != null ? first.title() : "关于我们";
+        s.put("title", pageTitle);
         s.put("summary", "这是单页示例摘要，正式应用后展示真实内容。");
         s.put("contentHtml",
-                "<p>这是用于模板预览的演示单页。正式应用模板后，此处将展示站点真实的单页内容。</p>"
-                        + "<h2>团队介绍</h2><p>演示文案：我们致力于打造开源、易用、可扩展的内容管理系统。</p>"
-                        + "<h2>联系方式</h2><p>演示文案：contact@example.com</p>");
+                "<p>本页围绕「" + escapeHtml(pageTitle) + "」组织内容，正式应用模板后将展示站点真实的单页内容。</p>"
+                        + "<h2>内容概览</h2><p>演示文案：这里介绍本页主题相关的背景、理念与核心信息。</p>"
+                        + "<h2>了解更多</h2><p>演示文案：如需了解更多，可通过导航浏览其他栏目或返回首页。</p>");
         s.put("seoKeywords", "关于我们,FastCMS");
         s.put("seoDescription", "这是用于模板预览的演示单页内容。");
         s.put("url", first != null ? resolveUrl(ctx, "page", first.suffix()) : ctx.pageUrl());

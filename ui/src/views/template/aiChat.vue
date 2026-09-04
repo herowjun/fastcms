@@ -105,6 +105,15 @@
 			</div>
 		</div>
 
+		<!-- 旧模板确定性升级横幅：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉。
+		     独立于文件区显示：新建调整会话尚无 AI 修改文件时也要能看到入口 -->
+		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
+			<span class="legacy-upgrade-tip">检测到旧版模板，可一键升级为组件化版本：保留站点名、菜单与预览数据，原文件自动备份，升级后可直接对话微调</span>
+			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
+				<el-icon><ele-MagicStick /></el-icon>升级为组件版
+			</el-button>
+		</div>
+
 		<!-- 文件列表区域 -->
 		<div class="files-area" v-if="state.files.length > 0">
 			<div class="files-header">
@@ -113,11 +122,6 @@
 					<el-button v-if="mode === 'adjust'" size="small" text type="danger" @click="onRollback" :loading="state.rollingBack">
 						<el-icon><ele-RefreshLeft /></el-icon>回滚最近一次修改
 					</el-button>
-						<!-- 旧模板确定性升级：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉 -->
-						<el-button v-if="state.legacyUpgradable && !state.chatting && !isApplied" size="small"
-							type="warning" :loading="state.upgrading" @click="onUpgradeLegacy">
-							<el-icon><ele-MagicStick /></el-icon>升级为组件版
-						</el-button>
 						<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
 					</el-button>
@@ -1036,6 +1040,25 @@ const breakSentences = (s: string): string =>
 		.regen-tip {
 			font-size: 12px;
 			color: var(--el-color-danger);
+		}
+	}
+
+	// 旧模板升级横幅（输入区下方）：不依赖文件列表存在，新建调整会话即可见
+	.legacy-upgrade-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-top: 8px;
+		margin-bottom: 8px;
+		padding: 8px 10px;
+		background: var(--el-color-warning-light-9);
+		border-left: 3px solid var(--el-color-warning);
+		border-radius: 4px;
+
+		.legacy-upgrade-tip {
+			font-size: 12px;
+			color: var(--el-color-warning-dark-2);
 		}
 	}
 

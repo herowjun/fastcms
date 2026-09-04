@@ -1,0 +1,15 @@
+{
+  "id": "gallery",
+  "name": "图库展示",
+  "description": "图片/作品网格：渐变色块 + 图标占位 + 说明文字，hover 放大",
+  "category": "content",
+  "appliesTo": [],
+  "variants": [
+    { "id": "default", "description": "三列网格，色块封面 + 底部说明" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：环境实拍" },
+    { "name": "items", "type": "list", "required": true, "desc": "图目列表（4-6 项），每项含 caption(≤16字)/icon(emoji)/tone(色系: primary|slate|warm)" }
+  ],
+  "cmsBindings": []
+}

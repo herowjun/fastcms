@@ -68,7 +68,7 @@ import java.util.Map;
  * ├── _components/
  * │   └── tw__navbar__sticky.ftl  ← 组件源码（每组件变体一份，全站共享）
  * └── static/css/
- *     ├── pack.css            ← 组件包地基（provider 资产复制）
+ *     ├── pack-{packId}.css   ← 组件包地基（每包一份，多包并存按序引入）
  *     ├── tokens.css          ← TokenEngine 按主色+风格预设生成
  *     └── site.css            ← 内容页正文排版（h2/p/img 等富文本元素）
  * </pre>
@@ -123,13 +123,39 @@ public class PageSpecRenderer {
     }
 
     /**
+     * 渲染计划：页面清单 + 布局区 + 用到的组件包（决定 CSS 落盘与引入顺序）
+     *
+     * <p>多包并存（1.2）：内置包与插件包可在同一模板混用（同一地基前提），
+     * 每个包的地基 CSS 独立落盘为 {@code pack-{packId}.css} 并按序引入——
+     * 地基包（提供正文骨架的包）始终在列，其余包按首次使用顺序追加。</p>
+     */
+    private record RenderPlan(LinkedHashSet<String> pageKeys, LayoutZones zones,
+                              LinkedHashSet<SectionComponentProvider> usedProviders,
+                              List<String> cssFiles) {
+    }
+
+    /**
      * 渲染 PageSpec 到目标模板目录（已存在的同名文件被覆盖，多余文件不清理——
-     * 微调场景由上层负责目录状态管理）
+     * 微调场景由上层负责目录状态管理）。等价于 {@code render(spec, targetDir, true)}。
      *
      * @throws IllegalArgumentException 组件/变体缺失（应先经 {@link PageSpecValidator}）
      * @throws IOException               写盘失败
      */
     public RenderResult render(PageSpec spec, Path targetDir) throws IOException {
+        return render(spec, targetDir, true);
+    }
+
+    /**
+     * 渲染 PageSpec 到目标模板目录（已存在的同名文件被覆盖，多余文件不清理——
+     * 微调场景由上层负责目录状态管理）
+     *
+     * @param mobileAdaptive 是否适配移动端：true 时向布局/独立页注入
+     *                       {@code <#assign mobileAdaptive = true>}（组件模板据此输出
+     *                       移动端汉堡菜单等响应式结构）；false 时注入 false，组件输出桌面专用结构
+     * @throws IllegalArgumentException 组件/变体缺失（应先经 {@link PageSpecValidator}）
+     * @throws IOException               写盘失败
+     */
+    public RenderResult render(PageSpec spec, Path targetDir, boolean mobileAdaptive) throws IOException {
         if (spec == null) {
             throw new IllegalArgumentException("PageSpec 为空");
         }
@@ -137,17 +163,67 @@ public class PageSpecRenderer {
 
         LinkedHashSet<String> pageKeys = collectPageKeys(spec);
         LayoutZones zones = extractLayoutZones(spec, pageKeys);
+        RenderPlan plan = buildRenderPlan(spec, pageKeys, zones);
 
-        writeStaticAssets(spec, targetDir, written);
-        writeComponentSources(spec, targetDir, pageKeys, zones, written);
-        writeLayout(spec, targetDir, zones, written);
-        writePages(spec, targetDir, pageKeys, zones, written);
+        writeStaticAssets(spec, plan, targetDir, written);
+        writeComponentSources(spec, plan, targetDir, written);
+        writeLayout(spec, plan, targetDir, written, mobileAdaptive);
+        writePages(spec, plan, targetDir, written, mobileAdaptive);
         writePagespec(spec, targetDir, written);
         writeTemplateProperties(spec, targetDir, written);
         writePreviewData(spec, targetDir, written);
 
-        log.info("PageSpec 渲染完成: {} 个文件 -> {}", written.size(), targetDir);
+        log.info("PageSpec 渲染完成: {} 个文件 -> {}（移动端适配: {}）", written.size(), targetDir, mobileAdaptive);
         return new RenderResult(List.copyOf(written));
+    }
+
+    /**
+     * 构建渲染计划：收集 spec 用到的全部组件包（地基包置首），生成 CSS 文件名清单
+     */
+    private RenderPlan buildRenderPlan(PageSpec spec, LinkedHashSet<String> pageKeys,
+                                        LayoutZones zones) {
+        LinkedHashSet<SectionComponentProvider> used = new LinkedHashSet<>();
+        // 地基包置首：foundation 与 spec.foundation 匹配的包；无匹配时取第一个注册包
+        LinkedHashSet<SectionComponentProvider> distinct = new LinkedHashSet<>();
+        for (ComponentRegistry.RegisteredComponent rc : registry.listComponents()) {
+            distinct.add(rc.provider());
+        }
+        if (distinct.isEmpty()) {
+            throw new IllegalStateException("没有已注册的组件包");
+        }
+        SectionComponentProvider foundationProvider = distinct.iterator().next();
+        for (SectionComponentProvider provider : distinct) {
+            if (provider.getFoundation().equals(spec.foundation())) {
+                foundationProvider = provider;
+                break;
+            }
+        }
+        used.add(foundationProvider);
+        // 收集 spec 实际引用的包
+        LinkedHashSet<SectionSpec> allSections = new LinkedHashSet<>();
+        for (String pageKey : pageKeys) {
+            allSections.addAll(effectiveSections(spec, pageKey));
+        }
+        allSections.addAll(zones.header());
+        allSections.addAll(zones.footer());
+        for (SectionSpec section : allSections) {
+            if (isContentBody(section)) {
+                continue;
+            }
+            registry.find(section.component())
+                    .ifPresent(rc -> used.add(rc.provider()));
+        }
+        // CSS 文件：每包独立（pack-{packId}.css），供 head 按序引入
+        List<String> cssFiles = new ArrayList<>();
+        for (SectionComponentProvider provider : used) {
+            if (provider.getPackAsset(ASSET_PACK_CSS) != null) {
+                cssFiles.add("static/css/pack-" + provider.getPackId() + ".css");
+            }
+        }
+        if (cssFiles.isEmpty()) {
+            throw new IllegalStateException("组件包缺少地基资产: " + ASSET_PACK_CSS);
+        }
+        return new RenderPlan(pageKeys, zones, used, cssFiles);
     }
 
     // ==================== 页面清单与布局抽取 ====================
@@ -225,29 +301,34 @@ public class PageSpecRenderer {
 
     /**
      * 组件源码落盘到 _components/：每个（组件, 变体）一份，页面与布局通过 include 引用。
-     * 同一组件变体被多个 section 引用时只写一次（源码全站共享的基础）
+     * 同一组件变体被多个 section 引用时只写一次（源码全站共享的基础）；
+     * content-body 为虚拟占位组件（渲染时替换为正文骨架），不落盘
      */
-    private void writeComponentSources(PageSpec spec, Path targetDir,
-                                        LinkedHashSet<String> pageKeys, LayoutZones zones,
+    private void writeComponentSources(PageSpec spec, RenderPlan plan, Path targetDir,
                                         List<String> written) throws IOException {
         Path dir = targetDir.resolve(COMPONENTS_DIR);
         Files.createDirectories(dir);
         LinkedHashSet<String> writtenRels = new LinkedHashSet<>();
-        for (String pageKey : pageKeys) {
+        for (String pageKey : plan.pageKeys()) {
             for (SectionSpec section : effectiveSections(spec, pageKey)) {
-                writeComponentFile(section, dir, writtenRels, written);
+                if (!isContentBody(section)) {
+                    writeComponentFile(section, dir, writtenRels, written);
+                }
             }
         }
-        for (SectionSpec section : zones.header()) {
+        for (SectionSpec section : plan.zones().header()) {
             writeComponentFile(section, dir, writtenRels, written);
         }
-        for (SectionSpec section : zones.footer()) {
+        for (SectionSpec section : plan.zones().footer()) {
             writeComponentFile(section, dir, writtenRels, written);
         }
     }
 
     private void writeComponentFile(SectionSpec section, Path dir,
                                      LinkedHashSet<String> writtenRels, List<String> written) throws IOException {
+        if (isContentBody(section)) {
+            return;
+        }
         String fileName = componentFileName(section);
         String rel = COMPONENTS_DIR + "/" + fileName;
         if (!writtenRels.add(rel)) {
@@ -302,14 +383,18 @@ public class PageSpecRenderer {
 
     /**
      * 公共布局 _layout.html：HTML 骨架 + 导航区 + <#nested> 页面内容 + 页脚区
+     *
+     * <p>CSS 按包引入（pack-{packId}.css 每包一份，地基包在前），tokens/site 全局唯一</p>
      */
-    private void writeLayout(PageSpec spec, Path targetDir, LayoutZones zones,
-                             List<String> written) throws IOException {
+    private void writeLayout(PageSpec spec, RenderPlan plan, Path targetDir,
+                             List<String> written, boolean mobileAdaptive) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("<#-- 公共布局：HTML 骨架 + 导航区 + 页脚区，全站共享，修改本文件即刻全站生效 -->\n");
         sb.append("<#-- 页面用法：<#import \"_layout.html\" as layout> + <@layout.page>...页面内容...</@layout.page> -->\n");
         sb.append("<#-- 页面标题由页面在 import 后 <#assign pageTitle> 提供；standalone 页面不经过本文件 -->\n");
         sb.append("<#macro page>\n");
+        sb.append("<#-- 移动端适配开关：组件模板以 (mobileAdaptive!true) 读取，控制响应式结构输出 -->\n");
+        sb.append("<#assign mobileAdaptive = ").append(mobileAdaptive).append(">\n");
         sb.append("<!DOCTYPE html>\n");
         sb.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
         sb.append("<head>\n");
@@ -318,19 +403,21 @@ public class PageSpecRenderer {
         sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
         sb.append("<meta name=\"keywords\" content=\"").append(escapeAttr(spec.safeSiteName())).append("\">\n");
         sb.append("<meta name=\"description\" content=\"${seoTag(\"website_sub_title\")!\"\"}\">\n");
-        sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/pack.css\">\n");
+        for (String css : plan.cssFiles()) {
+            sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/").append(css.substring(css.lastIndexOf('/') + 1)).append("\">\n");
+        }
         sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/tokens.css\">\n");
         sb.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/site.css\">\n");
         sb.append("</head>\n");
         sb.append("<body class=\"font-sans\">\n");
         sb.append("<#-- 头部区（structural 类组件，取自首个编排页面） -->\n");
-        for (SectionSpec section : zones.header()) {
+        for (SectionSpec section : plan.zones().header()) {
             sb.append(renderSection(section));
         }
         sb.append("<#-- 页面专属内容 -->\n");
         sb.append("<#nested>\n");
         sb.append("<#-- 尾部区（页脚类组件，取自首个编排页面） -->\n");
-        for (SectionSpec section : zones.footer()) {
+        for (SectionSpec section : plan.zones().footer()) {
             sb.append(renderSection(section));
         }
         sb.append("</body>\n");
@@ -342,23 +429,23 @@ public class PageSpecRenderer {
 
     // ==================== 页面组装 ====================
 
-    private void writePages(PageSpec spec, Path targetDir, LinkedHashSet<String> pageKeys,
-                            LayoutZones zones, List<String> written) throws IOException {
-        for (String pageKey : pageKeys) {
-            writePage(spec, targetDir, pageKey, zones, written);
+    private void writePages(PageSpec spec, RenderPlan plan, Path targetDir,
+                             List<String> written, boolean mobileAdaptive) throws IOException {
+        for (String pageKey : plan.pageKeys()) {
+            writePage(spec, targetDir, pageKey, plan, written, mobileAdaptive);
         }
     }
 
     private void writePage(PageSpec spec, Path targetDir, String pageKey,
-                           LayoutZones zones, List<String> written) throws IOException {
+                           RenderPlan plan, List<String> written, boolean mobileAdaptive) throws IOException {
         String base = PageSpec.basePageKeyOf(pageKey);
         if (base == null) {
             throw new IllegalArgumentException("未知页面 key: " + pageKey + "（应为 index/article_list/article/page 或带 suffix 的变体）");
         }
         List<SectionSpec> sections = effectiveSections(spec, pageKey);
         String html = isStandalone(spec, pageKey)
-                ? buildStandaloneHtml(spec, pageKey, base, sections)
-                : buildLayoutPageHtml(spec, pageKey, base, sections);
+                ? buildStandaloneHtml(spec, base, sections, plan.cssFiles(), mobileAdaptive)
+                : buildLayoutPageHtml(spec, base, sections);
         Path file = targetDir.resolve(pageKey + ".html");
         Files.createDirectories(file.getParent());
         Files.writeString(file, html, StandardCharsets.UTF_8);
@@ -368,19 +455,29 @@ public class PageSpecRenderer {
     /**
      * 布局页面：引用 _layout.html，正文只含本页专属 sections（布局区 section 由布局提供）
      *
-     * @param pageKey 页面 key（可为带 suffix 的变体，如 article_list_products）
-     * @param base    基础页类型（决定正文骨架与标题表达式）
+     * <p>内容页的正文骨架：AI 用 tw:content-body 占位时替换在序列位置（横幅→正文→转化区
+     * 等自定义结构）；未占位（旧协议 spec / 空 sections）追加在末尾，行为不变</p>
+     *
+     * @param base 基础页类型（决定正文骨架与标题表达式）
      */
-    private String buildLayoutPageHtml(PageSpec spec, String pageKey, String base, List<SectionSpec> sections) {
+    private String buildLayoutPageHtml(PageSpec spec, String base, List<SectionSpec> sections) {
         StringBuilder body = new StringBuilder();
+        boolean contentInserted = false;
         for (SectionSpec section : sections) {
             if (isLayoutSection(section)) {
                 continue; // 导航/页脚由 _layout.html 统一提供
             }
+            if (isContentBody(section)) {
+                if (isContentPage(base) && !contentInserted) {
+                    body.append(contentSkeleton(base));
+                    contentInserted = true;
+                }
+                continue;
+            }
             body.append(renderSection(section));
         }
-        // 内容页正文骨架：布局页脚区位于 <#nested> 之后，正文追加在内容末尾即位于页脚前
-        if (isContentPage(base)) {
+        // 旧协议兼容：内容页未显式占位时正文追加在末尾（位于布局页脚区之前）
+        if (isContentPage(base) && !contentInserted) {
             body.append(contentSkeleton(base));
         }
 
@@ -397,27 +494,38 @@ public class PageSpecRenderer {
     /**
      * 独立页面（standalone）：完整 HTML，自带骨架与全部 sections（含 navbar/footer）
      *
-     * @param pageKey 页面 key（可为带 suffix 的变体，如 page_landing）
-     * @param base    基础页类型（决定正文骨架与标题表达式）
+     * @param base     基础页类型（决定正文骨架与标题表达式）
+     * @param cssFiles 多包 CSS 清单（pack-{packId}.css 每包一份）
+     * @param mobileAdaptive 是否适配移动端（注入 assign 变量供组件模板读取）
      */
-    private String buildStandaloneHtml(PageSpec spec, String pageKey, String base, List<SectionSpec> sections) {
+    private String buildStandaloneHtml(PageSpec spec, String base, List<SectionSpec> sections,
+                                       List<String> cssFiles, boolean mobileAdaptive) {
         StringBuilder body = new StringBuilder();
 
         boolean contentInserted = false;
         for (SectionSpec section : sections) {
+            if (isContentBody(section)) {
+                if (isContentPage(base) && !contentInserted) {
+                    body.append(contentSkeleton(base));
+                    contentInserted = true;
+                }
+                continue;
+            }
             if (!contentInserted && isContentPage(base) && isFooterSection(section)) {
                 body.append(contentSkeleton(base));
                 contentInserted = true;
             }
             body.append(renderSection(section));
         }
-        // 内容页无 footer section 时正文追加在末尾
+        // 内容页无 footer section 且未显式占位时正文追加在末尾
         if (isContentPage(base) && !contentInserted) {
             body.append(contentSkeleton(base));
         }
 
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html>\n");
+        html.append("<#-- 移动端适配开关：组件模板以 (mobileAdaptive!true) 读取 -->\n");
+        html.append("<#assign mobileAdaptive = ").append(mobileAdaptive).append(">\n");
         html.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
         html.append("<head>\n");
         html.append("<meta charset=\"utf-8\">\n");
@@ -425,7 +533,9 @@ public class PageSpecRenderer {
         html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
         html.append("<meta name=\"keywords\" content=\"").append(escapeAttr(spec.safeSiteName())).append("\">\n");
         html.append("<meta name=\"description\" content=\"${seoTag(\"website_sub_title\")!\"\"}\">\n");
-        html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/pack.css\">\n");
+        for (String css : cssFiles) {
+            html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/").append(css.substring(css.lastIndexOf('/') + 1)).append("\">\n");
+        }
         html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/tokens.css\">\n");
         html.append("<link rel=\"stylesheet\" href=\"${ctx()}/css/site.css\">\n");
         html.append("</head>\n");
@@ -463,22 +573,23 @@ public class PageSpecRenderer {
 
     // ==================== 静态资产 ====================
 
-    private void writeStaticAssets(PageSpec spec, Path targetDir, List<String> written) throws IOException {
+    /**
+     * 静态资产落盘：每个用到的组件包一份 pack-{packId}.css（多包并存，1.2），
+     * tokens/site 全局唯一
+     */
+    private void writeStaticAssets(PageSpec spec, RenderPlan plan, Path targetDir,
+                                    List<String> written) throws IOException {
         Path cssDir = targetDir.resolve("static/css");
         Files.createDirectories(cssDir);
 
-        // pack.css：取第一个含地基资产的包（P1 只有内置包；多包混用地基已被校验器拒绝）
-        byte[] packCss = null;
-        for (ComponentRegistry.RegisteredComponent rc : registry.listComponents()) {
-            packCss = rc.provider().getPackAsset(ASSET_PACK_CSS);
-            if (packCss != null) {
-                break;
+        for (SectionComponentProvider provider : plan.usedProviders()) {
+            byte[] packCss = provider.getPackAsset(ASSET_PACK_CSS);
+            if (packCss == null) {
+                continue;
             }
+            String fileName = "pack-" + provider.getPackId() + ".css";
+            write(cssDir.resolve(fileName), packCss, "static/css/" + fileName, written);
         }
-        if (packCss == null) {
-            throw new IllegalStateException("组件包缺少地基资产: " + ASSET_PACK_CSS);
-        }
-        write(cssDir.resolve("pack.css"), packCss, "static/css/pack.css", written);
 
         write(cssDir.resolve("tokens.css"),
                 tokenEngine.generateTokens(spec.primaryColor(), spec.stylePreset())
@@ -603,6 +714,13 @@ public class PageSpecRenderer {
     }
 
     /**
+     * 正文占位 section（tw:content-body，虚拟组件）：渲染时替换为该页真实正文骨架
+     */
+    private boolean isContentBody(SectionSpec section) {
+        return section != null && PageSpec.CONTENT_BODY_SECTION.equals(section.component());
+    }
+
+    /**
      * 布局区 section：组件声明 layoutScope（header/footer 站点级 chrome），
      * 由 _layout.html 统一提供；页面级组件（hero/feature-grid 等）不属于布局区
      */
@@ -718,6 +836,45 @@ public class PageSpecRenderer {
               border: 1px solid #e2e8f0; padding: .5em .75em; text-align: left;
             }
             .article-content th { background: #f8fafc; font-weight: 600; }
+
+            /* 内容页骨架补充：面包屑 / 文章封面 / 上下篇 / 相关推荐（正文骨架的布局类，
+               与组件包工具类解耦，随 site.css 全站可用） */
+            .page-breadcrumb { color: #64748b; font-size: .875rem; }
+            .page-breadcrumb__link { color: #64748b; text-decoration: none; }
+            .page-breadcrumb__link:hover { color: var(--color-primary-600, #2563eb); }
+            .page-breadcrumb__sep { margin: 0 .5em; color: #cbd5e1; }
+            .page-breadcrumb__current { color: #334155; }
+            .article-cover { border-radius: .75rem; overflow: hidden; }
+            .article-cover__img { display: block; width: 100%; max-height: 26rem; object-fit: cover; }
+            .article-pager { display: grid; gap: .75rem; grid-template-columns: 1fr; }
+            @media (min-width: 48rem) {
+                .article-pager { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            }
+            .article-pager__link {
+                border: 1px solid #e2e8f0; border-radius: .5rem; display: flex; flex-direction: column;
+                gap: .25rem; padding: .875rem 1.25rem; text-decoration: none;
+                transition: border-color .15s ease;
+            }
+            .article-pager__link:hover { border-color: var(--color-primary-600, #2563eb); }
+            .article-pager__link--empty { background: #f8fafc; }
+            .article-pager__link--end { text-align: right; }
+            .article-pager__label { color: #94a3b8; font-size: .75rem; }
+            .article-pager__title { color: #0f172a; font-size: .875rem; font-weight: 600; line-height: 1.5; }
+            .article-related__title { border-left: 4px solid var(--color-primary-600, #2563eb); font-size: 1.125rem; font-weight: 600; padding-left: .75rem; }
+            .article-related__grid { display: grid; gap: 1rem; grid-template-columns: 1fr; margin-top: 1rem; }
+            @media (min-width: 48rem) {
+                .article-related__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            }
+            .article-related__card {
+                border: 1px solid #e2e8f0; border-radius: .5rem; display: flex; flex-direction: column;
+                gap: .375rem; padding: .875rem; text-decoration: none;
+                transition: border-color .15s ease, box-shadow .15s ease;
+            }
+            .article-related__card:hover { border-color: var(--color-primary-300, #93c5fd); box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1); }
+            .article-related__thumb { border-radius: .375rem; overflow: hidden; }
+            .article-related__thumb img { display: block; aspect-ratio: 16/9; object-fit: cover; width: 100%; }
+            .article-related__name { color: #0f172a; font-size: .875rem; font-weight: 600; line-height: 1.5; }
+            .article-related__time { color: #94a3b8; font-size: .75rem; }
             """;
 
 }

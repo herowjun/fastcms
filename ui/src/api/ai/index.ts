@@ -116,7 +116,7 @@ export function AiTemplateApi() {
 
 		/**
 		 * 创建会话
-		 * @param data { templateName, title?, requirement }
+		 * @param data { templateName, title?, requirement, mobileAdaptive? }
 		 */
 		createSession(data: object) {
 			return request({
