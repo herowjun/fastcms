@@ -95,6 +95,13 @@ public interface IResourceService extends IService<Resource> {
 		String RESOURCE_NAME_AI_MODEL_ACTIVATE = "fastcms.resource.name.ai.model.activate";
 		String RESOURCE_NAME_AI_MODEL_TEST = "fastcms.resource.name.ai.model.test";
 
+		// AI 生图（文生图/修图）
+		String RESOURCE_NAME_AI_IMAGE_LIST = "fastcms.resource.name.ai.image.list";
+		String RESOURCE_NAME_AI_IMAGE_GENERATE = "fastcms.resource.name.ai.image.generate";
+		String RESOURCE_NAME_AI_IMAGE_TASK = "fastcms.resource.name.ai.image.task";
+		String RESOURCE_NAME_AI_IMAGE_RETRY = "fastcms.resource.name.ai.image.retry";
+		String RESOURCE_NAME_AI_IMAGE_APPLY = "fastcms.resource.name.ai.image.apply";
+
 		// AI 模板生成器
 		String RESOURCE_NAME_AI_TEMPLATE_LIST = "fastcms.resource.name.ai.template.list";
 		String RESOURCE_NAME_AI_TEMPLATE_CREATE = "fastcms.resource.name.ai.template.create";
@@ -103,6 +110,7 @@ public interface IResourceService extends IService<Resource> {
 		String RESOURCE_NAME_AI_TEMPLATE_APPLY = "fastcms.resource.name.ai.template.apply";
 		String RESOURCE_NAME_AI_TEMPLATE_DELETE = "fastcms.resource.name.ai.template.delete";
 		String RESOURCE_NAME_AI_TEMPLATE_ROLLBACK = "fastcms.resource.name.ai.template.rollback";
+		String RESOURCE_NAME_AI_TEMPLATE_FILE_EDIT = "fastcms.resource.name.ai.template.fileEdit";
 
 		String RESOURCE_NAME_RESOURCE_LIST = "fastcms.resource.name.resource.list";
 		String RESOURCE_NAME_RESOURCE_SYNC = "fastcms.resource.name.resource.sync";

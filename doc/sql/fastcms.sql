@@ -165,6 +165,9 @@ CREATE TABLE `menu` (
   `sort_num` int(11) DEFAULT '0',
   `target` varchar(32) DEFAULT '_self',
   `status` varchar(32) DEFAULT 'show' COMMENT '显示或隐藏',
+  `template_id` varchar(64) DEFAULT NULL COMMENT '专属模板ID（NULL=全局菜单）',
+  `exclude_template_ids` varchar(500) DEFAULT NULL COMMENT '排除显示的模板ID列表，逗号分隔（仅全局菜单生效）',
+  `exclude_site_keys` varchar(1000) DEFAULT NULL COMMENT '排除显示的站点key列表（域名或路径），逗号分隔（仅全局菜单生效）',
   `created` datetime DEFAULT NULL,
   `updated` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)
@@ -878,4 +881,60 @@ CREATE TABLE `ai_template_file_backup` (
 
 -- ----------------------------
 -- 0.2.0 表结构变更记录结束
+-- ----------------------------
+
+-- ----------------------------
+-- 0.3.0 表结构变更记录开始
+-- ----------------------------
+
+-- 附件目录表（附件分类树：parent_id 父目录，0 为根）
+DROP TABLE IF EXISTS `attachment_directory`;
+CREATE TABLE `attachment_directory` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `parent_id` bigint NOT NULL DEFAULT 0 COMMENT '父目录ID，0为根目录',
+  `name` varchar(50) NOT NULL COMMENT '目录名称',
+  `sort_num` int DEFAULT 0 COMMENT '排序（越小越靠前）',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_parent_id` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='附件目录表';
+
+-- 已有环境升级（0.2.x → 0.3.x）：附件表增加目录归属字段
+-- ALTER TABLE `attachment` ADD COLUMN `directory_id` bigint NOT NULL DEFAULT 0 COMMENT '所属目录ID，0为未分类' AFTER `file_type`;
+
+-- AI 模型配置表增加用途场景（chat=对话，image=生图；同场景内仅一条激活）
+-- ALTER TABLE `ai_model_config` ADD COLUMN `scene` varchar(20) NOT NULL DEFAULT 'chat' COMMENT '用途场景: chat-对话 image-生图' AFTER `model`;
+
+-- AI 生图任务表（文生图/修图异步任务，前端轮询状态）
+DROP TABLE IF EXISTS `ai_image_task`;
+CREATE TABLE `ai_image_task` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `session_id` varchar(64) DEFAULT NULL COMMENT '关联模板会话ID，媒体库生图为 NULL',
+  `user_id` bigint NOT NULL COMMENT '发起用户ID',
+  `task_type` varchar(10) NOT NULL COMMENT '任务类型: t2i-文生图 edit-修图',
+  `model` varchar(64) NOT NULL COMMENT '生图模型名称',
+  `prompt` varchar(2000) NOT NULL COMMENT '提示词（业务语义描述）',
+  `source_attachment_id` bigint DEFAULT NULL COMMENT '修图原图附件ID',
+  `template_id` varchar(64) DEFAULT NULL COMMENT '修图源/回写目标模板ID（模板 static 图片修图场景）',
+  `template_file_path` varchar(500) DEFAULT NULL COMMENT '修图源/回写目标模板内文件路径（回写前原图自动备份为 .bak）',
+  `size` varchar(20) NOT NULL DEFAULT '1664*928' COMMENT '生成尺寸 宽*高',
+  `num` int NOT NULL DEFAULT 1 COMMENT '生成张数 1-4',
+  `status` varchar(10) NOT NULL DEFAULT 'pending' COMMENT '状态: pending/running/success/failed',
+  `result_paths` text DEFAULT NULL COMMENT '结果 JSON: [{filePath,attachmentId}]',
+  `error` varchar(500) DEFAULT NULL COMMENT '失败原因',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_session_id` (`session_id`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 生图任务表';
+
+-- 已有环境升级（0.3.x）：为 ai_image_task 增加模板图片修图字段
+-- ALTER TABLE `ai_image_task` ADD COLUMN `template_id` varchar(64) DEFAULT NULL COMMENT '修图源/回写目标模板ID（模板 static 图片修图场景）' AFTER `source_attachment_id`;
+-- ALTER TABLE `ai_image_task` ADD COLUMN `template_file_path` varchar(500) DEFAULT NULL COMMENT '修图源/回写目标模板内文件路径（回写前原图自动备份为 .bak）' AFTER `template_id`;
+
+-- ----------------------------
+-- 0.3.0 表结构变更记录结束
 -- ----------------------------

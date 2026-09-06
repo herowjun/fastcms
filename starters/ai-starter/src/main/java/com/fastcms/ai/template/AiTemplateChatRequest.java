@@ -42,6 +42,18 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private String currentFile;
 
+    /**
+     * 预览页点选的目标区块 sectionId（可空；来自 iframe 的 data-ai-section 标记）。
+     * 组件化会话微调时注入该 section 的 spec 片段，AI 只修改该区块。
+     */
+    private String focusSectionId;
+
+    /**
+     * 用户点选区块时命中的具体元素描述（可空；如 "标题「散养土鸡蛋」"）。
+     * 元素级语义提示：让 AI 知道用户聚焦区块内的哪个元素，修改更有针对性。
+     */
+    private String focusElementHint;
+
     public String getInput() {
         return input;
     }
@@ -56,6 +68,22 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setCurrentFile(String currentFile) {
         this.currentFile = currentFile;
+    }
+
+    public String getFocusSectionId() {
+        return focusSectionId;
+    }
+
+    public void setFocusSectionId(String focusSectionId) {
+        this.focusSectionId = focusSectionId;
+    }
+
+    public String getFocusElementHint() {
+        return focusElementHint;
+    }
+
+    public void setFocusElementHint(String focusElementHint) {
+        this.focusElementHint = focusElementHint;
     }
 
 }

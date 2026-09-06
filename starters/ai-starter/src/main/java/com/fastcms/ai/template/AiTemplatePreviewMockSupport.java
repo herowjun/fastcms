@@ -151,9 +151,14 @@ final class AiTemplatePreviewMockSupport {
 
     /**
      * 预览数据配置（_preview_data.json 的解析结果），全部字段可 null，null 表示该项回退默认数据
+     *
+     * <p>imageOverrides：预览图片替换映射（原图片 URL → 新图片 URL），用于预览页点选换图——
+     * mock 数据中的图片（文章封面等）按 key 命中即替换为新值。仅影响预览渲染，
+     * 正式环境的图片由数据库数据决定，不受此映射影响。</p>
      */
     record PreviewDataConfig(List<MenuConfig> menus, List<ItemConfig> categories, List<ItemConfig> tags,
-                             List<ItemConfig> singlePages, ArticleConfig articles, Map<String, String> seo) {
+                             List<ItemConfig> singlePages, ArticleConfig articles, Map<String, String> seo,
+                             Map<String, String> imageOverrides) {
     }
 
     /**
@@ -202,11 +207,12 @@ final class AiTemplatePreviewMockSupport {
             List<ItemConfig> singlePages = parseItems(root.get("singlePages"), MAX_SINGLE_PAGES);
             ArticleConfig articles = parseArticles(root.get("articles"));
             Map<String, String> seo = parseSeo(root.get("seo"));
+            Map<String, String> imageOverrides = parseImageOverrides(root.get("imageOverrides"));
             if (menus == null && categories == null && tags == null
-                    && singlePages == null && articles == null && seo == null) {
+                    && singlePages == null && articles == null && seo == null && imageOverrides == null) {
                 return null;
             }
-            return new PreviewDataConfig(menus, categories, tags, singlePages, articles, seo);
+            return new PreviewDataConfig(menus, categories, tags, singlePages, articles, seo, imageOverrides);
         } catch (Exception e) {
             log.warn("预览数据文件解析失败，回退默认演示数据: {}", file, e);
             return null;
@@ -307,6 +313,38 @@ final class AiTemplatePreviewMockSupport {
         return seo.isEmpty() ? null : seo;
     }
 
+    /**
+     * 解析预览图片替换映射（imageOverrides）：key/value 均为非空字符串，
+     * key 为模板渲染输出的原图片 URL（含内联 SVG data URI，原样匹配）
+     */
+    private static Map<String, String> parseImageOverrides(JsonNode node) {
+        if (node == null || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        Map<String, String> overrides = new LinkedHashMap<>();
+        node.properties().forEach(entry -> {
+            JsonNode value = entry.getValue();
+            if (value != null && value.isTextual()) {
+                String key = entry.getKey() == null ? "" : entry.getKey().trim();
+                String text = value.asString().trim();
+                if (!key.isEmpty() && !text.isEmpty()) {
+                    overrides.put(key, text);
+                }
+            }
+        });
+        return overrides.isEmpty() ? null : overrides;
+    }
+
+    /**
+     * 预览图片解析：配置了 imageOverrides 且命中原 URL 时返回替换值，否则原样返回
+     */
+    private static String resolveImage(PreviewDataConfig config, String url) {
+        if (config == null || config.imageOverrides() == null) {
+            return url;
+        }
+        return config.imageOverrides().getOrDefault(url, url);
+    }
+
     private static List<String> stringList(JsonNode node, int max) {
         if (node == null || !node.isArray() || node.isEmpty()) {
             return null;
@@ -389,8 +427,8 @@ final class AiTemplatePreviewMockSupport {
         vars.put("categoryList", dataDirective(p -> categories(ctx, config)));
         vars.put("tagList", dataDirective(p -> tags(ctx, config)));
         vars.put("singlePageList", dataDirective(p -> singlePages(ctx, config)));
-        vars.put("prevArticleTag", dataDirective(p -> article(1, ctx, config == null ? null : config.articles())));
-        vars.put("nextArticleTag", dataDirective(p -> article(2, ctx, config == null ? null : config.articles())));
+        vars.put("prevArticleTag", dataDirective(p -> article(1, ctx, config)));
+        vars.put("nextArticleTag", dataDirective(p -> article(2, ctx, config)));
         vars.put("relatedArticleList", dataDirective(p -> articles(3, ctx, config)));
         vars.put("formatTime", formatTimeDirective());
 
@@ -445,6 +483,16 @@ final class AiTemplatePreviewMockSupport {
         } else if (name.startsWith("page")) {
             model.put("singlePage", singlePageDetail(suffixOfFileName(name), ctx, config));
         }
+
+        // mock request：注入当前预览页地址，模板按 request.requestURI / request.url
+        // 前缀匹配菜单 URL 即可输出选中态（预览菜单 URL 与页面同前缀构造，starts_with 可命中）。
+        // 正式环境 request 由框架注入真实对象；此处补齐预览侧，导航选中态两端一致。
+        String pageUrl = ctx.urlPrefix() + "/" + relPath;
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("contextPath", "");
+        request.put("requestURI", pageUrl);
+        request.put("url", pageUrl);
+        model.put("request", request);
         return model;
     }
 
@@ -543,12 +591,18 @@ final class AiTemplatePreviewMockSupport {
 
     /**
      * 菜单列表：配置了 menus 时按配置构建（URL 按 type+suffix 解析），否则回退默认菜单
+     *
+     * <p>type=index（首页）条目跳过：导航类组件普遍硬编码"首页"链接，
+     * AI 生成 spec 的 menus 里再带一个 index 项会渲染出两个"首页"。</p>
      */
     private static List<Map<String, Object>> menus(PreviewContext ctx, PreviewDataConfig config) {
         List<MenuConfig> items = config == null ? null : config.menus();
         if (items != null && !items.isEmpty()) {
             List<Map<String, Object>> menus = new ArrayList<>();
             for (MenuConfig item : items) {
+                if (isIndexMenu(item)) {
+                    continue;
+                }
                 menus.add(menu(item, ctx));
             }
             return menus;
@@ -556,11 +610,18 @@ final class AiTemplatePreviewMockSupport {
         return defaultMenus(ctx.articleListUrl(), ctx.pageUrl());
     }
 
+    /** 是否首页菜单项（type=index）：与组件硬编码的首页链接重复，渲染时跳过 */
+    private static boolean isIndexMenu(MenuConfig item) {
+        return "index".equals(item.type());
+    }
+
     private static Map<String, Object> menu(MenuConfig item, PreviewContext ctx) {
         List<Map<String, Object>> children = new ArrayList<>();
         if (item.children() != null) {
             for (MenuConfig child : item.children()) {
-                children.add(menu(child, ctx));
+                if (!isIndexMenu(child)) {
+                    children.add(menu(child, ctx));
+                }
             }
         }
         return menu(item.name(), resolveUrl(ctx, item.type(), item.suffix()), children);
@@ -705,12 +766,13 @@ final class AiTemplatePreviewMockSupport {
         int n = count == null || count <= 0 ? total : Math.min(count, total);
         List<Map<String, Object>> list = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            list.add(article(i, ctx, cfg));
+            list.add(article(i, ctx, config));
         }
         return list;
     }
 
-    private static Map<String, Object> article(int index, PreviewContext ctx, ArticleConfig cfg) {
+    private static Map<String, Object> article(int index, PreviewContext ctx, PreviewDataConfig config) {
+        ArticleConfig cfg = config == null ? null : config.articles();
         String title = cfg != null && cfg.titles() != null
                 ? cfg.titles().get(index % cfg.titles().size())
                 : ARTICLE_TITLES[index % ARTICLE_TITLES.length];
@@ -729,7 +791,8 @@ final class AiTemplatePreviewMockSupport {
         a.put("id", (long) (index + 1));
         a.put("title", title);
         a.put("summary", summary);
-        a.put("thumbnail", THUMBNAIL_SVG);
+        // 封面：预览图片替换映射（imageOverrides）命中时用替换图，否则用内置演示图
+        a.put("thumbnail", resolveImage(config, THUMBNAIL_SVG));
         a.put("url", url);
         a.put("created", LocalDateTime.now().minusDays(index).withNano(0));
         a.put("viewCount", 420 - index * 37);
@@ -740,7 +803,7 @@ final class AiTemplatePreviewMockSupport {
      * 文章详情 mock（article.html 页面上下文 / prevArticleTag / nextArticleTag）
      */
     private static Map<String, Object> articleDetail(PreviewContext ctx, PreviewDataConfig config) {
-        Map<String, Object> a = article(0, ctx, config == null ? null : config.articles());
+        Map<String, Object> a = article(0, ctx, config);
         a.put("contentHtml", mockArticleBody(
                 (String) a.get("title"), (String) a.get("summary"), config));
         a.put("seoKeywords", "FastCMS,演示文章,模板预览");

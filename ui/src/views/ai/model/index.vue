@@ -9,8 +9,15 @@
 					<el-select v-model="providerFilter" placeholder="全部供应商" clearable size="default" class="ml10" style="width: 160px">
 						<el-option v-for="p in presentProviders" :key="p.value" :label="p.label" :value="p.value" />
 					</el-select>
-					<el-tag class="ml10" type="info" v-if="state.activeName">
-						当前激活：{{ state.activeName }}
+					<el-select v-model="sceneFilter" placeholder="全部场景" clearable size="default" class="ml10" style="width: 130px">
+						<el-option label="对话" value="chat" />
+						<el-option label="生图" value="image" />
+					</el-select>
+					<el-tag class="ml10" type="info" v-if="state.activeChatName">
+						对话激活：{{ state.activeChatName }}
+					</el-tag>
+					<el-tag class="ml10" type="info" v-if="state.activeImageName">
+						生图激活：{{ state.activeImageName }}
 					</el-tag>
 				</div>
 				<el-table :data="sortedTableData" stripe style="width: 100%" v-loading="state.loading" :span-method="providerSpanMethod">
@@ -21,6 +28,13 @@
 						</template>
 					</el-table-column>
 					<el-table-column prop="model" label="模型" min-width="140" show-overflow-tooltip />
+					<el-table-column label="场景" width="80">
+						<template #default="scope">
+							<el-tag size="small" :type="scope.row.scene === 'image' ? 'warning' : 'primary'">
+								{{ scope.row.scene === 'image' ? '生图' : '对话' }}
+							</el-tag>
+						</template>
+					</el-table-column>
 					<el-table-column prop="baseUrl" label="端点" min-width="220" show-overflow-tooltip />
 					<el-table-column prop="temperature" label="温度" width="80" />
 					<el-table-column prop="maxTokens" label="MaxTokens" width="100" />
@@ -133,25 +147,39 @@
 
 		<el-dialog :title="state.dialog.title" v-model="state.dialog.visible" width="640px" :close-on-click-modal="false">
 			<el-form :model="state.form" :rules="state.rules" ref="myRefForm" label-width="100px">
-				<el-form-item label="配置名称" prop="name">
-					<el-input v-model="state.form.name" placeholder="如：DeepSeek-聊天" clearable />
-				</el-form-item>
+					<el-form-item label="配置名称" prop="name">
+						<el-input v-model="state.form.name" placeholder="如：DeepSeek-聊天" clearable />
+					</el-form-item>
+					<el-form-item label="用途场景" prop="scene">
+						<el-radio-group v-model="state.form.scene" @change="onSceneChange">
+							<el-radio-button label="chat">对话</el-radio-button>
+							<el-radio-button label="image">生图</el-radio-button>
+						</el-radio-group>
+						<span class="ml10 scene-tip">对话用于模板生成/文章等；生图用于 AI 文生图/修图（DashScope qwen-image 系列）</span>
+					</el-form-item>
 				<el-form-item label="供应商" prop="provider">
-					<el-select v-model="state.form.provider" placeholder="请选择" @change="onProviderChange" style="width:100%">
-						<el-option label="DeepSeek" value="deepseek" />
-						<el-option label="通义千问" value="qwen" />
-						<el-option label="智谱 GLM" value="zhipu" />
-						<el-option label="Moonshot" value="moonshot" />
-						<el-option label="OpenAI" value="openai" />
-						<el-option label="Ollama" value="ollama" />
-						<el-option label="自定义" value="custom" />
-					</el-select>
-				</el-form-item>
-				<el-form-item label="API 端点" prop="baseUrl">
-					<el-select v-model="state.form.baseUrl" filterable allow-create default-first-option clearable placeholder="选择预设网关或手动输入" style="width:100%">
-						<el-option v-for="(preset, p) in providerPresets" :key="p" v-if="preset.baseUrl" :label="providerLabels[p as string] + '（' + preset.baseUrl + '）'" :value="preset.baseUrl" />
-					</el-select>
-				</el-form-item>
+						<el-select v-model="state.form.provider" placeholder="请选择" @change="onProviderChange" style="width:100%">
+							<template v-if="state.form.scene === 'image'">
+								<el-option label="通义千问（DashScope）" value="qwen" />
+								<el-option label="OpenAI" value="openai" />
+								<el-option label="自定义" value="custom" />
+							</template>
+							<template v-else>
+								<el-option label="DeepSeek" value="deepseek" />
+								<el-option label="通义千问" value="qwen" />
+								<el-option label="智谱 GLM" value="zhipu" />
+								<el-option label="Moonshot" value="moonshot" />
+								<el-option label="OpenAI" value="openai" />
+								<el-option label="Ollama" value="ollama" />
+								<el-option label="自定义" value="custom" />
+							</template>
+						</el-select>
+					</el-form-item>
+					<el-form-item label="API 端点" prop="baseUrl">
+						<el-select v-model="state.form.baseUrl" filterable allow-create default-first-option clearable placeholder="选择预设网关或手动输入" style="width:100%">
+							<el-option v-for="(preset, p) in currentScenePresets" :key="p" v-if="preset.baseUrl" :label="providerLabels[p as string] + '（' + preset.baseUrl + '）'" :value="preset.baseUrl" />
+						</el-select>
+					</el-form-item>
 				<el-form-item label="API Key" prop="apiKey">
 					<el-input v-model="state.form.apiKey" placeholder="sk-xxx（Ollama 等本地调用可留空）" show-password clearable />
 				</el-form-item>
@@ -189,6 +217,7 @@
 					<el-col :span="12">
 						<el-form-item label="是否激活">
 							<el-switch v-model="state.form.active" />
+							<span class="ml10 scene-tip">同场景内互斥</span>
 						</el-form-item>
 					</el-col>
 				</el-row>
@@ -344,7 +373,8 @@ const state = reactive({
 	loading: false,
 	submitting: false,
 	tableData: [] as any[],
-	activeName: '',
+	activeChatName: '',
+	activeImageName: '',
 	dialog: {
 		visible: false,
 		title: '新增模型',
@@ -352,6 +382,7 @@ const state = reactive({
 	form: {
 		id: null as any,
 		name: '',
+		scene: 'chat',
 		provider: 'deepseek',
 		baseUrl: '',
 		apiKey: '',
@@ -393,6 +424,8 @@ const providerIndex = (p?: string) => {
 
 // 供应商筛选（'' 表示全部）
 const providerFilter = ref('');
+// 场景筛选（'' 表示全部）
+const sceneFilter = ref('');
 const presentProviders = computed(() => {
 	const map = new Map<string, string>();
 	state.tableData.forEach((row: any) => {
@@ -412,9 +445,12 @@ const presentProviders = computed(() => {
 
 // 表格按供应商分组排序：先按 provider 固定顺序，再按 sortNum / id
 const sortedTableData = computed(() => {
-	const base = providerFilter.value
+	let base = providerFilter.value
 		? state.tableData.filter((r: any) => (r.provider || 'custom') === providerFilter.value)
 		: [...state.tableData];
+	if (sceneFilter.value) {
+		base = base.filter((r: any) => (r.scene === 'image' ? 'image' : 'chat') === sceneFilter.value);
+	}
 	return base.sort(
 		(a: any, b: any) =>
 			providerIndex(a.provider) - providerIndex(b.provider) ||
@@ -453,12 +489,37 @@ const providerPresets: Record<string, { baseUrl: string; models: string[] }> = {
 	custom: { baseUrl: '', models: [] },
 };
 
-// 当前供应商可选模型（用于下拉列表）
-const currentProviderModels = computed(() => providerPresets[state.form.provider]?.models || []);
+// 生图场景预设：DashScope 原生多模态生图端点（qwen-image 系列，文生图/修图）
+const imageProviderPresets: Record<string, { baseUrl: string; models: string[] }> = {
+	qwen: { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', models: ['qwen-image', 'qwen-image-edit'] },
+	openai: { baseUrl: 'https://api.openai.com/v1', models: ['gpt-image-1'] },
+	custom: { baseUrl: '', models: [] },
+};
 
-// 切换供应商时，API 端点跟随该供应商网关，模型回落到该供应商默认模型（models[0]）
+// 当前场景对应预设（生图场景只保留支持图像生成的供应商）
+const currentScenePresets = computed(() => (state.form.scene === 'image' ? imageProviderPresets : providerPresets));
+
+// 当前供应商可选模型（用于下拉列表，按场景取预设）
+const currentProviderModels = computed(() => currentScenePresets.value[state.form.provider]?.models || []);
+
+// 切换用途场景时：生图场景回落到 qwen + qwen-image；对话场景回落到 deepseek 默认
+const onSceneChange = (scene: string) => {
+	if (scene === 'image') {
+		if (!imageProviderPresets[state.form.provider]) {
+			state.form.provider = 'qwen';
+			onProviderChange('qwen');
+		}
+	} else {
+		if (!providerPresets[state.form.provider]) {
+			state.form.provider = 'deepseek';
+			onProviderChange('deepseek');
+		}
+	}
+};
+
+// 切换供应商时，API 端点跟随该供应商网关（按场景取预设），模型回落到该供应商默认模型（models[0]）
 const onProviderChange = (provider: string) => {
-	const preset = providerPresets[provider];
+	const preset = currentScenePresets.value[provider];
 	if (!preset) return;
 	state.form.baseUrl = preset.baseUrl;
 	state.form.model = preset.models[0] || '';
@@ -505,8 +566,12 @@ const initTableData = () => {
 	state.loading = true;
 	aiApi.list().then((res: any) => {
 		state.tableData = res.data || [];
-		const active = state.tableData.find((item: any) => item.active);
-		state.activeName = active ? `${active.name} (${active.model})` : '无';
+		const fmt = (item: any) => `${item.name} (${item.model})`;
+		// 场景归一化：后端历史数据 scene 为空视为 chat
+		const activeChat = state.tableData.find((item: any) => item.active && (item.scene || 'chat') === 'chat');
+		const activeImage = state.tableData.find((item: any) => item.active && item.scene === 'image');
+		state.activeChatName = activeChat ? fmt(activeChat) : '';
+		state.activeImageName = activeImage ? fmt(activeImage) : '';
 	}).catch(() => {}).finally(() => {
 		state.loading = false;
 	});
@@ -515,7 +580,7 @@ const initTableData = () => {
 const onOpenEdit = (row: any) => {
 	if (row) {
 		aiApi.get(row.id).then((res: any) => {
-			state.form = { ...res.data, extraHeaders: res.data.extraHeaders || '' };
+			state.form = { ...res.data, scene: res.data.scene || 'chat', extraHeaders: res.data.extraHeaders || '' };
 			state.form.apiKey = '********'; // 后端已脱敏，保持占位
 			state.dialog.title = '编辑模型';
 			state.dialog.visible = true;
@@ -525,6 +590,7 @@ const onOpenEdit = (row: any) => {
 		state.form = {
 			id: null,
 			name: '',
+			scene: 'chat',
 			provider: 'deepseek',
 			baseUrl: '',
 			apiKey: '',
@@ -597,4 +663,5 @@ onMounted(() => {
 .ml10 { margin-left: 10px; }
 .mt15 { margin-top: 15px; }
 .usage-range { color: var(--el-text-color-secondary); font-size: 12px; }
+.scene-tip { color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

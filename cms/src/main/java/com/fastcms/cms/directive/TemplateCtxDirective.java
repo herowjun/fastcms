@@ -16,10 +16,15 @@
  */
 package com.fastcms.cms.directive;
 
+import com.fastcms.cms.template.TemplateBaseController;
 import com.fastcms.core.directive.BaseFunction;
+import com.fastcms.core.template.Template;
 import com.fastcms.core.template.TemplateService;
 import freemarker.template.TemplateModelException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.annotation.Resource;
 import java.util.List;
@@ -42,8 +47,28 @@ public class TemplateCtxDirective extends BaseFunction {
 
 	@Override
 	public Object exec(List arguments) throws TemplateModelException {
-		String path = templateService.getCurrTemplate().getPath();
+		// 模板浏览态（/{模板pathName}/，见 TemplateBrowseController）返回被浏览模板的路径，
+		// 使页面静态资源（css/js）加载该模板自己的资源映射（/{模板path}/**）
+		Template template = getBrowseTemplate();
+		if (template == null) {
+			template = templateService.getCurrTemplate();
+		}
+		String path = template.getPath();
 		return path.substring(0, path.length() - 1);
+	}
+
+	private Template getBrowseTemplate() {
+		// 非请求线程（如静态化后台渲染）无浏览态，直接返回 null 走当前启用模板
+		ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+		if (attrs == null) {
+			return null;
+		}
+		HttpServletRequest request = attrs.getRequest();
+		Object browseTemplateId = request.getAttribute(TemplateBaseController.BROWSE_TEMPLATE_ID_ATTR);
+		if (browseTemplateId == null) {
+			return null;
+		}
+		return templateService.getTemplate(browseTemplateId.toString());
 	}
 
 }

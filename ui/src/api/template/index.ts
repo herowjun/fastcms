@@ -96,6 +96,20 @@ export function TemplateApi() {
 		},
 
 		/**
+		 * 恢复 AI 修图前的原图（原图备份 .bak 覆盖回原路径）
+		 * @param filePath
+		 * @param templateId  模板id（可选，缺省为当前激活模板）
+		 * @returns
+		 */
+		restoreImage(filePath: string, templateId?: string) {
+			return request({
+				url: '/admin/template/file/restore-image',
+				method: 'post',
+				params: { filePath, templateId }
+			});
+		},
+
+		/**
 		 * 获取网站模板菜单
 		 * @returns 
 		 */

@@ -90,9 +90,10 @@
 				type="textarea"
 				:rows="3"
 				:placeholder="isApplied ? '该会话已应用到正式模板目录，仅支持回看历史消息与文件'
+					: (focusSection ? `AI 已锁定选中区块「${focusSection}」，描述你想把它改成什么样子，例如：标题改成红色大字、换一张配图`
 					: (mode === 'adjust'
 						? (currentFileName ? `AI 当前聚焦页面：${currentFileName}。描述你想调整的内容，例如：把这里的导航改为深色` : '描述你想调整的内容，例如：把首页导航改为深色、文章列表改为卡片式布局')
-						: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计')"
+						: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计'))"
 				:disabled="state.chatting || isApplied"
 			/>
 			<div class="chat-actions">
@@ -124,6 +125,9 @@
 					</el-button>
 						<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
+					</el-button>
+					<el-button v-if="mode === 'generate' && !isApplied && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
+						<el-icon><ele-Edit /></el-icon>编辑文件
 					</el-button>
 					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
 						<el-icon><ele-Check /></el-icon>应用模板
@@ -178,6 +182,10 @@ const props = defineProps<{
 	mode: 'adjust' | 'generate';
 	/** 用户当前正在编辑的文件（含模板目录前缀），发送消息时传给后端，让 AI 聚焦当前页面 */
 	currentFile?: string;
+	/** 选区锁定：预览页点选的区块 ID，随消息发送让 AI 只修改该区块（组件化会话生效） */
+	focusSection?: string;
+	/** 选区锁定的元素语义提示（如 标题「散养土鸡蛋」），随消息发送 */
+	focusElementHint?: string;
 	/** 可切换的会话列表（父组件管理，为空时面板头部只显示标题） */
 	sessions?: any[];
 	/** 新建会话请求进行中（按钮 loading） */
@@ -189,8 +197,10 @@ const emit = defineEmits<{
 	(e: 'files-changed'): void;
 	/** AI 每写完一个文件的实时通知（SSE file 事件，父组件用于刷新实时预览） */
 	(e: 'file-written', path: string): void;
-	/** 生成型会话应用模板成功 */
-	(e: 'applied'): void;
+	/** 生成型会话应用模板成功（templateId：应用后的正式模板 ID，父组件据此无缝切换编辑目标） */
+	(e: 'applied', templateId: string): void;
+	/** 进入会话编辑模式（父组件把文件树/编辑器/预览切到会话工作目录） */
+	(e: 'edit-files'): void;
 	/** 切换会话（sessionId） */
 	(e: 'select-session', sessionId: string): void;
 	/** 新建会话 */
@@ -513,7 +523,12 @@ const onSend = async () => {
 				'Content-Type': 'application/json',
 				...(token ? { Authorization: 'Bearer ' + token } : {})
 			},
-			body: JSON.stringify({ input: userInput, currentFile: props.currentFile || '' }),
+			body: JSON.stringify({
+				input: userInput,
+				currentFile: props.currentFile || '',
+				focusSectionId: props.focusSection || '',
+				focusElementHint: props.focusElementHint || ''
+			}),
 			signal: controller.signal
 		});
 
@@ -702,15 +717,16 @@ const onRollback = () => {
 
 const onApplyTemplate = () => {
 	if (!props.session?.sessionId) return;
-	ElMessageBox.confirm('确认将此模板应用到正式模板目录？应用后可在模板列表中切换使用。', '提示', {
+	ElMessageBox.confirm('确认将此模板应用到正式模板目录？应用后将切换到正式模板编辑。', '提示', {
 		type: 'warning',
 	}).then(async () => {
 		state.applying = true;
 		try {
 			const res = await templateApi.applyTemplate(props.session.sessionId);
 			if (res.data) {
-				ElMessage.success(res.data);
-				emit('applied');
+				// 后端返回 ApplyResult：{ message, templateId }（应用后的正式模板 ID）
+				ElMessage.success(res.data.message || '应用成功');
+				emit('applied', res.data.templateId);
 			} else if (res.msg) {
 				ElMessage.error(res.msg);
 			}

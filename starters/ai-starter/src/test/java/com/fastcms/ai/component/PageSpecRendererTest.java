@@ -84,7 +84,8 @@ class PageSpecRendererTest {
                                 new SectionSpec("footer", "tw:footer", "simple", footerData))),
                         PageSpec.PAGE_PAGE, new PageSpecPage(List.of(
                                 new SectionSpec("nav", "tw:navbar", "sticky", navbarData),
-                                new SectionSpec("footer", "tw:footer", "simple", footerData)))));
+                                new SectionSpec("footer", "tw:footer", "simple", footerData)))),
+                null);
     }
 
     @Test
@@ -101,7 +102,8 @@ class PageSpecRendererTest {
                 Map.of(PageSpec.PAGE_INDEX, new PageSpecPage(List.of(
                         new SectionSpec("s1", "tw:not-exist", null, Map.of()),           // 组件不存在
                         new SectionSpec("s2", "tw:hero", "bad-variant", Map.of()),        // 变体不存在
-                        new SectionSpec("s3", "tw:hero", "centered", Map.of())))));       // 缺必填 title
+                        new SectionSpec("s3", "tw:hero", "centered", Map.of())))),        // 缺必填 title
+                null);
         List<String> errors = validator.validate(spec);
         assertFalse(errors.isEmpty());
         assertTrue(errors.stream().anyMatch(e -> e.contains("tw:not-exist")), "应提示组件不存在: " + errors);
@@ -202,7 +204,8 @@ class PageSpecRendererTest {
                         "page_landing", new PageSpecPage(List.of(
                                 new SectionSpec("nav", "tw:navbar", "sticky", Map.of("brand", "Demo")),
                                 new SectionSpec("hero", "tw:hero", "centered", heroData),
-                                new SectionSpec("footer", "tw:footer", "simple", Map.of("brand", "Demo"))), true)));
+                                new SectionSpec("footer", "tw:footer", "simple", Map.of("brand", "Demo"))), true)),
+                null);
 
         Path dir = tempDir.resolve("standalone-template");
         renderer.render(spec, dir);
@@ -272,7 +275,8 @@ class PageSpecRendererTest {
                                 new SectionSpec("footer", "tw:footer", "simple", footerData))),
                         PageSpec.PAGE_PAGE, new PageSpecPage(List.of(
                                 new SectionSpec("nav", "tw:navbar", "sticky", navbarData),
-                                new SectionSpec("footer", "tw:footer", "simple", footerData)))));
+                                new SectionSpec("footer", "tw:footer", "simple", footerData)))),
+                null);
 
         // site 信息架构合法（suffix 全站唯一）
         assertEquals(List.of(), validator.validate(spec), "校验应通过: " + validator.validate(spec));
@@ -333,9 +337,49 @@ class PageSpecRendererTest {
                 "bad-site", "测试", "demo", "minimal", "#2563eb", site,
                 Map.of(PageSpec.PAGE_INDEX, new PageSpecPage(List.of(
                         new SectionSpec("hero", "tw:hero", "centered",
-                                Map.of("title", "t"))))));
+                                Map.of("title", "t"))))),
+                null);
         List<String> errors = validator.validate(spec);
         assertTrue(errors.stream().anyMatch(e -> e.contains("缺少 suffix")), "应提示菜单缺 suffix: " + errors);
         assertTrue(errors.stream().anyMatch(e -> e.contains("重复")), "应提示 suffix 重复: " + errors);
+    }
+
+    /**
+     * media 槽位协议（PageSpec 1.2）：search:关键词 / 图片URL / 空合法，编造地址报错
+     */
+    @Test
+    void shouldValidateMediaSlotProtocol() {
+        PageSpec searchRef = mediaSlotSpec("search:产品主图 生态农场");
+        assertEquals(List.of(), validator.validate(searchRef), "search: 引用应合法: " + validator.validate(searchRef));
+
+        PageSpec urlRef = mediaSlotSpec("/attachment/2026/09/demo.png");
+        assertEquals(List.of(), validator.validate(urlRef), "图片 URL 应合法: " + validator.validate(urlRef));
+
+        PageSpec emptyRef = mediaSlotSpec("");
+        assertEquals(List.of(), validator.validate(emptyRef), "空值（组件占位兜底）应合法: " + validator.validate(emptyRef));
+
+        PageSpec blankKeyword = mediaSlotSpec("search:");
+        assertTrue(validator.validate(blankKeyword).stream()
+                        .anyMatch(e -> e.contains("search: 后缺少关键词")),
+                "应提示 search: 缺关键词: " + validator.validate(blankKeyword));
+
+        PageSpec fabricated = mediaSlotSpec("产品主图.png");
+        assertTrue(validator.validate(fabricated).stream()
+                        .anyMatch(e -> e.contains("槽位 image 值非法")),
+                "应提示非协议图片值非法: " + validator.validate(fabricated));
+    }
+
+    private PageSpec mediaSlotSpec(String imageValue) {
+        Map<String, Object> heroData = new LinkedHashMap<>();
+        heroData.put("title", "演示");
+        if (imageValue != null && !imageValue.isEmpty()) {
+            heroData.put("image", imageValue);
+        }
+        return new PageSpec(
+                PageSpec.SPEC_VERSION, BuiltinTailwindPackProvider.FOUNDATION,
+                "media-slot-demo", "演示", "demo", "minimal", "#2563eb", null,
+                Map.of(PageSpec.PAGE_INDEX, new PageSpecPage(List.of(
+                        new SectionSpec("hero", "tw:hero", "split", heroData)))),
+                null);
     }
 }

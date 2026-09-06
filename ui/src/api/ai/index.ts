@@ -228,6 +228,138 @@ export function AiTemplateApi() {
 		 */
 		previewUrl(sessionId: string, templateName: string, filePath: string = 'index.html') {
 			return '/ai/template/preview/' + sessionId + '/' + templateName + '/' + filePath;
+		},
+
+		/**
+		 * 更新图片槽位（预览页点选换图，不经 AI 对话）
+		 * @param sessionId 会话 ID
+		 * @param data { sectionId, slot, attachmentId }
+		 * @returns 本次写出的模板内相对路径清单
+		 */
+		updateImageSlot(sessionId: string, data: { sectionId: string; slot: string; attachmentId: number }) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/image-slot',
+				method: 'post',
+				data: data
+			});
+		},
+
+		/**
+		 * 更新预览演示图片（预览页点选无槽位标记的 mock 图片换图）
+		 *
+		 * 改 _preview_data.json 的 imageOverrides 映射，仅预览渲染生效；
+		 * 正式环境的图片由数据库文章数据决定。
+		 * @param sessionId 会话 ID
+		 * @param data { imageUrl: 模板渲染输出的原样图片地址, attachmentId }
+		 */
+		updatePreviewImage(sessionId: string, data: { imageUrl: string; attachmentId: number }) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/preview-image',
+				method: 'post',
+				data: data
+			});
+		},
+
+		// ==================== 会话工作目录文件编辑（生成型会话，应用前的手工打磨） ====================
+
+		/**
+		 * 会话工作目录文件树（与正式模板文件树同构：filePath 以模板目录名开头）
+		 */
+		getSessionFileTree(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/files/tree',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 读取会话工作目录的文本文件内容
+		 * @param filePath 文件路径（以模板目录名开头，与文件树返回值一致）
+		 */
+		getSessionFile(sessionId: string, filePath: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/file/get?filePath=' + encodeURIComponent(filePath),
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 保存（或新建）会话工作目录的文本文件（仅未应用的生成型会话可写）
+		 * @param params { filePath, fileContent }
+		 */
+		saveSessionFile(sessionId: string, params: object) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/file/save',
+				method: 'post',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				data: params
+			});
+		},
+
+		/**
+		 * 删除会话工作目录的文件（仅未应用的生成型会话可删）
+		 */
+		delSessionFile(sessionId: string, filePath: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/file/delete?filePath=' + encodeURIComponent(filePath),
+				method: 'post'
+			});
+		},
+
+		/**
+		 * 构造会话文件上传 URL（el-upload action 使用；data 携带 dirName + sessionId）
+		 */
+		sessionUploadUrl(sessionId: string) {
+			return import.meta.env.VITE_API_URL + '/admin/ai/template/sessions/' + sessionId + '/files/upload';
+		}
+	};
+}
+
+/**
+ * AI 生图 API（文生图/修图，任务异步：提交即返回 + 轮询 task/{id}）
+ */
+export function AiImageApi() {
+	return {
+		/**
+		 * 提交生图任务
+		 * @param data { taskType: 't2i'|'edit', prompt, size?, num?, sourceAttachmentId? }
+		 */
+		generate(data: object) {
+			return request({
+				url: '/admin/ai/image/generate',
+				method: 'post',
+				data: data
+			});
+		},
+
+		/**
+		 * 查询任务状态（前端轮询至 success/failed）
+		 */
+		getTask(id: number | string) {
+			return request({
+				url: '/admin/ai/image/task/' + id,
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 重试失败的任务
+		 */
+		retry(id: number | string) {
+			return request({
+				url: '/admin/ai/image/retry/' + id,
+				method: 'post'
+			});
+		},
+
+		/**
+		 * 应用模板图片修图结果（用户对比原图/生成图确认后调用：原图备份 .bak，结果图覆盖模板原路径）
+		 */
+		apply(id: number | string) {
+			return request({
+				url: '/admin/ai/image/apply/' + id,
+				method: 'post'
+			});
 		}
 	};
 }

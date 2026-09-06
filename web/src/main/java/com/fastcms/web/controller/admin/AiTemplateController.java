@@ -178,7 +178,9 @@ public class AiTemplateController {
             return emitter;
         }
         templateGenService.chatStream(sessionId, request == null ? null : request.getInput(),
-                request == null ? null : request.getCurrentFile(), emitter);
+                request == null ? null : request.getCurrentFile(),
+                request == null ? null : request.getFocusSectionId(),
+                request == null ? null : request.getFocusElementHint(), emitter);
         return emitter;
     }
 
@@ -187,15 +189,111 @@ public class AiTemplateController {
      *
      * <p>将预览工作目录的文件复制到正式模板目录，并刷新模板注册。
      * 调整型会话（绑定正式模板）不支持应用——其 AI 输出已直接写入正式模板目录。</p>
+     *
+     * @return ApplyResult（message：应用结果描述；templateId：应用后正式模板 ID，
+     *         前端据此从会话编辑模式无缝切换到正式模板编辑）
      */
     @PostMapping("sessions/{sessionId}/apply")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_APPLY, resource = "ai:template:apply", action = ActionTypes.WRITE)
-    public RestResult<String> apply(@PathVariable("sessionId") String sessionId) {
+    public RestResult<IAiTemplateGenService.ApplyResult> apply(@PathVariable("sessionId") String sessionId) {
         if (requireOwnedSession(sessionId) == null) {
             return RestResultUtils.failed("会话不存在");
         }
         try {
             return RestResultUtils.success(templateGenService.applyTemplate(sessionId));
+        } catch (Exception e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    // ==================== 会话工作目录文件编辑（生成型会话，应用前的手工打磨） ====================
+
+    /**
+     * 会话工作目录文件树（与正式模板文件树同构：filePath 以模板目录名开头）
+     */
+    @GetMapping("sessions/{sessionId}/files/tree")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILES, resource = "ai:template:files/tree", action = ActionTypes.READ)
+    public RestResult<List<com.fastcms.core.template.TemplateService.FileTreeNode>> sessionFileTree(
+            @PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            return RestResultUtils.success(templateGenService.getSessionFileTree(sessionId));
+        } catch (Exception e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 读取会话工作目录的文本文件内容
+     */
+    @GetMapping("sessions/{sessionId}/file/get")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILES, resource = "ai:template:file/get", action = ActionTypes.READ)
+    public RestResult<String> getSessionFile(@PathVariable("sessionId") String sessionId,
+                                             @RequestParam("filePath") String filePath) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            return RestResultUtils.success(templateGenService.getSessionFile(sessionId, filePath));
+        } catch (Exception e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 保存（或新建）会话工作目录的文本文件（仅未应用的生成型会话可写）
+     */
+    @PostMapping("sessions/{sessionId}/file/save")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILE_EDIT, resource = "ai:template:file/save", action = ActionTypes.WRITE)
+    public RestResult<Boolean> saveSessionFile(@PathVariable("sessionId") String sessionId,
+                                               @RequestParam("filePath") String filePath,
+                                               @RequestParam("fileContent") String fileContent) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            templateGenService.saveSessionFile(sessionId, filePath, fileContent);
+            return RestResultUtils.success(true);
+        } catch (Exception e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 删除会话工作目录的文件（仅未应用的生成型会话可删）
+     */
+    @PostMapping("sessions/{sessionId}/file/delete")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILE_EDIT, resource = "ai:template:file/delete", action = ActionTypes.WRITE)
+    public RestResult<Boolean> deleteSessionFile(@PathVariable("sessionId") String sessionId,
+                                                 @RequestParam("filePath") String filePath) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            templateGenService.deleteSessionFile(sessionId, filePath);
+            return RestResultUtils.success(true);
+        } catch (Exception e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 上传文件到会话工作目录（仅未应用的生成型会话可传）
+     *
+     * @param dirName 目标子目录（以模板目录名开头，与文件树路径约定一致）
+     */
+    @PostMapping("sessions/{sessionId}/files/upload")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_FILE_EDIT, resource = "ai:template:files/upload", action = ActionTypes.WRITE)
+    public RestResult<List<String>> uploadSessionFiles(@PathVariable("sessionId") String sessionId,
+                                                       @RequestParam(value = "dirName", required = false) String dirName,
+                                                       @RequestParam("files") org.springframework.web.multipart.MultipartFile[] files) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            return RestResultUtils.success(templateGenService.uploadSessionFiles(sessionId, dirName, files));
         } catch (Exception e) {
             return RestResultUtils.failed(e.getMessage());
         }
@@ -253,6 +351,115 @@ public class AiTemplateController {
             return RestResultUtils.success(templateGenService.upgradeLegacyTemplate(sessionId));
         } catch (Exception e) {
             return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 更新图片槽位（预览页点选换图，不经 AI 对话）
+     *
+     * <p>调整页开启"换图"模式后点选带 data-ai-slot 标记的图片，
+     * 前端回传 sectionId/slot + 附件库图片 ID（搜库/生成/上传三个来源均可归一为附件 ID），
+     * 服务端完成 spec 槽位替换 → 校验 → 重渲染 → 产物持久化。</p>
+     *
+     * @return 本次写出的模板内相对路径清单（前端据此刷新预览）
+     */
+    @PostMapping("sessions/{sessionId}/image-slot")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
+    public RestResult<List<String>> updateImageSlot(@PathVariable("sessionId") String sessionId,
+                                                    @RequestBody ImageSlotUpdateRequest request) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        if (request == null) {
+            return RestResultUtils.failed("缺少请求参数");
+        }
+        try {
+            return RestResultUtils.success(templateGenService.updateImageSlot(
+                    sessionId, request.getSectionId(), request.getSlot(), request.getAttachmentId()));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 图片槽位更新请求体（sectionId/slot 来自预览页 data-ai-section/data-ai-slot 标记）
+     */
+    public static class ImageSlotUpdateRequest {
+        private String sectionId;
+        private String slot;
+        private Long attachmentId;
+
+        public String getSectionId() {
+            return sectionId;
+        }
+
+        public void setSectionId(String sectionId) {
+            this.sectionId = sectionId;
+        }
+
+        public String getSlot() {
+            return slot;
+        }
+
+        public void setSlot(String slot) {
+            this.slot = slot;
+        }
+
+        public Long getAttachmentId() {
+            return attachmentId;
+        }
+
+        public void setAttachmentId(Long attachmentId) {
+            this.attachmentId = attachmentId;
+        }
+    }
+
+    /**
+     * 更新预览演示图片（预览页点选无槽位标记的 mock 图片换图，不经 AI 对话）
+     *
+     * <p>与 image-slot 的区别：槽位图改 _pagespec.json（模板资产，正式生效）；
+     * 演示图改 _preview_data.json 的 imageOverrides 映射（文章封面等 mock 数据），
+     * 仅预览渲染生效，正式环境的图片由数据库文章数据决定。</p>
+     */
+    @PostMapping("sessions/{sessionId}/preview-image")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
+    public RestResult<Boolean> updatePreviewImage(@PathVariable("sessionId") String sessionId,
+                                                  @RequestBody ImagePreviewUpdateRequest request) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        if (request == null) {
+            return RestResultUtils.failed("缺少请求参数");
+        }
+        try {
+            templateGenService.updatePreviewImage(sessionId, request.getImageUrl(), request.getAttachmentId());
+            return RestResultUtils.success(true);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 预览演示图片更新请求体（imageUrl 为模板渲染输出的原样图片地址，作为替换映射 key）
+     */
+    public static class ImagePreviewUpdateRequest {
+        private String imageUrl;
+        private Long attachmentId;
+
+        public String getImageUrl() {
+            return imageUrl;
+        }
+
+        public void setImageUrl(String imageUrl) {
+            this.imageUrl = imageUrl;
+        }
+
+        public Long getAttachmentId() {
+            return attachmentId;
+        }
+
+        public void setAttachmentId(Long attachmentId) {
+            this.attachmentId = attachmentId;
         }
     }
 

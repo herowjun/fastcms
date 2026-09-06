@@ -134,8 +134,170 @@ public class TokenEngine {
         sb.append("  --radius-xl: ").append(round(0.75 * preset.radiusScale())).append("rem;\n");
         sb.append("  --radius-2xl: ").append(round(1.0 * preset.radiusScale())).append("rem;\n");
         sb.append("  --radius-3xl: ").append(round(1.5 * preset.radiusScale())).append("rem;\n");
+        // 间距基准（Tailwind v4 默认 0.25rem）：安全网 calc(var(--spacing)*N) 依赖，
+        // 防御性声明保证个别 pack 未带主题变量时刻度类仍可解析（与 Tailwind 默认同值）
+        sb.append("  --spacing: 0.25rem;\n");
         sb.append("}\n");
+        appendPrimaryUtilityFallback(sb);
         return sb.toString();
+    }
+
+    /**
+     * 主色工具类兜底层：补齐 text/bg/border × 全色阶的基础、hover 变体与 important 变体类
+     *
+     * <p>pack.css 是组件包的预编译静态产物，与组件源码可能不同步——源码里用到的
+     * 裸工具类（如 {@code text-primary-600}，典型场景：导航选中态）在预编译时
+     * 若未出现就会缺失（只有 hover: 变体），导致该类无颜色规则、样式静默失效
+     * （表现为选中态回退成继承色/黑色）。本层按同一 {@code --color-primary-*}
+     * 变量补齐常用类：与 pack.css 已有类重复定义同值无害，缺失类即被兜底；
+     * 亦覆盖 AI 微调补丁（filePatches）新引入的主色类。</p>
+     *
+     * <p>覆盖三种形态：基础类（{@code .text-primary-600}）、hover 变体
+     * （{@code .hover\:text-primary-600:hover}，包 {@code @media (hover:hover)}
+     * 与触屏设备口径一致）、important 前缀变体（{@code .\!text-primary-600}，
+     * Tailwind v4 语法，AI 补丁高频使用——用于压制同元素上其他颜色类）。
+     * 复杂渐变类（from-/to-/via-）依赖 Tailwind 运行时 @property，不做兜底。</p>
+     *
+     * <p>附带补齐 {@code .font-normal}（font-weight:400）：pack.css 预编译按需生成，
+     * 组件源码未用过即缺失，而「选中态去加粗」是 AI 补丁高频需求。</p>
+     */
+    private static void appendPrimaryUtilityFallback(StringBuilder sb) {
+        sb.append("\n/* 主色工具类兜底层：pack.css 预编译缺的常用主色类在此补齐（同变量同值，\n");
+        sb.append(" * 与 pack.css 重复定义无害；AI 样式补丁新引入的主色类同样被覆盖） */\n");
+        for (String prefix : List.of("text", "bg", "border")) {
+            String cssProp = switch (prefix) {
+                case "text" -> "color";
+                case "bg" -> "background-color";
+                default -> "border-color";
+            };
+            for (String shade : SHADES) {
+                sb.append(".").append(prefix).append("-primary-").append(shade)
+                        .append(" { ").append(cssProp)
+                        .append(": var(--color-primary-").append(shade).append("); }\n");
+            }
+        }
+        sb.append("@media (hover: hover) {\n");
+        for (String prefix : List.of("text", "bg", "border")) {
+            String cssProp = switch (prefix) {
+                case "text" -> "color";
+                case "bg" -> "background-color";
+                default -> "border-color";
+            };
+            for (String shade : SHADES) {
+                sb.append("  .hover\\:").append(prefix).append("-primary-").append(shade)
+                        .append(":hover { ").append(cssProp)
+                        .append(": var(--color-primary-").append(shade).append("); }\n");
+            }
+        }
+        sb.append("}\n");
+        // important 前缀变体（Tailwind v4 语法 !text-primary-600，CSS 选择器转义为 .\!text-primary-600）
+        for (String prefix : List.of("text", "bg", "border")) {
+            String cssProp = switch (prefix) {
+                case "text" -> "color";
+                case "bg" -> "background-color";
+                default -> "border-color";
+            };
+            for (String shade : SHADES) {
+                sb.append(".\\!").append(prefix).append("-primary-").append(shade)
+                        .append(" { ").append(cssProp)
+                        .append(": var(--color-primary-").append(shade).append(") !important; }\n");
+            }
+        }
+        appendUtilitySafetyNet(sb);
+    }
+
+    /**
+     * 通用工具类安全网：标准 Tailwind 刻度的间距/宽高/gap、字号、字重、圆角类兜底
+     *
+     * <p>与主色兜底同理的系统性补丁：pack.css 按需预编译，AI 样式补丁引入的
+     * <b>任何</b>新数值类（典型：用户要求调高度/间距/字号/圆角，AI 输出
+     * {@code py-4}、{@code mt-6}、{@code h-20}、{@code text-xl} 等）都可能
+     * 未被编译而静默失效。本层按 Tailwind v4 同款公式
+     * （{@code calc(var(--spacing) * N)}）补齐标准刻度：</p>
+     * <ul>
+     *     <li>间距/宽高：p/px/py/pt/pb/pl/pr、m/mx/my/mt/mb/ml/mr、gap、w/h
+     *         × 刻度 0~12、14、16、20、24、28、32、40、48、56、64</li>
+     *     <li>字号：text-xs ~ text-9xl（仅 font-size；pack 已有类自带行高，重复定义同值不冲突）</li>
+     *     <li>字重：font-thin ~ font-black</li>
+     *     <li>圆角：rounded-none/xs/sm/md/lg/xl/2xl/3xl/full（sm~3xl 走主题变量，随风格预设缩放）</li>
+     * </ul>
+     *
+     * <p>全部类同时输出 {@code !} important 前缀变体（AI 补丁高频用法，
+     * 用于压制同元素已有类）。仅覆盖标准刻度——任意值语法
+     * （{@code py-[13px]}、{@code bg-[#ff0000]}）无法预生成，
+     * 由提示词约束禁止。</p>
+     */
+    private static void appendUtilitySafetyNet(StringBuilder sb) {
+        sb.append("\n/* 通用工具类安全网：标准 Tailwind 刻度兜底（pack.css 预编译缺的数值类在此补齐，\n");
+        sb.append(" * 重复定义同值无害；AI 样式补丁新引入的标准刻度类同样被覆盖。\n");
+        sb.append(" * 不含任意值语法（py-[13px] 等），该语法由提示词约束禁止） */\n");
+
+        // 间距/宽高/gap × 标准刻度，calc(var(--spacing)*N) 与 Tailwind v4 产物同式
+        String[][] sizeFamilies = {
+                {"p", "padding"}, {"px", "padding-inline"}, {"py", "padding-block"},
+                {"pt", "padding-top"}, {"pb", "padding-bottom"}, {"pl", "padding-left"}, {"pr", "padding-right"},
+                {"m", "margin"}, {"mx", "margin-inline"}, {"my", "margin-block"},
+                {"mt", "margin-top"}, {"mb", "margin-bottom"}, {"ml", "margin-left"}, {"mr", "margin-right"},
+                {"gap", "gap"}, {"w", "width"}, {"h", "height"}
+        };
+        int[] steps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64};
+        for (String[] fam : sizeFamilies) {
+            for (int step : steps) {
+                String val = "calc(var(--spacing) * " + step + ")";
+                sb.append(".").append(fam[0]).append("-").append(step)
+                        .append(" { ").append(fam[1]).append(": ").append(val).append("; }\n");
+                sb.append(".\\!").append(fam[0]).append("-").append(step)
+                        .append(" { ").append(fam[1]).append(": ").append(val).append(" !important; }\n");
+            }
+        }
+        // 常用特殊值（pack 通常已有，重复定义同值无害）
+        appendScaleRule(sb, "w-full", "width", "100%");
+        appendScaleRule(sb, "w-screen", "width", "100vw");
+        appendScaleRule(sb, "w-auto", "width", "auto");
+        appendScaleRule(sb, "h-full", "height", "100%");
+        appendScaleRule(sb, "h-screen", "height", "100vh");
+        appendScaleRule(sb, "h-auto", "height", "auto");
+        appendScaleRule(sb, "min-h-screen", "min-height", "100vh");
+
+        // 字号（Tailwind v4 默认刻度；仅 font-size，行高由 pack 已有类或继承决定）
+        String[][] fontSizes = {
+                {"text-xs", ".75rem"}, {"text-sm", ".875rem"}, {"text-base", "1rem"},
+                {"text-lg", "1.125rem"}, {"text-xl", "1.25rem"}, {"text-2xl", "1.5rem"},
+                {"text-3xl", "1.875rem"}, {"text-4xl", "2.25rem"}, {"text-5xl", "3rem"},
+                {"text-6xl", "3.75rem"}, {"text-7xl", "4.5rem"}, {"text-8xl", "6rem"}, {"text-9xl", "8rem"}
+        };
+        for (String[] fs : fontSizes) {
+            appendScaleRule(sb, fs[0], "font-size", fs[1]);
+        }
+
+        // 字重
+        String[][] fontWeights = {
+                {"font-thin", "100"}, {"font-extralight", "200"}, {"font-light", "300"},
+                {"font-normal", "400"}, {"font-medium", "500"}, {"font-semibold", "600"},
+                {"font-bold", "700"}, {"font-extrabold", "800"}, {"font-black", "900"}
+        };
+        for (String[] fw : fontWeights) {
+            appendScaleRule(sb, fw[0], "font-weight", fw[1]);
+        }
+
+        // 圆角（sm~3xl 走主题变量，随风格预设缩放）
+        String[][] radii = {
+                {"rounded-none", "0"}, {"rounded-xs", "0.125rem"}, {"rounded-sm", "var(--radius-sm)"},
+                {"rounded-md", "var(--radius-md)"}, {"rounded-lg", "var(--radius-lg)"},
+                {"rounded-xl", "var(--radius-xl)"}, {"rounded-2xl", "var(--radius-2xl)"},
+                {"rounded-3xl", "var(--radius-3xl)"}, {"rounded-full", "9999px"}
+        };
+        for (String[] r : radii) {
+            appendScaleRule(sb, r[0], "border-radius", r[1]);
+        }
+    }
+
+    /**
+     * 输出单条安全网规则（基础 + {@code !}important 前缀变体）
+     */
+    private static void appendScaleRule(StringBuilder sb, String cls, String prop, String value) {
+        sb.append(".").append(cls).append(" { ").append(prop).append(": ").append(value).append("; }\n");
+        sb.append(".\\!").append(cls).append(" { ").append(prop).append(": ").append(value).append(" !important; }\n");
     }
 
     /**

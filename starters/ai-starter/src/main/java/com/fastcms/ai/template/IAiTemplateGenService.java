@@ -101,9 +101,13 @@ public interface IAiTemplateGenService {
      * @param sessionId 会话 ID
      * @param userInput 用户输入（微调需求）
      * @param currentFile 用户当前正在编辑/预览的文件（可空；调整型会话注入提示词，让 AI 聚焦当前页面）
+     * @param focusSectionId 预览页点选的目标区块 sectionId（可空；组件化会话微调时注入该 section 的
+     *                       spec 片段，AI 只修改该区块，其他 section 原样保留）
+     * @param focusElementHint 用户点选区块时命中的具体元素描述（可空；元素级语义提示）
      * @param emitter   SSE emitter
      */
-    void chatStream(String sessionId, String userInput, String currentFile, SseEmitter emitter);
+    void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
+                    String focusElementHint, SseEmitter emitter);
 
     /**
      * 将会话工作目录的模板文件应用到 fastcms 正式模板目录
@@ -119,9 +123,18 @@ public interface IAiTemplateGenService {
      * <p>调整型会话（绑定正式模板）不支持应用——其 AI 输出已直接写入正式模板目录。</p>
      *
      * @param sessionId 会话 ID
-     * @return 应用结果描述
+     * @return 应用结果（含成功消息与应用后的正式模板 ID，前端据此无缝切换到正式模板编辑）
      */
-    String applyTemplate(String sessionId);
+    ApplyResult applyTemplate(String sessionId);
+
+    /**
+     * 模板应用结果
+     *
+     * @param message    应用结果描述（展示给用户）
+     * @param templateId 应用后正式模板的 ID（按模板目录名从模板注册表匹配；匹配不到时为 null）
+     */
+    record ApplyResult(String message, String templateId) {
+    }
 
     /**
      * 回滚最近一轮 AI 修改（仅调整型会话支持）
@@ -157,5 +170,73 @@ public interface IAiTemplateGenService {
      * @return 升级结果描述（文件数、备份位置）
      */
     String upgradeLegacyTemplate(String sessionId);
+
+    /**
+     * 更新图片槽位（AI 调整页点选图片换图，不经 AI 对话）
+     *
+     * <p>流程：读 _pagespec.json → 定位 section 槽位 → 替换为附件库图片 URL →
+     * 更新 imageAssets 解析记录 → 校验 → 重渲染 → 持久化产物。
+     * 调整型会话直写正式模板目录（与对话微调一致）。</p>
+     *
+     * @param sessionId    会话 ID
+     * @param sectionId    section ID（data-ai-section 标记回传）
+     * @param slot         槽位名（data-ai-slot 标记回传，须为 media 类型槽位）
+     * @param attachmentId 附件库图片 ID（URL 由服务端解析，前端不传地址）
+     * @return 本次写出的模板内相对路径清单（前端据此刷新预览）
+     */
+    java.util.List<String> updateImageSlot(String sessionId, String sectionId, String slot, Long attachmentId);
+
+    /**
+     * 更新预览演示图片（预览页点选无槽位标记的 mock 图片换图，不经 AI 对话）
+     *
+     * <p>与 {@link #updateImageSlot} 的区别：前者改 _pagespec.json（模板资产图，模板正式生效），
+     * 本方法改 _preview_data.json 的 imageOverrides 映射（mock 演示图，如文章封面）——
+     * 仅预览渲染生效，正式环境的图片由数据库数据决定。</p>
+     *
+     * <p>流程：附件解析 URL → workDir 下读写 _preview_data.json（保留既有字段）→
+     * imageOverrides[imageUrl] = 附件 URL 写回。预览渲染每次现读该文件，无需重渲染。</p>
+     *
+     * @param sessionId    会话 ID
+     * @param imageUrl     原图片 URL（模板渲染输出的原样值，作为映射 key；含内联 SVG data URI）
+     * @param attachmentId 附件库图片 ID
+     */
+    void updatePreviewImage(String sessionId, String imageUrl, Long attachmentId);
+
+    // ==================== 会话工作目录文件编辑（生成型会话，应用前的手工打磨） ====================
+
+    /**
+     * 生成型会话工作目录的文件树（复用正式模板的树构建规则，filePath 以模板目录名开头）
+     *
+     * <p>已应用（applied）会话同样可读——应用后仍可回看文件结构。</p>
+     */
+    List<com.fastcms.core.template.TemplateService.FileTreeNode> getSessionFileTree(String sessionId);
+
+    /**
+     * 读取会话工作目录的文本文件内容
+     *
+     * @param filePath 文件路径（以模板目录名开头，与文件树返回值一致）
+     */
+    String getSessionFile(String sessionId, String filePath);
+
+    /**
+     * 保存（或新建）会话工作目录的文本文件
+     *
+     * <p>仅生成型会话且未应用时可写；应用后的会话目录只读（改动应走正式模板编辑）。</p>
+     */
+    void saveSessionFile(String sessionId, String filePath, String fileContent);
+
+    /**
+     * 删除会话工作目录的文件（仅生成型会话且未应用时）
+     */
+    void deleteSessionFile(String sessionId, String filePath);
+
+    /**
+     * 上传文件到会话工作目录指定子目录
+     *
+     * @param dirName 目标目录（以模板目录名开头，与文件树路径约定一致）
+     * @param files   上传的文件
+     * @return 写入的文件相对路径清单
+     */
+    List<String> uploadSessionFiles(String sessionId, String dirName, org.springframework.web.multipart.MultipartFile[] files);
 
 }

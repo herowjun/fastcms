@@ -31,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * PageSpec 渲染引擎：spec → 自包含的 fastcms 模板目录
@@ -99,6 +100,16 @@ public class PageSpecRenderer {
      * 共享组件源码目录（模板内相对路径）
      */
     private static final String COMPONENTS_DIR = "_components";
+
+    /**
+     * 组件覆盖目录：AI 微调的 filePatches 落盘处，渲染时优先于组件包原版
+     */
+    public static final String COMPONENT_OVERRIDES_DIR = "_component_overrides";
+
+    /**
+     * media 槽位模板内引用前缀（附件库搜图/演示图解析产物，见 {@link AttachmentImageSearcher}）
+     */
+    private static final String TEMPLATE_INTERNAL_PREFIX = "static/";
 
     private final ComponentRegistry registry;
 
@@ -334,9 +345,105 @@ public class PageSpecRenderer {
         if (!writtenRels.add(rel)) {
             return;
         }
-        String source = componentSource(section);
+        // 组件覆盖优先：AI 微调输出的 filePatches 落在 _component_overrides/ 下，
+        // 存在则直接使用（覆盖版基于已注入标记的工作目录版本修改，标记天然保留，
+        // 不再重复注入）；不存在走组件包原版 + 标记注入。重渲染因此不会冲掉补丁。
+        Path override = dir.getParent().resolve(COMPONENT_OVERRIDES_DIR).resolve(fileName);
+        String source;
+        if (Files.isRegularFile(override)) {
+            source = Files.readString(override, StandardCharsets.UTF_8);
+        } else {
+            source = injectMediaSlotMarkers(componentSource(section), mediaSlotNames(section));
+            source = injectSectionRootMarker(source);
+        }
         Files.writeString(dir.resolve(fileName), source, StandardCharsets.UTF_8);
         written.add(rel);
+    }
+
+    /**
+     * 首个 HTML 元素开标签匹配（注入区块根标记用）：
+     * 标签名以字母开头，天然跳过 FreeMarker 指令（{@code <#...>}/{@code <@...>}）与闭标签
+     */
+    private static final java.util.regex.Pattern ROOT_TAG_PATTERN =
+            java.util.regex.Pattern.compile("<([a-zA-Z][a-zA-Z0-9-]*)");
+
+    /**
+     * FreeMarker 注释与 HTML 注释区间（标记注入时跳过：注释内的标签不会渲染）
+     */
+    private static final java.util.regex.Pattern COMMENT_PATTERN =
+            java.util.regex.Pattern.compile("<#--[\\s\\S]*?-->|<!--[\\s\\S]*?-->", java.util.regex.Pattern.DOTALL);
+
+    /**
+     * 组件根元素注入 data-ai-section-root 标记：选区修改模式据此定位区块边界
+     *
+     * <p>只在首个 HTML 元素开标签的标签名后追加属性，不改变 DOM 结构与布局
+     * （不用 wrapper div，避免影响组件 CSS 的直接子元素选择器）。
+     * 组件含多个根元素时仅首根带标记；媒体槽位 img 另有 data-ai-section/data-ai-slot
+     * 标记，选区点击兜底同样可用。section id 来自 include 处的 {@code _aiSection} assign。</p>
+     */
+    private String injectSectionRootMarker(String source) {
+        // 注释区间内的标签不渲染，注入前先圈出来
+        List<int[]> commentSpans = new ArrayList<>();
+        java.util.regex.Matcher commentMatcher = COMMENT_PATTERN.matcher(source);
+        while (commentMatcher.find()) {
+            commentSpans.add(new int[]{commentMatcher.start(), commentMatcher.end()});
+        }
+        java.util.regex.Matcher matcher = ROOT_TAG_PATTERN.matcher(source);
+        while (matcher.find()) {
+            int start = matcher.start();
+            boolean inComment = commentSpans.stream().anyMatch(span -> start >= span[0] && start < span[1]);
+            if (inComment) {
+                continue;
+            }
+            String tag = matcher.group();
+            String replacement = tag + " data-ai-section-root=\"${(_aiSection)!''}\"";
+            return source.substring(0, start) + replacement + source.substring(matcher.end());
+        }
+        return source;
+    }
+
+    /**
+     * img 标签匹配（注入 data-ai-slot 标记用；{@code [^>]*} 覆盖跨行属性）
+     */
+    private static final java.util.regex.Pattern IMG_TAG_PATTERN =
+            java.util.regex.Pattern.compile("<img\\b[^>]*>");
+
+    /**
+     * 组件源码中引用 media 槽位的 img 标签注入 data-ai-slot/data-ai-section 标记：
+     * {@code <img src="${comp.image}">} → 追加 {@code data-ai-slot="image" data-ai-section="${(_aiSection)!''}"}。
+     * AI 调整页点选图片（S4-2）据此定位槽位（section id 来自 include 处的 {@code _aiSection} assign），
+     * 对内置与插件组件统一生效；引用 CMS 动态数据（item.thumbnail 等）的 img 不受影响
+     */
+    private String injectMediaSlotMarkers(String source, Set<String> mediaSlots) {
+        if (mediaSlots.isEmpty()) {
+            return source;
+        }
+        java.util.regex.Matcher matcher = IMG_TAG_PATTERN.matcher(source);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            String tag = matcher.group();
+            String slot = mediaSlotReferenced(tag, mediaSlots);
+            if (slot != null && !tag.contains("data-ai-slot")) {
+                String closing = tag.endsWith("/>") ? "/>" : ">";
+                String marker = " data-ai-slot=\"" + slot + "\" data-ai-section=\"${(_aiSection)!''}\"";
+                tag = tag.substring(0, tag.length() - closing.length()) + marker + closing;
+            }
+            matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(tag));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    /**
+     * img 标签引用的 media 槽位名（src/样式取自 {@code comp.<slot>}），无匹配返回 null
+     */
+    private String mediaSlotReferenced(String imgTag, Set<String> mediaSlots) {
+        for (String slot : mediaSlots) {
+            if (imgTag.contains("comp." + slot)) {
+                return slot;
+            }
+        }
+        return null;
     }
 
     /**
@@ -348,13 +455,60 @@ public class PageSpecRenderer {
 
     /**
      * section 引用（布局与页面统一）：槽位数据 assign（留在引用处，支持每页差异化）+ include 共享源码
+     *
+     * <p>点选支持（S4/S6）：无条件注入 {@code <#assign _aiSection>}，
+     * 配合组件源码中 {@link #injectMediaSlotMarkers} 注入的 data-ai-slot/data-ai-section 标记
+     * （换图定位槽位）与 {@link #injectSectionRootMarker} 注入的 data-ai-section-root 标记
+     * （选区修改定位区块），预览页点选即可定位 section</p>
      */
     private String renderSection(SectionSpec section) {
         StringBuilder sb = new StringBuilder();
-        sb.append("<#assign comp = ").append(toFtlLiteral(section.safeData())).append(">\n");
+        sb.append("<#assign comp = ").append(toFtlLiteral(adaptMediaRefs(section))).append(">\n");
+        sb.append("<#assign _aiSection = ").append(toFtlLiteral(section.id())).append(">\n");
         sb.append("<#include \"").append(COMPONENTS_DIR).append("/")
                 .append(componentFileName(section)).append("\">\n");
         return sb.toString();
+    }
+
+    /**
+     * media 槽位的模板内图片引用（{@code static/} 前缀，附件库搜图/演示图解析产物）→ ctx() 表达式：
+     * {@code static/images/demo-nature.svg} → {@code ctx() + "/images/demo-nature.svg"}。
+     * 预览与生产环境的 ctx() 分别指向会话静态分支与模板静态目录，同一模板文件两环境通用；
+     * 站内绝对路径（/attachment/...）与完整 URL 原样保留
+     */
+    private Map<String, Object> adaptMediaRefs(SectionSpec section) {
+        Set<String> mediaSlots = mediaSlotNames(section);
+        if (mediaSlots.isEmpty()) {
+            return section.safeData();
+        }
+        Map<String, Object> copy = new LinkedHashMap<>(section.safeData());
+        boolean adapted = false;
+        for (String slot : mediaSlots) {
+            Object value = copy.get(slot);
+            if (value instanceof String s && s.startsWith(TEMPLATE_INTERNAL_PREFIX)) {
+                copy.put(slot, new FtlExpression("ctx() + \"/"
+                        + s.substring(TEMPLATE_INTERNAL_PREFIX.length()) + "\""));
+                adapted = true;
+            }
+        }
+        return adapted ? copy : section.safeData();
+    }
+
+    /**
+     * media 类型槽位名集合（组件不在注册表时返回空集，校验器已拦截）
+     */
+    private Set<String> mediaSlotNames(SectionSpec section) {
+        return registry.find(section.component())
+                .map(rc -> {
+                    Set<String> names = new LinkedHashSet<>();
+                    for (ComponentSlot slot : rc.descriptor().safeSlots()) {
+                        if ("media".equals(slot.type())) {
+                            names.add(slot.name());
+                        }
+                    }
+                    return names;
+                })
+                .orElse(Set.of());
     }
 
     /**
@@ -671,10 +825,50 @@ public class PageSpecRenderer {
             }
         }
 
+        // 用户在预览页点选换图产生的替换映射（imageOverrides）不属于 spec 派生数据，
+        // 重渲染时从既有文件原样保留（否则每次 AI 调整都会丢失用户换过的演示图）
+        carryOverImageOverrides(root, targetDir);
+
         StringWriter sw = new StringWriter();
         MAPPER.writerWithDefaultPrettyPrinter().writeValue(sw, root);
         Files.writeString(targetDir.resolve("_preview_data.json"), sw.toString() + "\n", StandardCharsets.UTF_8);
         written.add("_preview_data.json");
+    }
+
+    /**
+     * 从目录中既有的 _preview_data.json 提取 imageOverrides 并并入待写入数据
+     *
+     * <p>key/value 均须为非空字符串；既有文件缺失或非法时静默跳过（等同无保留项）。</p>
+     */
+    private void carryOverImageOverrides(Map<String, Object> root, Path targetDir) {
+        Path existing = targetDir.resolve("_preview_data.json");
+        if (!Files.isRegularFile(existing)) {
+            return;
+        }
+        try {
+            tools.jackson.databind.JsonNode node = MAPPER.readTree(Files.readString(existing, StandardCharsets.UTF_8));
+            if (node == null || !node.isObject()) {
+                return;
+            }
+            tools.jackson.databind.JsonNode overrides = node.get("imageOverrides");
+            if (overrides == null || !overrides.isObject() || overrides.isEmpty()) {
+                return;
+            }
+            Map<String, String> carry = new LinkedHashMap<>();
+            overrides.properties().forEach(entry -> {
+                tools.jackson.databind.JsonNode value = entry.getValue();
+                String key = entry.getKey() == null ? "" : entry.getKey().trim();
+                if (value != null && value.isTextual() && !key.isEmpty() && !value.asString().trim().isEmpty()) {
+                    carry.put(key, value.asString().trim());
+                }
+            });
+            if (!carry.isEmpty()) {
+                root.put("imageOverrides", carry);
+            }
+        } catch (Exception e) {
+            // 保留失败不阻断渲染（既有文件非法时以本轮渲染产物为准）
+            log.debug("保留 imageOverrides 失败，忽略: {}", existing, e);
+        }
     }
 
     private Map<String, Object> navItemJson(SiteContentSpec.NavItem item) {
@@ -739,6 +933,13 @@ public class PageSpecRenderer {
     }
 
     /**
+     * FTL 原生表达式包装（media 槽位模板内图片引用 → ctx() 表达式，见 adaptMediaRefs）：
+     * 字面量序列化时原样输出表达式而非字符串
+     */
+    record FtlExpression(String expression) {
+    }
+
+    /**
      * 槽位数据（Jackson 解析出的 POJO）→ FTL 字面量
      *
      * <p>AI 产出的 data 经 _pagespec.json 往返（Map/List/String/Number/Boolean），
@@ -747,6 +948,9 @@ public class PageSpecRenderer {
     static String toFtlLiteral(Object value) {
         if (value == null) {
             return "''";
+        }
+        if (value instanceof FtlExpression expr) {
+            return expr.expression();
         }
         if (value instanceof String s) {
             return "\"" + escapeFtl(s) + "\"";

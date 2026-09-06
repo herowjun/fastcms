@@ -21,11 +21,12 @@
 				<el-table-column prop="version" label="版本" show-overflow-tooltip></el-table-column>
 				<el-table-column prop="provider" label="作者" show-overflow-tooltip></el-table-column>
 				<el-table-column prop="description" label="描述" show-overflow-tooltip></el-table-column>
-				<el-table-column label="操作" width="160">
+				<el-table-column label="操作" width="200">
 					<template #default="scope">
 						<el-tag v-if="scope.row.active == true" type="success">使用中</el-tag>
 						<el-button v-if="scope.row.active == false" size="small" text type="primary" @click="onRowEnable(scope.row)">启用</el-button>
 						<el-button v-if="scope.row.active == false" size="small" text type="primary" @click="onRowUnInstall(scope.row)">卸载</el-button>
+						<el-button size="small" text type="primary" @click="onRowPreview(scope.row)">浏览</el-button>
 					</template>
 				</el-table-column>
 			</el-table>
@@ -86,8 +87,19 @@ const onRowEnable = (row: object) => {
 		})
 	})
 	.catch(() => {
-		
+
 	});
+}
+
+// 浏览模板：新标签页打开真实站点首页（真实数据渲染，非 mock 预览）
+// 使用中的模板打开正式站点首页 /；
+// 未启用的模板打开 /{模板path}/（如 /test001/），后端用该模板+真实数据渲染，启用前可评估真实效果
+const onRowPreview = (row: any) => {
+	if (row.active == true) {
+		window.open('/', '_blank');
+	} else {
+		window.open(row.path, '_blank');
+	}
 }
 
 const uploadSuccess = (res :any) => {

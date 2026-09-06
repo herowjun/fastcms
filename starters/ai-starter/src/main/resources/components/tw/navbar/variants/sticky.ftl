@@ -1,9 +1,9 @@
 <#-- 导航栏 / sticky 变体：品牌名 + CMS 菜单，吸顶悬浮
-     菜单高亮：正式环境由框架注入 request 变量，按 requestURI 前缀匹配输出 active（方案A）；
-     预览环境无 request，兜底不高亮（不报错）。
+     菜单高亮：正式环境由框架注入 request 变量，预览环境由预览渲染器注入 mock request
+     （requestURI = 预览页地址），两端统一按 requestURI 前缀匹配输出 active。
      移动端适配：读取布局注入的 (mobileAdaptive!true)，开启时输出汉堡菜单 + 竖向展开菜单。 -->
 <#assign cp = (request.contextPath)!''>
-<#assign currentUri = cp + ((request.requestURI)!'')>
+<#assign currentUri = cp + ((request.requestURI)!((request.url)!))>
 <#-- 菜单项是否选中：URL 前缀匹配（子页面命中时父级菜单同样高亮） -->
 <#function navIsActive url>
   <#if !(url??) || url == '' || url == '#' || url == '/' || !(currentUri??) || currentUri == ''>
@@ -11,9 +11,15 @@
   </#if>
   <#return currentUri?starts_with(url)>
 </#function>
-<#-- 首页是否选中（URI 等于根路径才算，避免 starts_with('/') 恒真） -->
+<#-- 首页是否选中：URI 等于根路径（生产）或以 /index.html 结尾（预览）才算，
+     避免 starts_with('/') 恒真 -->
 <#function navIsHome>
-  <#return currentUri == (cp + '/') || currentUri == cp>
+  <#return currentUri == (cp + '/') || currentUri == cp || currentUri?ends_with('/index.html')>
+</#function>
+<#-- 菜单项渲染条件：CMS 菜单数据中常含"首页"（url=/），与本组件硬编码的首页链接重复，跳过 -->
+<#function navShowItem item>
+  <#local u = (item.url!'')>
+  <#return item.menuName?? && item.menuName?has_content && u != '' && u != '/'>
 </#function>
 <#assign mobile = (mobileAdaptive!true)>
 <section class="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur">
@@ -39,7 +45,7 @@
         <@menuTag>
           <#if data??>
             <#list data as item>
-              <#if item.menuName?? && item.menuName?has_content>
+              <#if navShowItem(item)>
                 <li>
                   <a href="${item.url!''}" target="${item.target!'_self'}"
                      class="text-sm transition-colors hover:text-primary-600<#if navIsActive(item.url!'')> text-primary-600 font-semibold<#else> text-slate-600</#if>">${item.menuName}</a>
@@ -60,7 +66,7 @@
         <@menuTag>
           <#if data??>
             <#list data as item>
-              <#if item.menuName?? && item.menuName?has_content>
+              <#if navShowItem(item)>
                 <li>
                   <a href="${item.url!''}" target="${item.target!'_self'}"
                      class="block border-t border-slate-100 px-4 py-3 text-sm<#if navIsActive(item.url!'')> text-primary-600 font-semibold<#else> text-slate-700</#if>">${item.menuName}</a>

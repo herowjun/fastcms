@@ -286,15 +286,35 @@ private void validateTheme(PageSpec spec, List<String> errors) {
                                SectionSpec section, List<String> errors) {
         List<String> missing = new ArrayList<>();
         for (ComponentSlot slot : descriptor.safeSlots()) {
-            if (slot.isRequired()) {
-                Object value = section.safeData().get(slot.name());
-                if (value == null || (value instanceof String s && s.isBlank())) {
-                    missing.add(slot.name());
-                }
+            Object value = section.safeData().get(slot.name());
+            if (slot.isRequired()
+                    && (value == null || (value instanceof String s && s.isBlank()))) {
+                missing.add(slot.name());
             }
+            validateMediaSlotValue(location, fullId, slot, value, errors);
         }
         if (!missing.isEmpty()) {
             errors.add(location + " 组件 " + fullId + " 缺少必填槽位: " + String.join(", ", missing));
+        }
+    }
+
+    /**
+     * media 槽位值协议校验（PageSpec 1.2）：search:关键词 / 图片 URL / 空，其余视为非法
+     */
+    private void validateMediaSlotValue(String location, String fullId, ComponentSlot slot,
+                                        Object value, List<String> errors) {
+        if (!"media".equals(slot.type()) || !(value instanceof String s) || s.isBlank()) {
+            return;
+        }
+        if (ImageAssetSpec.isSearchRef(s)) {
+            if (ImageAssetSpec.searchKeyword(s) == null) {
+                errors.add(location + " 槽位 " + slot.name() + " 的 search: 后缺少关键词（如 \"search:产品主图\"）");
+            }
+            return;
+        }
+        if (!ImageAssetSpec.isDirectRef(s)) {
+            errors.add(location + " 槽位 " + slot.name() + " 值非法: " + s
+                    + "（media 槽位应填 search:关键词 或 图片URL，不要编造地址）");
         }
     }
 

@@ -19,6 +19,7 @@ package com.fastcms.ai.template;
 import com.fastcms.ai.component.ComponentRegistry;
 import com.fastcms.ai.component.TokenEngine;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * AI 组件化生成提示词构建器：让 AI 输出 PageSpec（结构规划），而非直写 HTML
@@ -71,7 +72,7 @@ public class ComponentGenPromptBuilder {
 
                 ```json
                 {
-                  "specVersion": "1.1",
+                  "specVersion": "1.2",
                   "foundation": "%s",
                   "templateName": "模板目录名（英文小写，用户需求给出则沿用）",
                   "siteName": "站点名称（中文，4~10 字）",
@@ -88,7 +89,7 @@ public class ComponentGenPromptBuilder {
                     "articles": [ { "title": "文章标题", "summary": "文章摘要" } ]
                   },
                   "pages": {
-                    "index": { "sections": [ { "id": "hero", "component": "组件全名", "variant": "变体", "data": { 槽位: 值 } } ] },
+                    "index": { "sections": [ { "id": "hero", "component": "组件全名", "variant": "变体", "data": { "title": "槽位值", "image": "search:产品主图 生态农场" } } ] },
                     "article_list": { "sections": [ ... ] },
                     "article": { "sections": [ ... ] },
                     "page": { "sections": [ ... ] },
@@ -96,6 +97,16 @@ public class ComponentGenPromptBuilder {
                   }
                 }
                 ```
+
+                # 图片槽位协议（type=media 的槽位统一遵守）
+
+                配图由系统装配，你不写任何图片地址：
+                - 值填 "search:搜索关键词"（如 "search:散养土鸡 生态农场"）：系统自动从附件库搜索匹配图片，
+                  附件库无合适图片时自动使用演示图。关键词用贴合站点主题的中文短语（产品/场景/氛围），2~8 个词
+                - 用户需求中明确提供了图片地址时，直接填该 URL（http(s):// 或 / 开头）
+                - 不需要配图时留空（组件自带占位设计）
+                - 严禁编造 unsplash / picsum 等占位图站 URL 或任何虚假地址
+                - spec 顶层的 imageAssets 字段是系统的图片解析记录，你不要输出它
 
                 # 信息架构规划（site 段，你的第一职责，必须完成）
 
@@ -160,9 +171,11 @@ public class ComponentGenPromptBuilder {
                 ```json
                 {
                   "reply": "给用户看的中文回复：简述你的设计思路（主色与风格选择理由、页面结构编排），100 字以内",
-                  "pagespec": { ...完整 PageSpec JSON... }
+                  "pagespec": { ...完整 PageSpec JSON... },
+                  "filePatches": [ { "path": "_components/组件文件名.ftl", "search": "组件源码原文精确片段", "replace": "替换后片段" } ]
                 }
                 ```
+                filePatches 为可选字段（仅在用户提示词给出组件源码且需求属组件源码级样式时输出），无补丁时省略。
 
                 # 行为准则
 
@@ -206,29 +219,147 @@ public class ComponentGenPromptBuilder {
                 + "4. 再编排 pages（全部页面精心设计，不是只有首页）：\n"
                 + "   index 页 4~6 个 section（含导航与页脚）；每个内容页用「栏目横幅 → tw:content-body →\n"
                 + "   补充组件（常见问题/转化区等）」范式，各页面选不同组件与文案，体现页面差异化\n"
-                + "5. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
-                + "6. 请全程使用中文思考和回复\n";
+                + "5. 图片槽位（type=media）按「图片槽位协议」填 search: 搜索关键词，\n"
+                + "   附件库无匹配时系统自动用演示图，不要编造图片 URL\n"
+                + "6. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
+                + "7. 请全程使用中文思考和回复\n";
     }
 
     /**
      * 构建微调用户提示词（组件化会话：基于当前 PageSpec 调整）
      *
      * <p>微调是 PageSpec 往返：输出调整后的完整 PageSpec，系统重渲染。
-     * 换主色/换风格/换组件/改文案都走这条路，一次输出全量生效。</p>
+     * 换主色/换风格/换组件/改文案都走这条路，一次输出全量生效。
+     * spec 表达不了的组件源码级样式（选中态/hover 色、写死的间距圆角等）走 filePatches，
+     * 由 {@code componentSourcesBlock} 注入的组件源码支撑精准 search/replace。</p>
      *
      * @param requirement     用户微调需求
      * @param currentSpecJson 当前生效的完整 PageSpec JSON
+     * @param componentSourcesBlock 组件源码注入块（可为空串：无组件文件时不注入）
      */
-    public String buildRefinePrompt(String requirement, String currentSpecJson) {
-        return "请基于当前 PageSpec 进行调整，输出调整后的完整 PageSpec。\n\n"
+    public String buildRefinePrompt(String requirement, String currentSpecJson, String componentSourcesBlock) {
+        return "请基于当前 PageSpec 进行调整，输出调整后的完整 PageSpec"
+                + (StringUtils.hasText(componentSourcesBlock) ? "（spec 表达不了的可附 filePatches）" : "") + "。\n\n"
                 + "## 微调需求\n\n" + requirement + "\n\n"
                 + "## 当前 PageSpec\n\n```json\n" + currentSpecJson + "\n```\n\n"
+                + componentSourcesBlock
                 + "## 要求\n\n"
                 + "1. 未被需求提及的部分保持原样（包括 site 信息架构与各页 sections，不要擅自「优化」）\n"
                 + "2. 增删 section、换组件/变体、改文案、换主色/风格预设均可\n"
                 + "3. 新增组件同样只能取自组件菜单，必填槽位必须填\n"
-                + "4. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出差异），不要包裹 markdown 代码块\n"
-                + "6. 请全程使用中文思考和回复\n";
+                + "4. 图片槽位：已有图片的槽位值是系统解析后的图片地址，未要求换图时保持原样；\n"
+                + "   需要换图时改填 search:新关键词（按「图片槽位协议」）；spec 中的 imageAssets\n"
+                + "   字段由系统维护，原样保留即可\n"
+                + "5. 需求路由：结构/文案/槽位数据/主色等 spec 能表达的 → 只改 PageSpec；\n"
+                + "   组件源码内写死的样式（如导航选中态颜色与 hover 不一致、选中态加粗黑色、\n"
+                + "   固定圆角间距字号等 spec 无对应槽位）→ 输出 filePatches 直接改组件源码，\n"
+                + "   此时 pagespec 原样带回。两类需求并存时同时输出\n"
+                + "6. filePatches 格式（可选字段）：[{\"path\": \"_components/组件文件名.ftl\",\n"
+                + "   \"search\": \"当前源码中的原文精确片段（须全文唯一）\", \"replace\": \"替换后片段\"}]。\n"
+                + "   search 必须与上方组件源码逐字一致（含空格缩进）；不要删除源码中\n"
+                + "   data-ai-section-root / data-ai-slot 标记（预览点选依赖它们）\n"
+                + "   类名约束：改样式优先复用源码已有的类；可用类还有——主色系\n"
+                + "   text/bg/border-primary-50~900（含 hover:/! 变体）；标准刻度数值类\n"
+                + "   px/py/p/m/gap/w/h-0~64（如 py-4、mt-6、h-20）、text-xs~9xl、\n"
+                + "   font-thin~black、rounded-none~full（以上全站已兜底定义）。\n"
+                + "   禁用任意值语法（py-[13px]、text-[1.1rem]、bg-[#ff0000]）及未列出的\n"
+                + "   自造类名（CSS 未编译，样式会静默失效）\n"
+                + "7. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出差异），不要包裹 markdown 代码块\n"
+                + "8. 请全程使用中文思考和回复\n";
+    }
+
+    /**
+     * 构建选中区块的微调用户提示词（预览页点选区块后聚焦修改）
+     *
+     * <p>与 {@link #buildRefinePrompt} 的区别：明确告知用户点选的目标区块，
+     * 注入该 section 的 spec 片段，并施加「只改该区块、其余逐字保留」的强约束——
+     * 输出仍是完整 PageSpec（渲染引擎只接受全量 spec），但变更范围被限定在目标 section。
+     * 组件源码级样式同样可走 filePatches（目标组件源码在注入块中）。</p>
+     *
+     * @param requirement      用户微调需求（针对选中区块）
+     * @param currentSpecJson  当前生效的完整 PageSpec JSON
+     * @param sectionId        用户点选的区块 ID
+     * @param focusSectionJson 该区块的当前 spec 片段（JSON）
+     * @param elementHint      用户点选区块时命中的具体元素描述（可空；元素级语义提示）
+     * @param componentSourcesBlock 组件源码注入块（可为空串）
+     */
+    public String buildFocusRefinePrompt(String requirement, String currentSpecJson, String sectionId,
+                                         String focusSectionJson, String elementHint, String componentSourcesBlock) {
+        StringBuilder sb = new StringBuilder("用户在预览页面点选了区块「").append(sectionId)
+                .append("」，本轮需求只针对该区块。请调整 PageSpec，输出调整后的完整 PageSpec")
+                .append(StringUtils.hasText(componentSourcesBlock) ? "（spec 表达不了的可附 filePatches）" : "")
+                .append("。\n\n");
+        if (elementHint != null && !elementHint.isBlank()) {
+            sb.append("（用户点选时聚焦的是区块内的：").append(elementHint.trim())
+                    .append("，需求很可能与此元素相关）\n\n");
+        }
+        sb.append("## 微调需求\n\n").append(requirement).append("\n\n")
+                .append("## 选中区块「").append(sectionId).append("」的当前定义\n\n```json\n")
+                .append(focusSectionJson).append("\n```\n\n")
+                .append("## 当前完整 PageSpec\n\n```json\n").append(currentSpecJson).append("\n```\n\n")
+                .append(componentSourcesBlock)
+                .append("## 要求\n\n")
+                .append("1. 只允许修改选中区块「").append(sectionId).append("」（可换组件/变体、改文案、")
+                .append("增删该 section 的槽位数据；若需求实属全站级调整如换主色，可顺带完成，但需在 reply 中说明）\n")
+                .append("2. 除选中区块外，输出的完整 PageSpec 中其余所有内容（site 信息架构、其他页面的")
+                .append("所有 sections、布局结构）必须与当前 PageSpec 逐字保持一致，严禁任何「顺手优化」\n")
+                .append("3. 选中区块调整后仍须遵守组件菜单约束：只能取清单内组件与变体，必填槽位必须填\n")
+                .append("4. 图片槽位：未要求换图时保持原值；需要换图时改填 search:新关键词；")
+                .append("spec 中的 imageAssets 字段由系统维护，原样保留即可\n")
+                .append("5. 需求路由：spec 能表达的（文案/槽位数据/换组件变体）→ 只改 PageSpec；")
+                .append("组件源码内写死的样式（如选中态颜色、hover、固定圆角间距字号）→ 输出 filePatches")
+                .append("改组件源码，pagespec 原样带回。filePatches 格式：[{\"path\": ")
+                .append("\"_components/组件文件名.ftl\", \"search\": \"原文精确片段（须全文唯一）\", ")
+                .append("\"replace\": \"替换后片段\"}]，search 与源码逐字一致（含缩进），")
+                .append("不要删除 data-ai-section-root / data-ai-slot 标记。类名约束：优先复用源码")
+                .append("已有的类；可用 text/bg/border-primary-50~900（含 ! 变体）、标准刻度类 ")
+                .append("px/py/p/m/gap/w/h-0~64、text-xs~9xl、font-thin~black、rounded-none~full")
+                .append("（全站已兜底）；禁用任意值语法（py-[13px] 等）及自造类名（会静默失效）\n")
+                .append("6. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出选中区块），不要包裹 markdown 代码块\n")
+                .append("7. 请全程使用中文思考和回复\n");
+        return sb.toString();
+    }
+
+    /**
+     * 组件源码注入块总字节数上限：超过时只注入文件清单（避免 prompt 膨胀稀释注意力，
+     * 此时模型无源码依据，不宜输出 filePatches，提示用户用选区模式定位）
+     */
+    private static final int COMPONENT_SOURCES_MAX_BYTES = 96 * 1024;
+
+    /**
+     * 构建组件源码注入块（refine 轮：让模型看到组件源码全文，才能输出精准 search/replace）
+     *
+     * <p>焦点模式只注入目标组件的源码（需求只针对该区块，其余组件无关）；
+     * 非焦点模式注入全部组件源码（需求可能指向任意区块）。总量超上限时只列清单。</p>
+     *
+     * @param sources 组件源码列表（path + content），已按调用方策略筛选
+     * @return prompt 注入块（无组件文件时返回空串）
+     */
+    public String buildComponentSourcesBlock(java.util.List<ComponentSource> sources) {
+        if (sources == null || sources.isEmpty()) {
+            return "";
+        }
+        long totalBytes = sources.stream().mapToLong(s -> s.content().length()).sum();
+        StringBuilder sb = new StringBuilder("## 组件源码（filePatches 的 search 须与其逐字一致）\n\n");
+        if (totalBytes > COMPONENT_SOURCES_MAX_BYTES) {
+            sb.append("组件源码总量过大，仅列文件清单：\n");
+            for (ComponentSource s : sources) {
+                sb.append("- ").append(s.path()).append("\n");
+            }
+            sb.append("\n（源码未注入，无法输出可靠 filePatches；组件样式级调整请在预览中点选目标区块后重试）\n\n");
+            return sb.toString();
+        }
+        for (ComponentSource s : sources) {
+            sb.append("### ").append(s.path()).append("\n\n```ftl\n")
+                    .append(s.content()).append("\n```\n\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 组件源码（渲染产物落盘版，含系统注入的点选标记）
+     */
+    public record ComponentSource(String path, String content) {
     }
 
     /**
@@ -243,8 +374,39 @@ public class ComponentGenPromptBuilder {
         }
         sb.append("\n请输出修正后的完整 PageSpec（严格按错误提示修正，其余部分保持原样）。\n")
                 .append("常见错误：组件全名写错（必须与组件菜单完全一致，含包前缀）、")
-                .append("变体名不存在、必填槽位缺失、主色格式非法（需 #RRGGBB）。\n")
+                .append("变体名不存在、必填槽位缺失、主色格式非法（需 #RRGGBB）、")
+                .append("图片槽位值非法（应填 search:关键词 或 图片URL）。\n")
                 .append("严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块。\n");
+        return sb.toString();
+    }
+
+    /**
+     * 构建渲染校验失败的修复提示词（渲染产物 FTL 报错时回喂模型自动修复）
+     *
+     * <p>渲染校验与预览同管线，失败说明页面在预览中也是坏的。错误可能来自：
+     * spec 槽位数据结构不符（如组件期望 sequence 却给了标量）、组件包自身源码缺陷
+     * （FTL 报错指向 _components/ 下的文件，改 spec 修不了源码，只能规避）。
+     * 提示词据此给出两类修复路径。</p>
+     *
+     * @param renderErrors   渲染错误列表（含文件与行号）
+     * @param currentSpecJson 当前生效的完整 PageSpec JSON（已渲染落盘的版本）
+     */
+    public String buildRenderFixPrompt(java.util.List<String> renderErrors, String currentSpecJson) {
+        StringBuilder sb = new StringBuilder("模板已渲染，但渲染校验发现 ")
+                .append(renderErrors.size()).append(" 个页面渲染失败（预览同样会报错），错误如下：\n\n");
+        for (int i = 0; i < renderErrors.size(); i++) {
+            sb.append(i + 1).append(". ").append(renderErrors.get(i)).append("\n");
+        }
+        sb.append("\n## 当前 PageSpec\n\n```json\n").append(currentSpecJson).append("\n```\n\n")
+                .append("请修复导致渲染失败的问题，输出修复后的完整 PageSpec：\n")
+                .append("1. 若报错与槽位数据有关（如期望序列/哈希却给了其他类型），修正对应 section 的槽位数据结构\n")
+                .append("2. 若 FTL 错误指向 _components/ 下的组件源码文件，那是组件包自身的缺陷，")
+                .append("改 spec 修不了源码——两条路任选：a) 规避：将报错页面的该 section 换用清单内的")
+                .append("其他组件或变体，或调整槽位数据让组件可用（如缺少 items 时补充合法数组）；")
+                .append("b) 若报错行是简单语法/逻辑问题（如布尔运算写法），可输出 filePatches ")
+                .append("精准修正该组件源码（格式与微调协议一致）\n")
+                .append("3. 其余未报错的页面与 section 保持原样，不要顺手改动\n")
+                .append("4. 严格按照约定的 JSON 格式输出完整 PageSpec，不要包裹 markdown 代码块\n");
         return sb.toString();
     }
 

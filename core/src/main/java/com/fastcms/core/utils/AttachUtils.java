@@ -277,6 +277,18 @@ public final class AttachUtils {
      * @return
      */
     public static Object upload(MultipartFile[] files, IAttachmentService attachmentService) {
+        return upload(files, attachmentService, null);
+    }
+
+    /**
+     * 上传附件并归档到指定目录
+     *
+     * @param files            待上传文件
+     * @param attachmentService 附件服务
+     * @param directoryId      目录ID（null 或 0 = 未分类）
+     * @return
+     */
+    public static Object upload(MultipartFile[] files, IAttachmentService attachmentService, Long directoryId) {
         if(files == null || files.length <= 0) {
             return RestResultUtils.failed("请选择上传文件");
         }
@@ -311,6 +323,7 @@ public final class AttachUtils {
                 attachment.setFileName(file.getOriginalFilename());
                 attachment.setFilePath(newFilePath.replace("\\", "/"));
                 attachment.setFileType(Attachment.AttachType.getValue(FileUtils.getSuffix(file.getOriginalFilename())));
+                attachment.setDirectoryId(directoryId == null ? 0L : directoryId);
                 attachmentList.add(attachment);
             } catch (IOException e) {
                 e.printStackTrace();

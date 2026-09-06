@@ -93,6 +93,12 @@ public class AiTemplatePreviewController {
             return;
         }
 
+        // 兼容文件树路径约定：会话编辑模式的文件树返回的 filePath 以模板目录名开头（如 mytpl/index.html），
+        // 与 previewTemplate 分支的截取规则保持一致，截掉后再按相对路径解析
+        if (relPath.startsWith(templateName + "/")) {
+            relPath = relPath.substring(templateName.length() + 1);
+        }
+
         servePreview(workDir, PREVIEW_URL_PREFIX + sessionId + "/" + templateName, templateName, relPath, response);
     }
 

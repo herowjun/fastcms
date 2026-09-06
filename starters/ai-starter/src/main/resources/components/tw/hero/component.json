@@ -15,7 +15,7 @@
     { "name": "ctaHref", "type": "string", "required": false, "desc": "主按钮链接，如 /article/category/1" },
     { "name": "ctaSecondaryLabel", "type": "string", "required": false, "maxLength": 12, "desc": "次按钮文案（可空）" },
     { "name": "ctaSecondaryHref", "type": "string", "required": false, "desc": "次按钮链接" },
-    { "name": "image", "type": "media", "required": false, "desc": "配图地址（split 变体使用）" }
+    { "name": "image", "type": "media", "required": false, "desc": "配图（split 变体使用），填 search:关键词 系统自动从附件库匹配，如 search:产品主图 科技感" }
   ],
   "cmsBindings": []
 }
