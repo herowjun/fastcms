@@ -57,13 +57,58 @@ export function AttachApi() {
 
 		/**
 		 * 删除附件
-		 * @param id 
-		 * @returns 
+		 * @param id
+		 * @returns
 		 */
 		delAttach(id: string) {
 			return request({
 				url: '/admin/attachment/delete/'+id,
 				method: 'post'
+			});
+		},
+
+		/**
+		 * 附件目录树（含各目录附件计数）
+		 */
+		getDirTree() {
+			return request({
+				url: '/admin/attachment/dir/tree',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 保存附件目录（新增/重命名）
+		 * @param params {id?, parentId, name, sortNum?}
+		 */
+		saveDir(params: object) {
+			return request({
+				url: '/admin/attachment/dir/save',
+				method: 'post',
+				data: params
+			});
+		},
+
+		/**
+		 * 删除附件目录（附件移回未分类）
+		 * @param id
+		 */
+		delDir(id: string | number) {
+			return request({
+				url: '/admin/attachment/dir/delete/'+id,
+				method: 'post'
+			});
+		},
+
+		/**
+		 * 批量移动附件到目录
+		 * @param params {attachmentIds: number[], directoryId: number}
+		 */
+		moveAttach(params: object) {
+			return request({
+				url: '/admin/attachment/move',
+				method: 'post',
+				data: params
 			});
 		},
 	}

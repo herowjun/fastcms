@@ -1,0 +1,209 @@
+/*! twx 组件包地基 CSS（插件供给）
+ *  与内置包 pack-tw.css 同页共存约定：
+ *  1) 首行预声明层级顺序（与 Tailwind v4 输出一致），无论本文件先载还是后载，
+ *     均不会打乱 properties/theme/base/components/utilities 的级联顺序；
+ *  2) 组件样式全部走自定义 twx-* 类（@layer components），不依赖内置包的工具类集合；
+ *  3) 颜色一律取 CSS 变量并带兜底值：--color-primary-*（tokens.css 按主色覆写）、
+ *     --color-slate-*（内置包主题层）、--radius-*（tokens.css 按风格预设覆写）。
+ */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+
+  /* ==================== 布局基元 ==================== */
+
+  .twx-section { padding-block: 5rem; }
+  .twx-section-alt { background: var(--color-slate-50, #f8fafc); }
+  .twx-container { margin-inline: auto; max-width: 72rem; padding-inline: 1rem; }
+
+  .twx-h2 { color: var(--color-slate-900, #0f172a); font-size: 1.875rem; font-weight: 700; line-height: 1.25; letter-spacing: -0.025em; }
+  .twx-head-center { margin-inline: auto; text-align: center; }
+
+  .twx-grid { display: grid; gap: 2rem; margin-top: 2.5rem; }
+  .twx-cols-2 { grid-template-columns: 1fr; }
+  .twx-cols-3 { grid-template-columns: 1fr; }
+  @media (min-width: 40rem) {
+    .twx-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .twx-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 48rem) {
+    .twx-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+
+  .twx-card {
+    background: var(--color-white, #fff);
+    border: 1px solid var(--color-slate-200, #e2e8f0);
+    border-radius: var(--radius-xl, 0.75rem);
+    padding: 1.5rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .twx-card:hover { border-color: var(--color-primary-300, #93c5fd); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+
+  .twx-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-lg, 0.5rem);
+    font-size: 0.875rem; font-weight: 500; line-height: 1;
+    padding: 0.8rem 2rem; text-decoration: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  .twx-btn--light { background: var(--color-white, #fff); color: var(--color-primary-700, #1d4ed8); }
+  .twx-btn--light:hover { background: var(--color-primary-50, #eff6ff); }
+
+  /* ==================== 栏目横幅 page-hero ==================== */
+
+  .twx-pagehero {
+    background: linear-gradient(to bottom,
+        var(--color-primary-50, #eff6ff), var(--color-white, #fff));
+    padding-block: 4.5rem;
+  }
+  .twx-pagehero__inner { max-width: 48rem; text-align: center; }
+  .twx-pagehero__crumb { color: var(--color-primary-600, #2563eb); font-size: 0.875rem; margin-bottom: 1rem; }
+  .twx-pagehero__title { color: var(--color-slate-900, #0f172a); font-size: 2.25rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.025em; }
+  .twx-pagehero__sub { color: var(--color-slate-600, #475569); font-size: 1.125rem; line-height: 1.625; margin-top: 1rem; }
+
+  .twx-pagehero-min__inner { max-width: 48rem; text-align: center; }
+  .twx-pagehero-min__title { color: var(--color-slate-900, #0f172a); font-size: 2.25rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.025em; }
+  .twx-pagehero-min__bar {
+    background: var(--color-primary-600, #2563eb); border-radius: 9999px;
+    height: 4px; margin: 1.25rem auto 0; width: 4rem;
+  }
+  .twx-pagehero-min__sub { color: var(--color-slate-600, #475569); font-size: 1.125rem; line-height: 1.625; margin-top: 1rem; }
+  .twx-pagehero-min__crumb { color: var(--color-slate-500, #64748b); font-size: 0.875rem; margin-top: 1rem; }
+
+  /* ==================== 图文内容区 content-section ==================== */
+
+  .twx-cs-grid { align-items: center; display: grid; gap: 3rem; grid-template-columns: 1fr; }
+  @media (min-width: 48rem) {
+    .twx-cs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .twx-cs-title { margin-bottom: 1.5rem; }
+  .twx-cs-para { color: var(--color-slate-600, #475569); font-size: 1rem; line-height: 1.9; margin-top: 1rem; }
+  .twx-cs-figure { aspect-ratio: 4 / 3; border-radius: var(--radius-2xl, 1rem); overflow: hidden; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+  .twx-cs-figure--placeholder {
+    align-items: center; display: flex; justify-content: center;
+    background: linear-gradient(to bottom right,
+        var(--color-primary-100, #dbeafe), var(--color-primary-200, #bfdbfe));
+  }
+  .twx-cs-img { height: 100%; object-fit: cover; width: 100%; }
+  .twx-cs-placeholder-icon { font-size: 3.75rem; line-height: 1; }
+
+  .twx-cs-centered { max-width: 42rem; }
+  .twx-cs-centered .twx-h2 { margin-bottom: 1.5rem; text-align: center; }
+  .twx-cs-centered__para { color: var(--color-slate-600, #475569); font-size: 1rem; line-height: 1.9; margin-top: 1rem; }
+
+  /* ==================== 数据统计 stats ==================== */
+
+  .twx-stats { background: var(--color-primary-600, #2563eb); padding-block: 3.5rem; }
+  .twx-stats__title { color: var(--color-white, #fff); font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: 2rem; }
+  .twx-stats__grid { display: grid; gap: 2rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (min-width: 48rem) {
+    .twx-stats__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  .twx-stats__item { text-align: center; }
+  .twx-stats__value { color: var(--color-white, #fff); font-size: 2.25rem; font-weight: 700; line-height: 1.1; }
+  .twx-stats__label { color: rgb(255 255 255 / 0.85); font-size: 0.875rem; margin-top: 0.5rem; }
+
+  /* ==================== 品牌客户云 logo-cloud ==================== */
+
+  .twx-logocloud { background: var(--color-slate-50, #f8fafc); padding-block: 3.5rem; }
+  .twx-logocloud__title { color: var(--color-slate-500, #64748b); font-size: 0.875rem; text-align: center; margin-bottom: 1.5rem; }
+  .twx-logocloud__row { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; }
+  .twx-logocloud__pill {
+    background: var(--color-white, #fff); border: 1px solid var(--color-slate-200, #e2e8f0);
+    border-radius: 9999px; color: var(--color-slate-600, #475569);
+    font-size: 0.875rem; font-weight: 500; padding: 0.5rem 1.25rem;
+  }
+
+  /* ==================== 客户评价 testimonial ==================== */
+
+  .twx-quote { display: flex; flex-direction: column; }
+  .twx-quote__text { color: var(--color-slate-700, #334155); flex: 1; font-size: 1rem; line-height: 1.625; }
+  .twx-quote__mark { color: var(--color-primary-300, #93c5fd); font-size: 1.875rem; font-weight: 700; line-height: 1; }
+  .twx-quote__meta { align-items: center; border-top: 1px solid var(--color-slate-100, #f1f5f9); display: flex; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1.25rem; }
+  .twx-avatar {
+    align-items: center; background: var(--color-primary-100, #dbeafe); border-radius: 9999px;
+    color: var(--color-primary-700, #1d4ed8); display: flex;
+    font-size: 1rem; font-weight: 600; height: 3rem; justify-content: center; width: 3rem;
+  }
+  .twx-quote__author { color: var(--color-slate-900, #0f172a); display: block; font-size: 0.875rem; font-weight: 600; }
+  .twx-quote__role { color: var(--color-slate-500, #64748b); display: block; font-size: 0.75rem; margin-top: 0.25rem; }
+
+  .twx-quote-single { max-width: 48rem; }
+  .twx-quote-single__text { color: var(--color-slate-700, #334155); font-size: 1.25rem; line-height: 1.875; margin-top: 2.5rem; text-align: center; }
+  .twx-quote-single__mark { color: var(--color-primary-300, #93c5fd); font-size: 2.25rem; font-weight: 700; }
+  .twx-quote-single__meta { margin-top: 1.5rem; text-align: center; }
+  .twx-quote-single__author { color: var(--color-slate-900, #0f172a); font-size: 1rem; font-weight: 600; }
+  .twx-quote-single__author + .twx-quote__role { margin-top: 0.25rem; }
+
+  /* ==================== 团队展示 team-grid ==================== */
+
+  .twx-team { padding: 2rem 1.5rem; text-align: center; }
+  .twx-team__avatar {
+    align-items: center; background: linear-gradient(to bottom right,
+        var(--color-primary-100, #dbeafe), var(--color-primary-200, #bfdbfe));
+    border-radius: 9999px; color: var(--color-primary-700, #1d4ed8);
+    display: flex; font-size: 1.5rem; font-weight: 700; height: 4.5rem;
+    justify-content: center; margin: 0 auto; width: 4.5rem;
+  }
+  .twx-team__name { color: var(--color-slate-900, #0f172a); font-size: 1.125rem; font-weight: 600; margin-top: 1.25rem; }
+  .twx-team__role { color: var(--color-primary-600, #2563eb); font-size: 0.875rem; margin-top: 0.25rem; }
+  .twx-team__bio { color: var(--color-slate-600, #475569); font-size: 0.875rem; line-height: 1.625; margin-top: 0.75rem; }
+
+  /* ==================== 图库展示 gallery ==================== */
+
+  .twx-gallery__tile { aspect-ratio: 4 / 3; background: linear-gradient(to bottom right, var(--color-primary-100, #dbeafe), var(--color-primary-200, #bfdbfe)); border-radius: var(--radius-xl, 0.75rem); display: flex; margin: 0; overflow: hidden; position: relative; }
+  .twx-gallery__tile--primary { background: linear-gradient(to bottom right, var(--color-primary-100, #dbeafe), var(--color-primary-200, #bfdbfe)); }
+  .twx-gallery__tile--slate { background: linear-gradient(to bottom right, var(--color-slate-100, #f1f5f9), var(--color-slate-200, #e2e8f0)); }
+  .twx-gallery__tile--warm { background: linear-gradient(to bottom right, #fde68a, #fdba74); }
+  .twx-gallery__icon { align-items: center; display: flex; font-size: 3rem; justify-content: center; width: 100%; }
+  .twx-gallery__caption {
+    background: rgb(255 255 255 / 0.85); bottom: 0; color: var(--color-slate-700, #334155);
+    font-size: 0.875rem; left: 0; padding: 0.625rem 1rem; position: absolute; width: 100%;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+
+  /* ==================== 常见问题 faq（纯 CSS 手风琴） ==================== */
+
+  .twx-faq { max-width: 48rem; }
+  .twx-faq__list { display: grid; gap: 0.75rem; margin-top: 2.5rem; }
+  .twx-faq__item {
+    background: var(--color-white, #fff); border: 1px solid var(--color-slate-200, #e2e8f0);
+    border-radius: var(--radius-xl, 0.75rem); overflow: hidden;
+  }
+  .twx-faq__q { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 1rem; list-style: none; padding: 1.125rem 1.5rem; }
+  .twx-faq__q::-webkit-details-marker { display: none; }
+  .twx-faq__qtext { color: var(--color-slate-900, #0f172a); font-size: 0.9375rem; font-weight: 600; line-height: 1.4; }
+  .twx-faq__marker { flex: none; position: relative; height: 1rem; width: 1rem; }
+  .twx-faq__marker::before, .twx-faq__marker::after {
+    background: var(--color-primary-600, #2563eb); border-radius: 1px;
+    content: ""; position: absolute; inset: 50% 0 auto; height: 2px; margin-top: -1px; width: 100%;
+  }
+  .twx-faq__marker::after { transform: rotate(90deg); transition: transform 0.2s ease; }
+  .twx-faq__item[open] .twx-faq__marker::after { transform: rotate(0deg); }
+  .twx-faq__a { border-top: 1px solid var(--color-slate-100, #f1f5f9); color: var(--color-slate-600, #475569); font-size: 0.9375rem; line-height: 1.75; padding: 1rem 1.5rem 1.25rem; }
+
+  /* ==================== 转化行动横幅 cta-banner ==================== */
+
+  .twx-cta {
+    background: var(--color-primary-600, #2563eb); border-radius: var(--radius-2xl, 1rem);
+    padding: 3.5rem 2rem; text-align: center;
+  }
+  .twx-cta--gradient {
+    background: linear-gradient(to bottom right,
+        var(--color-primary-600, #2563eb), var(--color-primary-700, #1d4ed8));
+  }
+  .twx-cta__title { color: var(--color-white, #fff); font-size: 1.875rem; font-weight: 700; line-height: 1.25; }
+  .twx-cta__sub { color: rgb(255 255 255 / 0.85); font-size: 1.125rem; line-height: 1.625; margin-top: 0.75rem; }
+  .twx-cta__btn { margin-top: 2rem; }
+
+  /* ==================== 联系区块 contact ==================== */
+
+  .twx-contact__item { align-items: flex-start; display: flex; gap: 1rem; }
+  .twx-contact__icon {
+    align-items: center; background: var(--color-primary-50, #eff6ff); border-radius: var(--radius-lg, 0.5rem);
+    display: flex; font-size: 1.25rem; height: 3rem; justify-content: center; width: 3rem; flex: none;
+  }
+  .twx-contact__label { color: var(--color-slate-500, #64748b); font-size: 0.8125rem; }
+  .twx-contact__value { color: var(--color-slate-900, #0f172a); font-size: 1rem; font-weight: 500; margin-top: 0.25rem; }
+
+}

@@ -47,31 +47,61 @@ public class TemplateGenPromptBuilder {
      * <p>系统提示词是固定的，不随用户需求变化。
      * 用户需求通过 user 消息注入，由 {@link #buildUserPrompt(String, String)} 生成。</p>
      *
-     * @param templateName 模板目录名（英文，作为 pathName）
+     * @param templateName   模板目录名（英文，作为 pathName）
+     * @param mobileAdaptive 是否适配移动端（控制第 10 节移动端适配与行为准则第 3 条的强弱）
      */
-    public String buildSystemPrompt(String templateName) {
+    public String buildSystemPrompt(String templateName, boolean mobileAdaptive) {
         return BASE_SYSTEM_PROMPT
-                .replace("${templateName}", templateName);
+                .replace("${templateName}", templateName)
+                .replace("${mobileAdaptiveSection}", mobileAdaptive ? MOBILE_SECTION_REQUIRED : MOBILE_SECTION_DISABLED)
+                .replace("${mobileRule}", mobileAdaptive ? MOBILE_RULE_REQUIRED : MOBILE_RULE_DISABLED);
     }
 
     /**
-     * 构建用户首条消息（初始需求描述）
+     * 构建用户首条消息（初始需求描述，默认开启移动端适配）
      *
      * @param templateName 模板目录名
      * @param requirement  用户对模板的需求描述（风格、配色、布局、栏目等）
      */
     public String buildUserPrompt(String templateName, String requirement) {
+        return buildUserPrompt(templateName, requirement, true);
+    }
+
+    /**
+     * 构建用户首条消息（初始需求描述）
+     *
+     * @param templateName   模板目录名
+     * @param requirement    用户对模板的需求描述（风格、配色、布局、栏目等）
+     * @param mobileAdaptive 是否适配移动端
+     */
+    public String buildUserPrompt(String templateName, String requirement, boolean mobileAdaptive) {
+        String mobileRequire = mobileAdaptive
+                ? "7. 移动端适配（强制）：\n"
+                + "   7.1 base.css 必须包含至少两档 media query 断点：@media (max-width: 768px) 与 @media (max-width: 480px)，\n"
+                + "       分别对应平板/小屏手机；桌面优先，小屏下容器宽度改为 100%、栅格列数折叠、字号与间距缩小\n"
+                + "   7.2 header 导航在宽度 <= 768px 时隐藏菜单 ul，显示汉堡按钮（三横线 / svg 图标），\n"
+                + "       点击后通过纯 CSS + checkbox 或少量 JS 展开为竖向侧边菜单，不要依赖 Bootstrap 等外部框架\n"
+                + "   7.3 文章列表在手机端改为单列（移动端自动堆叠），图片使用 max-width:100% 自适应\n"
+                : "7. 移动端适配：本会话用户选择桌面专用模板，无需 media query 断点与汉堡菜单，按 ≥1200px 固定布局设计\n";
         return "请为模板目录「" + templateName + "」生成一套完整的网站模板。\n\n"
                 + "## 用户需求\n\n" + requirement + "\n\n"
                 + "## 输出要求\n\n"
                 + "1. 必须包含必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html\n"
                 + "2. 必须生成 _preview_data.json 预览演示数据：菜单/分类/单页/文章标题贴合用户需求主题（如餐饮模板用\"菜品展示/门店故事\"）\n"
-                + "3. 至少包含一个基础样式文件 static/css/base.css\n"
+                + "3. 至少包含基础样式文件 static/css/base.css（若主样式命名为 style.css 等，base.css 可作为基础重置与变量定义，样式文件总数控制在 2 个以内）\n"
                 + "4. 静态资源路径使用 ${ctx()} 前缀，例如 <link href=\"${ctx()}/css/base.css\">\n"
                 + "5. 页面通过 <#import \"_layout.html\" as layout> 引入布局宏\n"
                 + "6. 使用 fastcms 指令渲染动态内容，不要硬编码文章列表\n"
-                + "7. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
-                + "8. 请全程使用中文思考和回复\n";
+                + mobileRequire
+                + "8. 菜单选中高亮（强制）：\n"
+                + "   8.1 在 body 宏开头用 <#assign currentUri=request.contextPath! + request.requestURI!> 获取当前请求路径（request 变量由框架注入）\n"
+                + "   8.2 渲染首页 <li> 时判断：currentUri == (request.contextPath + '/') → 添加 class=\"active\"\n"
+                + "   8.3 menuTag 遍历的每一项对比 (item.url!): currentUri?starts_with(item.url!) → 当前 li 加 class=\"active\"，\n"
+                + "       且其所有祖先（父菜单）也应加 active 类（递归 children 时同步判断）\n"
+                + "   8.4 _layout.html 中必须包含一个递归宏（如 menuChildren）处理二级及以下菜单，子菜单 active 同样按前缀匹配\n"
+                + "   8.5 CSS 中必须定义 nav li.active > a { 颜色/下划线/背景 高亮 } 样式\n"
+                + "9. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
+                + "10. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -106,9 +136,10 @@ public class TemplateGenPromptBuilder {
      * @param targetPath       本次要生成的文件相对路径
      * @param existingContext  已生成文件的上下文（文件清单 + _layout.html 完整内容），可为空
      * @param retryHint        重试提示（上次输出截断/格式非法时非空，附加压缩篇幅要求）
+     * @param mobileAdaptive   是否适配移动端（false 时关键文件的强约束降级为桌面专用）
      */
     public String buildSingleFilePrompt(String requirement, String targetPath,
-                                        String existingContext, String retryHint) {
+                                        String existingContext, String retryHint, boolean mobileAdaptive) {
         StringBuilder sb = new StringBuilder();
         sb.append("请生成模板中的一个文件。\n\n## 用户需求\n\n").append(requirement).append("\n\n");
         if (existingContext != null && !existingContext.isBlank()) {
@@ -121,10 +152,20 @@ public class TemplateGenPromptBuilder {
                 .append("1. files 数组只包含一个元素：path 为 `").append(targetPath)
                 .append("`，content 为完整文件内容，action 为 create\n")
                 .append("2. content 必须是可直接使用的完整内容，禁止省略或输出占位符（如 ... 省略 ...）\n")
-                .append("3. 控制篇幅：").append(buildSizeHint(targetPath)).append('\n')
-                .append("4. 静态资源路径使用 ${ctx()} 前缀\n")
-                .append("5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
-                .append("6. 请全程使用中文思考和回复\n");
+                .append("3. 控制篇幅：").append(buildSizeHint(targetPath, mobileAdaptive)).append('\n')
+                .append("4. 静态资源路径使用 ${ctx()} 前缀\n");
+
+        // 针对关键文件追加差异化强约束（覆盖生成型与分块单文件两条路径共用此提示词）
+        String extra = buildTargetFileConstraint(targetPath, mobileAdaptive);
+        if (extra != null && !extra.isBlank()) {
+            sb.append("5. ").append(extra).append('\n');
+            sb.append("6. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
+              .append("7. 请全程使用中文思考和回复\n");
+        } else {
+            sb.append("5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
+              .append("6. 请全程使用中文思考和回复\n");
+        }
+
         if (retryHint != null && !retryHint.isBlank()) {
             sb.append("\n## 注意\n\n").append(retryHint).append("\n");
         }
@@ -132,9 +173,46 @@ public class TemplateGenPromptBuilder {
     }
 
     /**
-     * 按文件类型给出差异化的篇幅约束（端到端测试中 CSS 最易超限截断，要求最严格）
+     * 按目标文件给出差异化的强约束提示，仅对关键文件（_layout.html / base.css / 主 JS）返回非空
+     *
+     * @param targetPath     目标文件相对路径
+     * @param mobileAdaptive 是否适配移动端（false 时 _layout/CSS 的移动端约束降级为桌面专用）
      */
-    private String buildSizeHint(String targetPath) {
+    private String buildTargetFileConstraint(String targetPath, boolean mobileAdaptive) {
+        String name = targetPath.contains("/")
+                ? targetPath.substring(targetPath.lastIndexOf('/') + 1)
+                : targetPath;
+        if ("_layout.html".equals(name)) {
+            return "本文件必须包含：(a) header/body/script 三个宏 + 一个递归子菜单宏 menuChildren；"
+                    + "(b) body 宏开头 `<#assign cp = request.contextPath!> <#assign currentUri = cp + (request.requestURI)!>`；"
+                    + "(c) 首页 li 与 menuTag 每一项都按 `currentUri?starts_with(item.url!)` 输出 class=\"active\"；"
+                    + (mobileAdaptive
+                        ? "(d) 移动端汉堡按钮 `<input type=\"checkbox\" id=\"nav-toggle\">` + label + 三横线 span；"
+                        : "(d) 本会话为桌面专用模板，无需移动端汉堡按钮与响应式结构；")
+                    + "(e) 不引入 Bootstrap/jQuery，不使用 data-toggle。菜单选中判断必须在 FreeMarker 层，不要只在 JS 里切";
+        }
+        if (name.endsWith(".css")) {
+            return (mobileAdaptive
+                        ? "本文件必须包含三档响应式断点：@media (max-width:991px)、@media (max-width:768px)、@media (max-width:480px)；"
+                          + "≤768px 时隐藏 .site-nav ul、显示 .nav-toggle-label 汉堡按钮，#nav-toggle:checked 控制 .site-nav 展开；"
+                        : "本会话为桌面专用模板，按 ≥1200px 固定布局设计，无需 media query 断点与汉堡菜单样式；")
+                    + "必须定义 .site-nav li.active > a { 颜色+下划线 } 高亮样式；img{max-width:100%;height:auto}；"
+                    + "主题色用 :root CSS 变量。若文件名为 style.css 且已存在 base.css，则 base.css 可只放变量+重置，主样式放本文件";
+        }
+        if (name.endsWith(".js")) {
+            return "JS 只负责导航展开的降级（若纯 CSS 方案不可用）与回到顶部等轻交互，禁止接管菜单 active 状态；"
+                    + "active 必须由 FreeMarker 模板输出，JS 里不要写 nav 切换 active 的逻辑";
+        }
+        return null;
+    }
+
+    /**
+     * 按文件类型给出差异化的篇幅约束（端到端测试中 CSS 最易超限截断，要求最严格）
+     *
+     * @param targetPath     目标文件相对路径
+     * @param mobileAdaptive 是否适配移动端（false 时 CSS 不要求响应式断点）
+     */
+    private String buildSizeHint(String targetPath, boolean mobileAdaptive) {
         String ext = targetPath.contains(".")
                 ? targetPath.substring(targetPath.lastIndexOf('.') + 1).toLowerCase()
                 : "";
@@ -142,7 +220,7 @@ public class TemplateGenPromptBuilder {
             // CSS 在 JSON 中转义开销最大，最易被 max_tokens 截断：紧凑写法 + 变量复用 + 硬性行数上限
             case "css" -> "采用紧凑写法（每条规则一行），总行数不超过 200 行；"
                     + "主题色/字体/间距用 CSS 变量（:root）统一定义后复用；删除全部注释；"
-                    + "响应式只需桌面 + 移动两档断点";
+                    + (mobileAdaptive ? "响应式只需桌面 + 移动两档断点" : "按桌面固定布局设计，无需 media query 断点");
             case "js" -> "总行数不超过 150 行，只实现必要交互（导航切换、回到顶部等），删除全部注释";
             case "properties" -> "只输出配置键值对，不超过 10 行";
             case "json" -> "只输出预览演示数据 JSON，总行数不超过 60 行，字段名与系统提示中的 schema 一致";
@@ -358,16 +436,43 @@ public class TemplateGenPromptBuilder {
 
             ## 3. _layout.html 公共布局宏
 
-            使用 FreeMarker macro 定义三个核心宏，所有页面通过 `<#import "_layout.html" as layout>` 引入：
+            使用 FreeMarker macro 定义三个核心宏（header / body / script）+ 一个递归子菜单宏 menuChildren，
+            所有页面通过 `<#import "_layout.html" as layout>` 引入。
+            **必须同时满足响应式（汉堡菜单）与菜单选中高亮两个要求**，示例如下：
 
             ```html
+            <#-- 辅助宏：判断某个菜单 URL 是否应高亮（前缀匹配，子菜单命中时祖先也高亮） -->
+            <#function isMenuActive url>
+              <#local cp = request.contextPath!>
+              <#local uri = (request.requestURI)!>
+              <#if url?? && uri?? && (uri?starts_with(url!) || (uri == url!))>
+                <#return true>
+              </#if>
+              <#return false>
+            </#function>
+
+            <#-- 递归宏：渲染二级及以下子菜单，active 同样按前缀匹配 -->
+            <#macro menuChildren children currentUri>
+              <#if children?? && children?size gt 0>
+                <ul class="submenu">
+                  <#list children as child>
+                    <#local childActive = (child.url?? && currentUri?starts_with(child.url!))>
+                    <li class="${'$'}{''}${'#'}{if childActive}active${'#'}{/if}">
+                      <a href="${'$'}{child.url!'#'}" target="${'$'}{child.target!"_self"}">${'$'}{child.menuName!}</a>
+                      <@menuChildren children=child.children currentUri=currentUri/>
+                    </li>
+                  </#list>
+                </ul>
+              </#if>
+            </#macro>
+
             <#macro header title>
             <!DOCTYPE html>
-            <html>
+            <html lang="zh-CN">
             <head>
               <meta charset="utf-8">
               <title>${'$'}{title!""}</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
               <meta name="keywords" content="${'$'}{seoTag("website_title")!""}">
               <meta name="description" content="${'$'}{seoTag("website_sub_title")!""}">
               <link href="${'$'}{ctx()}/css/base.css" rel="stylesheet">
@@ -377,24 +482,43 @@ public class TemplateGenPromptBuilder {
 
             <#macro body>
             <body>
-              <header>
-                <div class="logo"><a href="/"><img src="${'$'}{ctx()}/images/logo.png" alt="Logo"></a></div>
-                <nav>
-                  <ul>
-                    <li><a href="/">首页</a></li>
-                    <@menuTag>
-                      <#if data?? && (data?size > 0)>
-                        <#list data as item>
-                          <li><a href="${'$'}{item.url!}" target="${'$'}{item.target!"_self"}">${'$'}{item.menuName!}</a></li>
-                        </#list>
-                      </#if>
-                    </@menuTag>
-                  </ul>
-                </nav>
+              <#-- body 宏开头获取当前请求路径，供菜单 active 判断使用 -->
+              <#assign cp = (request.contextPath)!>
+              <#assign currentUri = cp + (request.requestURI)!>
+              <header class="site-header">
+                <div class="container header-inner">
+                  <div class="logo"><a href="${'$'}{cp}/"><img src="${'$'}{ctx()}/images/logo.png" alt="Logo"></a></div>
+                  <#-- 移动端汉堡按钮（≤768px 显示）：用纯 CSS + label/checkbox 切换，不依赖外部框架 -->
+                  <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="菜单">
+                  <label for="nav-toggle" class="nav-toggle-label"><span></span><span></span><span></span></label>
+                  <nav class="site-nav">
+                    <ul>
+                      <#-- 首页 -->
+                      <#local homeActive = (currentUri == cp + '/') || (currentUri == cp)>
+                      <li class="${'$'}{''}${'#'}{if homeActive}active${'#'}{/if}"><a href="${'$'}{cp}/">首页</a></li>
+                      <#-- 后台管理的菜单（menuTag 数据） -->
+                      <@menuTag>
+                        <#if data?? && (data?size > 0)>
+                          <#list data as item>
+                            <#local mi_active = (item.url?? && currentUri?starts_with(item.url!))>
+                            <li class="${'$'}{''}${'#'}{if mi_active}active${'#'}{/if}">
+                              <a href="${'$'}{item.url!}" target="${'$'}{item.target!"_self"}">${'$'}{item.menuName!}</a>
+                              <@menuChildren children=item.children currentUri=currentUri/>
+                            </li>
+                          </#list>
+                        </#if>
+                      </@menuTag>
+                    </ul>
+                  </nav>
+                </div>
               </header>
-              <#nested/>
-              <footer>
-                <p>Copyright © ${'$'}{.now?string("yyyy")} - Powered by Fastcms</p>
+              <main class="container main-content">
+                <#nested/>
+              </main>
+              <footer class="site-footer">
+                <div class="container">
+                  <p>Copyright © ${'$'}{.now?string("yyyy")} - Powered by Fastcms</p>
+                </div>
               </footer>
             </body>
             </#macro>
@@ -406,7 +530,12 @@ public class TemplateGenPromptBuilder {
             </html>
             </#macro>
             ```
-            注意：`<#nested/>` 是宏的占位符，调用方传入的内容会渲染到这里。
+            关键点说明：
+            - `request.contextPath/requestURI` 变量由 fastcms 框架自动注入到 FreeMarker 视图，模板可直接引用（要加 ! 默认值防 null）
+            - 顶部首页 `<li>` 和 menuTag 每一项都必须按上述 `currentUri?starts_with(item.url!)` 前缀匹配输出 `active` class，不要仅靠 JS 切换
+            - 子菜单通过递归宏 `menuChildren` 渲染，子菜单命中时父级也应是 active（前缀匹配天然保证了这一点）
+            - 移动端通过 `#nav-toggle:checked ~ .site-nav { display:block }` 之类的纯 CSS 选择器控制展开，不依赖 Bootstrap/jQuery 的 data-toggle
+            - `<#nested/>` 是宏的占位符，调用方传入的页面内容会渲染到这里（header 宏中 <head> 内、body 宏中 <main> 内、script 宏中 </body> 前）
 
             ## 4. FreeMarker 指令清单（fastcms 自定义指令）
 
@@ -549,7 +678,36 @@ public class TemplateGenPromptBuilder {
             - articles 的 titles/summaries/suffixes 是平行数组，最多 12 项；summaries/suffixes 可省略
             - seo 的 key 与 seoTag 指令一致（website_title、website_sub_title、website_seo、public_website_domain）
 
-            ## 10. 响应格式（严格 JSON）
+            ## 10. 移动端响应式适配
+
+            ${mobileAdaptiveSection}
+
+            ## 11. 菜单选中高亮（强制，方案 A：模板层通过 request 对比）
+
+            菜单选中状态必须由 **FreeMarker 模板渲染时静态输出 active class**，不能只依靠前端 JS 切换
+            （否则新打开页面时 JS 还没执行，菜单项看起来就没选中）。
+            具体实现：
+
+            1. **当前请求路径来源**：fastcms 框架已通过 `FastcmsTemplateViewResolver` 向 FreeMarker 视图注入
+               `request`（类型 `HttpServletRequest`），模板里可用 `${request.requestURI}` 与 `${request.contextPath}` 获取路径，
+               **均要加 ! 默认值**：`<#assign cp = request.contextPath!>`、`<#assign currentUri = cp + (request.requestURI)!>`。
+               预览模式下（AI 模板预览路由）同样注入了 request，因此 active 判断在预览/正式环境都生效。
+            2. **首页高亮规则**：当 `currentUri == cp + '/' || currentUri == cp` 时首页 `<li>` 加 `class="active"`
+            3. **菜单高亮规则（前缀匹配）**：对 menuTag 遍历的每一项 `item`，当
+               `item.url?? && currentUri?starts_with(item.url!)` 时该 `<li>` 加 `class="active"`；
+               前缀匹配的好处是：进入 `/article/123` 时父菜单 `/article/category/3`（如果指向同前缀）也会高亮
+            4. **子菜单递归**：必须在 _layout.html 中定义递归宏 `<#macro menuChildren children currentUri>`，
+               二级及以下菜单同样按前缀匹配输出 active；子菜单命中时其父级因前缀包含关系天然也是 active
+            5. **高亮样式**：CSS 中必须定义：
+               ```css
+               .site-nav li.active > a { color: [主色]; border-bottom: 2px solid [主色]; font-weight: 600; }
+               .site-nav li.active > .submenu { display:block; } /* 桌面端下拉菜单 */
+               ```
+            6. **注意**：`item.url` 可能包含 contextPath（由 menuTag 数据源决定），对比时不要重复拼接；
+               若出现路径多次加前缀的情况，可在 body 宏开头先把 item.url 去掉重复前缀（如 `<#local itemUrl = (item.url?starts_with(cp+cp))?then(item.url?substring(cp?length), item.url)>`），
+               推荐保持默认：`currentUri = cp + requestURI`、`item.url` 直接用，两者口径一致。
+
+            ## 12. 响应格式（严格 JSON）
 
             你的每次回复必须是一个 JSON 对象（不能是数组），包含两个字段：
             ```json
@@ -605,11 +763,57 @@ public class TemplateGenPromptBuilder {
 
             1. **遵循规范**：严格遵循上述 fastcms 模板规范，使用正确的指令和宏
             2. **完整可用**：生成的模板必须能被 fastcms 直接识别和应用，不缺文件
-            3. **响应式设计**：CSS 应支持桌面和移动端自适应
-            4. **可访问性**：HTML 语义化，alt 属性完整，aria 属性适当使用
-            5. **性能优先**：CSS 放头部、JS 放尾部，避免内联样式
-            6. **不硬编码内容**：动态内容（菜单、文章列表、文章详情）必须用指令渲染，不要写死文章标题
-            7. **风格统一**：配色、字体、间距遵循视觉一致性，参考现代化网站设计
-            8. **语言要求**：全程使用中文。思考推理过程（reasoning）必须使用中文，reply 回复也必须是中文
+            3. **响应式**：${mobileRule}
+            4. **菜单选中（硬约束）**：严格按照"第 11 节 菜单选中高亮（方案 A）"实现，在 _layout.html 的 FreeMarker 层
+               用 request.contextPath + request.requestURI 对比 item.url 输出 active class，不能只在 JS 里切换；子菜单递归宏必须定义
+            5. **可访问性**：HTML 语义化，alt 属性完整，aria 属性适当使用；汉堡按钮要加 aria-label
+            6. **性能优先**：CSS 放头部、JS 放尾部，避免内联样式；汉堡菜单尽量用纯 CSS（checkbox/label + :checked），不引入额外 JS 依赖
+            7. **不硬编码内容**：动态内容（菜单、文章列表、文章详情）必须用指令渲染，不要写死文章标题
+            8. **风格统一**：配色、字体、间距遵循视觉一致性，参考现代化网站设计
+            9. **语言要求**：全程使用中文。思考推理过程（reasoning）必须使用中文，reply 回复也必须是中文
             """;
+
+    /**
+     * 系统提示词第 10 节正文：开启移动端适配时的三档断点 + 汉堡菜单硬约束
+     */
+    private static final String MOBILE_SECTION_REQUIRED = """
+            （强制）生成的模板必须同时满足桌面端（≥1200px）、平板（769–991px）、手机（≤768px，含 ≤480px 小屏）三档自适应。
+            具体要求：
+
+            1. **基础 viewport**：`<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">`
+            2. **CSS 断点（必须写全）**：
+               - `@media (max-width: 991px)`：平板过渡档，`.container` 最大宽改为 960px 或 100%，侧边栏与主体布局开始折叠
+               - `@media (max-width: 768px)`：手机主档，`.container` 最大宽 100% + 左右各 15–20px padding；
+                 栅格 3/4 列折叠为 1–2 列；文章卡片改为单列堆叠；
+                 隐藏 desktop 水平菜单 `.site-nav ul`，显示 `.nav-toggle-label` 汉堡按钮
+               - `@media (max-width: 480px)`：小屏手机档，标题字号 h1 缩至 22–24px、h2 至 18–20px；
+                 按钮 padding 缩小；首页 banner 高度由 400–500px 降到 240–280px
+            3. **汉堡菜单（纯 CSS 实现，不依赖 Bootstrap/jQuery）**：
+               - header 中必须有 `<input type="checkbox" id="nav-toggle" class="nav-toggle">`
+                 与 `<label for="nav-toggle" class="nav-toggle-label"><span></span>×3</label>`
+               - `#nav-toggle` 默认隐藏（display:none），`.nav-toggle-label` 只在 ≤768px 显示（三条横线用 label 的三个 span + border-bottom 或背景绘制）
+               - 通过 `#nav-toggle:checked + .nav-toggle-label + .site-nav` 或兄弟选择器控制
+                 `.site-nav` 从 display:none → display:block，菜单展开为竖向全宽列表；子菜单在移动端默认展开或点击父项展开（不用 hover）
+            4. **图片自适应**：`img { max-width:100%; height:auto; }` 写在 base.css 顶部；首页 banner 背景用 `background-size: cover; background-position: center;`
+            5. **字体**：body 基础字号 15–16px（桌面）、14px（手机）；使用系统字体栈 `-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`""";
+
+    /**
+     * 系统提示词第 10 节正文：关闭移动端适配时的桌面专用约束
+     */
+    private static final String MOBILE_SECTION_DISABLED = """
+            （本会话用户已选择桌面专用模板）无需适配移动端：不要求 media query 断点、汉堡菜单与移动端结构，
+            按 ≥1200px 固定布局设计，专注桌面端视觉与交互质量；viewport meta 仍保留标准写法。""";
+
+    /**
+     * 行为准则第 3 条：开启移动端适配
+     */
+    private static final String MOBILE_RULE_REQUIRED = """
+            （硬约束）严格按照"第 10 节 移动端响应式适配"实现三档断点 + 汉堡菜单 + 图片自适应，
+               不能只写 viewport 而无 @media；不能靠 Bootstrap/外部框架兜底；文章列表/栅格/容器宽度/导航在 ≤768px 必须可验证地切换布局""";
+
+    /**
+     * 行为准则第 3 条：关闭移动端适配
+     */
+    private static final String MOBILE_RULE_DISABLED = """
+            本会话用户选择桌面专用模板，第 10 节移动端适配要求不适用；按 ≥1200px 桌面布局设计即可""";
 }

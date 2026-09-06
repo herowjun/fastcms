@@ -33,7 +33,17 @@ import java.util.List;
 public interface IAiModelConfigService extends IService<AiModelConfig> {
 
     /**
-     * 获取当前激活的模型配置
+     * 配置场景：对话（默认）
+     */
+    String SCENE_CHAT = "chat";
+
+    /**
+     * 配置场景：生图（DashScope qwen-image 系列）
+     */
+    String SCENE_IMAGE = "image";
+
+    /**
+     * 获取当前激活的模型配置（chat 场景）
      * <p>同一时刻仅一条记录为激活状态；如果没有激活的，返回最新的那一条</p>
      *
      * @return 激活的配置，没有则返回 null
@@ -41,7 +51,15 @@ public interface IAiModelConfigService extends IService<AiModelConfig> {
     AiModelConfig getActiveConfig();
 
     /**
-     * 设置某个配置为激活状态，其他配置自动设为未激活
+     * 获取指定场景当前激活的模型配置
+     *
+     * @param scene 场景（chat/image），见 {@link #SCENE_CHAT} {@link #SCENE_IMAGE}
+     * @return 激活的配置，没有则返回 null
+     */
+    AiModelConfig getActiveConfig(String scene);
+
+    /**
+     * 设置某个配置为激活状态，同场景的其他配置自动设为未激活
      *
      * @param id 要激活的配置 id
      */

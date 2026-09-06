@@ -1,0 +1,15 @@
+{
+  "id": "faq",
+  "name": "常见问题",
+  "description": "FAQ 手风琴（纯 CSS 展开/收起）：问答列表，消除访问疑虑",
+  "category": "content",
+  "appliesTo": [],
+  "variants": [
+    { "id": "accordion", "description": "两栏窄容器手风琴，默认第一项展开" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：常见问题" },
+    { "name": "items", "type": "list", "required": true, "desc": "问答列表（4-6 项），每项含 q(问题 ≤30字)/a(回答 ≤100字)" }
+  ],
+  "cmsBindings": []
+}

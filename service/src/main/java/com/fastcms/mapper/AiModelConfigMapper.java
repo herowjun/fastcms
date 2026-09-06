@@ -28,13 +28,15 @@ import com.fastcms.entity.AiModelConfig;
 public interface AiModelConfigMapper extends BaseMapper<AiModelConfig> {
 
     /**
-     * 原子化激活：将其他所有配置置为未激活
+     * 原子化激活：将同场景的其他配置置为未激活
      *
      * @param id 要激活的配置 id
+     * @param scene 配置场景（chat/image）
      * @return 受影响行数
      */
-    @org.apache.ibatis.annotations.Update("UPDATE ai_model_config SET is_active = 0 WHERE is_active = 1 AND id <> #{id}")
-    int deactivateOthers(@org.apache.ibatis.annotations.Param("id") Long id);
+    @org.apache.ibatis.annotations.Update("UPDATE ai_model_config SET is_active = 0 WHERE is_active = 1 AND scene = #{scene} AND id <> #{id}")
+    int deactivateOthers(@org.apache.ibatis.annotations.Param("id") Long id,
+                         @org.apache.ibatis.annotations.Param("scene") String scene);
 
     /**
      * 原子化激活目标配置
@@ -46,10 +48,11 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig> {
     int activateById(@org.apache.ibatis.annotations.Param("id") Long id);
 
     /**
-     * 将所有配置置为未激活（新增激活配置前调用，此时尚无新配置 id）
+     * 将指定场景的所有配置置为未激活（新增激活配置前调用，此时尚无新配置 id）
      *
+     * @param scene 配置场景（chat/image）
      * @return 受影响行数
      */
-    @org.apache.ibatis.annotations.Update("UPDATE ai_model_config SET is_active = 0 WHERE is_active = 1")
-    int deactivateAll();
+    @org.apache.ibatis.annotations.Update("UPDATE ai_model_config SET is_active = 0 WHERE is_active = 1 AND scene = #{scene}")
+    int deactivateAllByScene(@org.apache.ibatis.annotations.Param("scene") String scene);
 }

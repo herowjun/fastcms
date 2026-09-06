@@ -1,0 +1,15 @@
+{
+  "id": "stats",
+  "name": "数据统计",
+  "description": "核心数字指标条：3-4 个大数字 + 标签，建立规模信任感",
+  "category": "social-proof",
+  "appliesTo": [],
+  "variants": [
+    { "id": "default", "description": "主色实底横条，白色大数字" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": false, "maxLength": 16, "desc": "区块标题（可空，空时不显示）" },
+    { "name": "items", "type": "list", "required": true, "desc": "指标列表（3-4 项），每项含 value(≤8字，如 10万+)/label(≤8字)" }
+  ],
+  "cmsBindings": []
+}

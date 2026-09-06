@@ -255,11 +255,13 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
         if(template == null) return null;
 
         // 仅过滤 i18n 目录下的 .properties（国际化文件，无在线编辑需求）；
-        // 模板根下的 _template.properties（模板元信息）保持可见、可在线编辑
+        // 模板根下的 _template.properties（模板元信息）保持可见、可在线编辑。
+        // .bak 为 AI 修图的原图备份（内部产物，通过「恢复原图」入口使用），不在文件树展示
         List<FileTreeNode> treeNodeList = Files.walk(template.getTemplatePath())
                 .filter(item -> !(item.toString().endsWith(".properties")
                         && item.getParent() != null
                         && i18nDir.equals(item.getParent().getFileName().toString())))
+                .filter(item -> !item.toString().endsWith(".bak"))
                 .map(item -> new FileTreeNode(item, template.getTemplatePath()))
                 .sorted(Comparator.comparing(FileTreeNode::getSortNum)).collect(Collectors.toList());
         return (List<FileTreeNode>) getTreeNodeList(treeNodeList);

@@ -16,6 +16,7 @@
  */
 package com.fastcms.ai.component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +34,10 @@ import java.util.Map;
  * AI 规划时必须先推导信息架构再编排页面，渲染器据此产出全量 _preview_data.json
  * 与每个菜单的专属页面文件。null（1.0 旧数据）时回退内置默认演示数据。</p>
  *
+ * <p>{@code imageAssets}（1.2 新增）为图片资产解析记录：media 槽位的 {@code search:}
+ * 引用解析（附件库命中 / 演示图兜底）后由系统回写，AI 不产出。null（1.1 及更早数据）
+ * 时无图片来源记录，行为不变。media 槽位协议见 {@link ImageAssetSpec}。</p>
+ *
  * @author wjun_java@163.com
  * @since 0.2.0
  */
@@ -45,14 +50,22 @@ public record PageSpec(
         String stylePreset,
         String primaryColor,
         SiteContentSpec site,
-        Map<String, PageSpecPage> pages) {
+        Map<String, PageSpecPage> pages,
+        List<ImageAssetSpec> imageAssets) {
 
-    public static final String SPEC_VERSION = "1.1";
+    public static final String SPEC_VERSION = "1.2";
 
     public static final String PAGE_INDEX = "index";
     public static final String PAGE_ARTICLE_LIST = "article_list";
     public static final String PAGE_ARTICLE = "article";
     public static final String PAGE_PAGE = "page";
+
+    /**
+     * 正文占位组件（虚拟组件，不在组件包清单中）：AI 编排内容页时用它标记正文位置，
+     * 渲染时替换为该页真实正文骨架（文章列表/文章详情/单页正文）。
+     * 使 AI 能为内容页设计"横幅 → 正文 → 转化区"等完整结构。
+     */
+    public static final String CONTENT_BODY_SECTION = "tw:content-body";
 
     /**
      * 首选 specVersion（向后兼容旧 spec 时按版本分支）
@@ -71,6 +84,10 @@ public record PageSpec(
 
     public SiteContentSpec safeSite() {
         return site;
+    }
+
+    public List<ImageAssetSpec> safeImageAssets() {
+        return imageAssets == null ? List.of() : imageAssets;
     }
 
     /**

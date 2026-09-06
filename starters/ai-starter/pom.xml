@@ -48,6 +48,12 @@
             <artifactId>fastcms-service</artifactId>
         </dependency>
 
+        <!-- fastcms cms：应用模板时初始化站点数据（菜单/分类/单页） -->
+        <dependency>
+            <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-cms</artifactId>
+        </dependency>
+
         <!-- plugin-starter：AiToolRegister 需要操作插件类加载器 -->
         <dependency>
             <groupId>com.fastcms</groupId>

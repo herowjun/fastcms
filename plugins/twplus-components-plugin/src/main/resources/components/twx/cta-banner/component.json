@@ -1,0 +1,18 @@
+{
+  "id": "cta-banner",
+  "name": "转化行动横幅",
+  "description": "页面收尾转化区：主色大横幅 + 行动按钮，承接页面情绪促成转化",
+  "category": "conversion",
+  "appliesTo": [],
+  "variants": [
+    { "id": "solid", "description": "主色实底 + 白字 + 白色按钮（默认）" },
+    { "id": "gradient", "description": "主色深浅渐变底" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 20, "desc": "号召主标题，如：准备好开始了吗" },
+    { "name": "subtitle", "type": "string", "required": false, "maxLength": 50, "desc": "补充说明一句" },
+    { "name": "buttonLabel", "type": "string", "required": true, "maxLength": 10, "desc": "按钮文字，如：立即咨询" },
+    { "name": "buttonHref", "type": "string", "required": false, "desc": "按钮链接（默认 #）" }
+  ],
+  "cmsBindings": []
+}

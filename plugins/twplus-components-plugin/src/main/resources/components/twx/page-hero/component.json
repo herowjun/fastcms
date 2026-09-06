@@ -1,0 +1,17 @@
+{
+  "id": "page-hero",
+  "name": "栏目横幅",
+  "description": "内容页顶部开场横幅：大标题 + 副标题，承接导航后的第一视觉",
+  "category": "content",
+  "appliesTo": [],
+  "variants": [
+    { "id": "gradient", "description": "主色浅渐变底，居中标题（默认）" },
+    { "id": "minimal", "description": "白底极简，标题居中带分隔线" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 20, "desc": "栏目大标题，如：产品展示" },
+    { "name": "subtitle", "type": "string", "required": false, "maxLength": 60, "desc": "栏目一句话简介" },
+    { "name": "breadcrumb", "type": "string", "required": false, "maxLength": 30, "desc": "面包屑文字，如：首页 / 产品展示" }
+  ],
+  "cmsBindings": []
+}

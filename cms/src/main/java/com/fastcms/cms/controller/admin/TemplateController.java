@@ -406,15 +406,54 @@ public class TemplateController {
     }
 
     /**
-     * 菜单列表
+     * 恢复 AI 修图前的原图（模板编辑页图片预览窗「恢复原图」）
+     *
+     * <p>AI 修图回写模板图片前，原图自动备份为同目录 {@code xxx.ext.bak}（多次修图只保留
+     * 最早的原件备份）。本接口将备份覆盖回原路径，实现一键撤销修图。</p>
+     *
+     * @param filePath    图片文件路径（含模板目录前缀，与文件树格式一致）
+     * @param templateId 模板id（可选，缺省为当前激活模板）
+     * @return 无备份时返回失败（提示信息）
+     */
+    @PostMapping("file/restore-image")
+    @Secured(name = RESOURCE_NAME_TEMPLATE_FILE_SAVE, resource = "templates:file/save", action = ActionTypes.WRITE)
+    public Object restoreImage(@RequestParam("filePath") String filePath,
+                               @RequestParam(value = "templateId", required = false) String templateId) {
+        if (StringUtils.isBlank(filePath) || filePath.contains("..")) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_PATH_IS_ERROR));
+        }
+
+        Template template = resolveTemplate(templateId);
+        if (template == null) {
+            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_NOT_EXIST));
+        }
+
+        try {
+            Path target = getFilePath(template, filePath);
+            if (target == null || !Files.isRegularFile(target)) {
+                return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_EXIST));
+            }
+            Path backup = target.resolveSibling(target.getFileName().toString() + ".bak");
+            if (!Files.isRegularFile(backup)) {
+                return RestResultUtils.failed("该图片没有可恢复的备份（从未经过 AI 修图或备份已被清理）");
+            }
+            Files.copy(backup, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return RestResultUtils.success();
+        } catch (Exception e) {
+            return RestResultUtils.failed(I18nUtils.getMessage(FASTCMS_SYSTEM_ERROR).concat(
+                    e.getMessage() == null ? "" : ": " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 菜单列表（管理端：不做显示范围过滤，后台可见全部菜单）
      * @return
      */
     @RequestMapping("menu/list")
     @Secured(name = RESOURCE_NAME_TEMPLATE_MENU_LIST, resource = "templates:menu/list", action = ActionTypes.READ)
 	public RestResult<List<IMenuService.MenuNode> > menuList() {
-        return RestResultUtils.success(menuService.getMenus());
+        return RestResultUtils.success(menuService.getMenuNodeTree());
     }
-
     /**
      * 菜单信息
      * @param menuId

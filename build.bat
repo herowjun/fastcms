@@ -21,6 +21,11 @@ xcopy web\target\fastcms-web-*-exec.jar .dist /s /i
 xcopy web\src\main\resources\application-prod.yml .dist\config /s
 REM xcopy doc\sql\* .dist\config /s
 
+REM copy plugins
+for /d %%p in (plugins\*-plugin) do (
+    if exist "%%p\target\*.jar" xcopy "%%p\target\*.jar" .dist\plugins /y /i
+)
+
 REM copy htmls
 xcopy templates\src\main\resources .dist\htmls /s /i
 

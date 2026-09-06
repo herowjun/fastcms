@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="自然生态演示图">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ecfdf5"/>
+      <stop offset="1" stop-color="#a7f3d0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <circle cx="940" cy="180" r="80" fill="#fde68a"/>
+  <path d="M0 800 L0 520 L260 300 L480 520 L640 380 L900 620 L1200 400 L1200 800 Z" fill="#34d399" opacity="0.85"/>
+  <path d="M0 800 L0 640 L320 460 L560 640 L760 520 L1200 760 L1200 800 Z" fill="#10b981"/>
+  <g transform="translate(230 560)">
+    <path d="M0 0 C-8 -60 -6 -110 0 -150 C6 -110 8 -60 0 0" fill="#059669"/>
+    <path d="M0 -40 C-45 -55 -70 -85 -78 -120 C-40 -105 -12 -80 0 -40" fill="#10b981"/>
+    <path d="M0 -70 C45 -85 70 -115 78 -150 C40 -135 12 -110 0 -70" fill="#34d399"/>
+    <path d="M0 -110 C-30 -125 -48 -145 -54 -170 C-26 -158 -6 -140 0 -110" fill="#34d399"/>
+  </g>
+  <g fill="#ffffff" opacity="0.5">
+    <ellipse cx="420" cy="180" rx="70" ry="22"/>
+    <ellipse cx="470" cy="160" rx="50" ry="18"/>
+  </g>
+</svg>

@@ -5,6 +5,20 @@
 			<el-table :data="menuTableData" stripe style="width: 100%" row-key="id" :tree-props="{ children: 'children', hasChildren: 'hasChildren' }">
 				<el-table-column prop="menuName" label="名称" show-overflow-tooltip></el-table-column>
 				<el-table-column prop="menuUrl" label="跳转地址" show-overflow-tooltip></el-table-column>
+				<el-table-column label="显示范围" width="220">
+					<template #default="scope">
+						<el-tag v-if="scope.row.templateId" type="warning" size="small">专属：{{ templateNameOf(scope.row.templateId) }}</el-tag>
+						<template v-else>
+							<el-tag type="success" size="small">全局</el-tag>
+							<el-tag v-if="countCsv(scope.row.excludeTemplateIds) > 0" type="info" size="small" style="margin-left: 4px">
+								排除{{ countCsv(scope.row.excludeTemplateIds) }}个模板
+							</el-tag>
+							<el-tag v-if="countCsv(scope.row.excludeSiteKeys) > 0" type="danger" size="small" style="margin-left: 4px">
+								排除{{ countCsv(scope.row.excludeSiteKeys) }}个站点
+							</el-tag>
+						</template>
+					</template>
+				</el-table-column>
 				<el-table-column prop="sortNum" label="排序" show-overflow-tooltip></el-table-column>
 				<el-table-column prop="target" label="打开方式" show-overflow-tooltip></el-table-column>
 				<el-table-column label="操作" show-overflow-tooltip width="160">
@@ -29,12 +43,23 @@ import AddMenu from '/@/views/template/addMenu.vue';
 const templateApi = TemplateApi();
 const addMenuRef = ref();
 const state = reactive({
-	menuData: null
+	menuData: null,
+	// 已安装模板列表（显示范围列展示模板名）
+	templateList: [] as Array<any>,
 });
 // 获取 vuex 中的路由
 const menuTableData = computed(() => {
 	return state.menuData;
 });
+// 模板ID → 模板名（找不到时回退显示 ID）
+const templateNameOf = (templateId: string): string => {
+	const template = state.templateList.find((item: any) => item.id === templateId);
+	return template ? template.name : templateId;
+};
+// 逗号分隔字符串的条目数
+const countCsv = (csv: string | null | undefined): number => {
+	return (csv || '').split(',').filter((item: string) => item.trim().length > 0).length;
+};
 // 打开新增菜单弹窗
 const onOpenAddMenu = (row: object) => {
 	addMenuRef.value.openDialog("add", row);
@@ -68,6 +93,9 @@ const loadMenuList = () => {
 
 onMounted(() => {
 	loadMenuList();
+	templateApi.getTemplateList().then((res: any) => {
+		state.templateList = res.data || [];
+	}).catch(() => {});
 });
 
 </script>

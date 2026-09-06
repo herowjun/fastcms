@@ -41,6 +41,37 @@
 							</el-select>
 						</el-form-item>
 					</el-col>
+					<el-col :xs="24" :sm="24" :md="24" :lg="24" :xl="24" class="mb20">
+						<el-form-item label="显示范围" prop="scope">
+							<el-radio-group v-model="state.ruleForm.scope" @change="onScopeChange">
+								<el-radio label="global">全局（所有模板共用）</el-radio>
+								<el-radio label="template">指定模板专属</el-radio>
+							</el-radio-group>
+						</el-form-item>
+					</el-col>
+					<el-col v-if="state.ruleForm.scope === 'template'" :xs="24" :sm="12" :md="12" :lg="12" :xl="12" class="mb20">
+						<el-form-item label="所属模板" prop="templateId" :rules="[{ required: true, message: '请选择所属模板', trigger: 'change' }]">
+							<el-select v-model="state.ruleForm.templateId" placeholder="请选择模板" clearable class="w100">
+								<el-option v-for="item in state.templateList" :key="item.id" :label="item.name" :value="item.id"></el-option>
+							</el-select>
+						</el-form-item>
+					</el-col>
+					<template v-else>
+						<el-col :xs="24" :sm="12" :md="12" :lg="12" :xl="12" class="mb20">
+							<el-form-item label="排除模板" prop="excludeTemplateIds">
+								<el-select v-model="state.ruleForm.excludeTemplateIds" multiple collapse-tags placeholder="不选=所有模板都显示" clearable class="w100">
+									<el-option v-for="item in state.templateList" :key="item.id" :label="item.name" :value="item.id"></el-option>
+								</el-select>
+							</el-form-item>
+						</el-col>
+						<el-col :xs="24" :sm="12" :md="12" :lg="12" :xl="12" class="mb20">
+							<el-form-item label="排除站点" prop="excludeSiteKeys">
+								<el-select v-model="state.ruleForm.excludeSiteKeys" multiple filterable allow-create default-first-option
+									:reserve-keyword="false" placeholder="输入站点域名回车，不填=所有站点都显示" class="w100">
+								</el-select>
+							</el-form-item>
+						</el-col>
+					</template>
 				</el-row>
 			</el-form>
 			<template #footer>
@@ -65,29 +96,65 @@ const templateApi = TemplateApi();
 const state = reactive({
 	isShowDialog: false,
 	title: '',
+	// 已安装模板列表（显示范围配置用）
+	templateList: [] as Array<any>,
 	ruleForm: {
 		id: '',
 		parentId: '',
-		menuName: '', 
+		menuName: '',
 		menuUrl: '',
-		menuIcon: '', 
+		menuIcon: '',
 		sortNum: '',
 		target: '_self',
 		urlType: '',
+		// 显示范围：global=全局 / template=模板专属
+		scope: 'global',
+		templateId: '',
+		excludeTemplateIds: [] as Array<string>,
+		excludeSiteKeys: [] as Array<string>,
 	},
 	rules: {
 		"menuName": { required: true, message: '请输入菜单名称', trigger: 'blur' },
 		"menuUrl": { required: true, message: '请输入菜单地址', trigger: 'blur' },
 	},
 });
+// 加载模板列表
+const loadTemplateList = () => {
+	if (state.templateList.length > 0) return;
+	templateApi.getTemplateList().then((res: any) => {
+		state.templateList = res.data || [];
+	}).catch(() => {});
+};
+// 显示范围切换：模板专属时清空排除项，全局时清空专属模板
+const onScopeChange = () => {
+	if (state.ruleForm.scope === 'template') {
+		state.ruleForm.excludeTemplateIds = [];
+		state.ruleForm.excludeSiteKeys = [];
+	} else {
+		state.ruleForm.templateId = '';
+	}
+};
+// 逗号分隔字符串 → 数组（编辑回显）
+const csvToArray = (csv: string | null | undefined): Array<string> => {
+	return (csv || '').split(',').map((item: string) => item.trim()).filter((item: string) => item.length > 0);
+};
 // 打开弹窗
 const openDialog = (type: string, row?: any) => {
+	loadTemplateList();
 	if (type === 'edit') {
 		state.title = '修改菜单';
 		templateApi.getTemplateMenu(row.id).then(res => {
 			delete res.data.created;
 			delete res.data.updated;
-			state.ruleForm = res.data;
+			// 显示范围回显：templateId 非空=模板专属，否则全局 + 排除配置
+			const data = res.data;
+			state.ruleForm = {
+				...data,
+				scope: data.templateId ? 'template' : 'global',
+				templateId: data.templateId || '',
+				excludeTemplateIds: csvToArray(data.excludeTemplateIds),
+				excludeSiteKeys: csvToArray(data.excludeSiteKeys),
+			};
 		})
 	} else {
 		state.title = '新增菜单';
@@ -95,6 +162,10 @@ const openDialog = (type: string, row?: any) => {
 			// 清空表单，此项需加表单验证才能使用
 			myRefForm.value.resetFields();
 			state.ruleForm.id = '';
+			state.ruleForm.scope = 'global';
+			state.ruleForm.templateId = '';
+			state.ruleForm.excludeTemplateIds = [];
+			state.ruleForm.excludeSiteKeys = [];
 			// 设置菜单上级
 			state.ruleForm.parentId = row == null ? 0 : (row.id || 0);
 		});
@@ -120,7 +191,18 @@ const onSubmit = () => {
 
 	myRefForm.value.validate((valid: any) => {
 		if (valid) {
-			templateApi.saveTemplateMenu(state.ruleForm).then(() => {
+			// 显示范围：模板专属 → templateId；全局 → 排除配置（数组转逗号串）
+			const form: any = { ...state.ruleForm };
+			delete form.scope;
+			if (state.ruleForm.scope === 'template') {
+				form.excludeTemplateIds = '';
+				form.excludeSiteKeys = '';
+			} else {
+				form.templateId = '';
+				form.excludeTemplateIds = (state.ruleForm.excludeTemplateIds || []).join(',');
+				form.excludeSiteKeys = (state.ruleForm.excludeSiteKeys || []).join(',');
+			}
+			templateApi.saveTemplateMenu(form).then(() => {
 				closeDialog(); // 关闭弹窗
 				// 刷新菜单，未进行后端接口测试
 				initForm();

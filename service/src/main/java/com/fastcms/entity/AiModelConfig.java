@@ -73,6 +73,12 @@ public class AiModelConfig implements Serializable {
     private String model;
 
     /**
+     * 用途场景：chat-对话（默认） image-生图
+     * <p>同一场景内仅一条激活配置；生图场景用于 qwen-image 等 DashScope 生图模型。</p>
+     */
+    private String scene;
+
+    /**
      * 温度参数 0.0-2.0
      */
     private Double temperature;
@@ -129,6 +135,9 @@ public class AiModelConfig implements Serializable {
 
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
+
+    public String getScene() { return scene; }
+    public void setScene(String scene) { this.scene = scene; }
 
     public Double getTemperature() { return temperature; }
     public void setTemperature(Double temperature) { this.temperature = temperature; }

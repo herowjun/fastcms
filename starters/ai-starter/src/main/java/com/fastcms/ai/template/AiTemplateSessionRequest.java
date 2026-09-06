@@ -51,6 +51,14 @@ public class AiTemplateSessionRequest implements Serializable {
      */
     private String templateId;
 
+    /**
+     * 是否适配移动端（可选，默认 true）
+     *
+     * <p>开启时生成响应式布局（多端断点 + 移动端汉堡菜单）；
+     * 关闭时专注桌面端设计。null 视为 true（兼容旧客户端）。</p>
+     */
+    private Boolean mobileAdaptive;
+
     public String getTemplateName() {
         return templateName;
     }
@@ -81,6 +89,14 @@ public class AiTemplateSessionRequest implements Serializable {
 
     public void setTemplateId(String templateId) {
         this.templateId = templateId;
+    }
+
+    public Boolean getMobileAdaptive() {
+        return mobileAdaptive;
+    }
+
+    public void setMobileAdaptive(Boolean mobileAdaptive) {
+        this.mobileAdaptive = mobileAdaptive;
     }
 
 }

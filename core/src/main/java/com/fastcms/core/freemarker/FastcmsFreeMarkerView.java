@@ -267,7 +267,16 @@ public class FastcmsFreeMarkerView extends AbstractTemplateView {
 
 		// Grab the locale-specific version of the template.
 		Locale locale = RequestContextUtils.getLocale(request);
-		processTemplate(getTemplate(locale), fmModel, response);
+
+		// 模板浏览态（/{模板pathName}/）：渲染到内存缓冲并重写站内链接后写回，
+		// 使浏览未启用模板时站内跳转保持在浏览态（见 TemplateBrowseLinkRewriteSupport）
+		String browsePrefix = com.fastcms.core.template.TemplateBrowseLinkRewriteSupport.resolveBrowsePrefix(request);
+		if (browsePrefix != null) {
+			com.fastcms.core.template.TemplateBrowseLinkRewriteSupport.processWithRewrite(
+					getTemplate(locale), fmModel, request, response, browsePrefix);
+		} else {
+			processTemplate(getTemplate(locale), fmModel, response);
+		}
 	}
 
 	/**

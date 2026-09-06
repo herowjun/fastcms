@@ -289,7 +289,8 @@ public class LegacyTemplateUpgrader {
                         PageSpec.PAGE_INDEX, new PageSpecPage(indexSections),
                         PageSpec.PAGE_ARTICLE_LIST, new PageSpecPage(frameSections),
                         PageSpec.PAGE_ARTICLE, new PageSpecPage(frameSections),
-                        PageSpec.PAGE_PAGE, new PageSpecPage(frameSections)));
+                        PageSpec.PAGE_PAGE, new PageSpecPage(frameSections)),
+                null);
     }
 
     /**

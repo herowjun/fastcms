@@ -66,5 +66,15 @@ export function ClientAttachApi() {
 				method: 'post'
 			});
 		},
+
+		/**
+		 * 附件目录树（含各目录附件计数，只统计当前用户自己的附件）
+		 */
+		getDirTree() {
+			return request({
+				url: '/client/attachment/dir/tree',
+				method: 'get'
+			});
+		},
 	};
 }

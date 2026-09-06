@@ -1,0 +1,15 @@
+{
+  "id": "team-grid",
+  "name": "团队展示",
+  "description": "团队成员网格卡片：头像占位 + 姓名 + 职务 + 简介",
+  "category": "content",
+  "appliesTo": [],
+  "variants": [
+    { "id": "default", "description": "三列居中卡片，头像为图标占位" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：核心团队" },
+    { "name": "items", "type": "list", "required": true, "desc": "成员列表（3-6 项），每项含 name(≤8字)/role(≤12字)/bio(≤40字)" }
+  ],
+  "cmsBindings": []
+}

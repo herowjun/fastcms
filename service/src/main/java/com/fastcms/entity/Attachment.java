@@ -53,6 +53,11 @@ public class Attachment implements Serializable {
     private String fileType;
 
     /**
+     * 所属目录ID（0=未分类）
+     */
+    private Long directoryId;
+
+    /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)
@@ -133,6 +138,14 @@ public class Attachment implements Serializable {
 
     public void setFileType(String fileType) {
         this.fileType = fileType;
+    }
+
+    public Long getDirectoryId() {
+        return directoryId;
+    }
+
+    public void setDirectoryId(Long directoryId) {
+        this.directoryId = directoryId;
     }
 
     /**

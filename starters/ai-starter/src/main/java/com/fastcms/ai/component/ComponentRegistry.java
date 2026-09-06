@@ -16,20 +16,29 @@
  */
 package com.fastcms.ai.component;
 
+import org.springframework.beans.BeansException;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 组件注册中心：聚合所有 {@link SectionComponentProvider}，对渲染引擎/AI 统一供给组件
  *
- * <p>注册中心是"组件从哪来"的终点抽象——内置包（classpath 资源）与未来的插件包（PF4J Extension）
- * 在这里被拉平：引擎只认 {@code packId:componentId} 全名，不关心供给方式。
- * 插件启动/停止时可通过 {@link #refresh(List)} 重建（P1 只有内置包，启动时一次注册即可）。</p>
+ * <p>注册中心是"组件从哪来"的终点抽象——内置包（classpath 资源）与插件包（PF4J Extension）
+ * 在这里被拉平：引擎只认 {@code packId:componentId} 全名，不关心供给方式。</p>
+ *
+ * <p><b>插件动态装卸（1.2）</b>：插件组件包以 {@code @Extension} 实现 SectionComponentProvider，
+ * 由 plugin-starter 的 ExtensionsRegister 注册为 Spring 单例（装卸时增删）。
+ * 本类通过 {@link #ensureFresh()} 惰性感知容器内 provider 集合变化（1 秒节流），
+ * 插件安装后下一次生成/渲染自动纳入新组件，卸载后自动剔除——无需事件耦合。</p>
  *
  * <p>AI 规划用的"组件菜单"由 {@link #buildManifest()} 生成——只含元数据，不含源码。</p>
  *
@@ -37,9 +46,21 @@ import java.util.Optional;
  * @since 0.2.0
  */
 @Component
-public class ComponentRegistry {
+public class ComponentRegistry implements ApplicationContextAware {
 
-    private final Map<String, RegisteredComponent> components = new LinkedHashMap<>();
+    /**
+     * 惰性刷新检查节流间隔（纳秒）：ensureFresh 高频调用（渲染/校验循环内），
+     * 实际容器扫描最多每秒一次
+     */
+    private static final long REFRESH_CHECK_INTERVAL_NANOS = 1_000_000_000L;
+
+    private volatile Map<String, RegisteredComponent> components = Map.of();
+
+    private volatile List<SectionComponentProvider> providers = List.of();
+
+    private volatile ApplicationContext applicationContext;
+
+    private volatile long lastCheckNanos = 0L;
 
     /**
      * 已注册组件：元数据 + 供给方（取 FTL 源码/包资产用）
@@ -52,15 +73,20 @@ public class ComponentRegistry {
         refresh(providers);
     }
 
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
+    }
+
     /**
-     * 重建注册表（启动时调用；未来插件装卸时重新调用）
+     * 重建注册表（构造时调用；ensureFresh 检测到容器 provider 集合变化时重建）
      */
-    public void refresh(List<SectionComponentProvider> providers) {
-        components.clear();
+    public synchronized void refresh(List<SectionComponentProvider> providers) {
+        Map<String, RegisteredComponent> map = new LinkedHashMap<>();
         for (SectionComponentProvider provider : providers) {
             for (ComponentDescriptor descriptor : provider.listComponents()) {
                 String fullId = provider.getPackId() + ":" + descriptor.id();
-                RegisteredComponent previous = components.put(fullId,
+                RegisteredComponent previous = map.put(fullId,
                         new RegisteredComponent(fullId, descriptor, provider));
                 if (previous != null) {
                     throw new IllegalStateException("组件 id 冲突: " + fullId
@@ -68,17 +94,49 @@ public class ComponentRegistry {
                 }
             }
         }
+        this.providers = List.copyOf(providers);
+        this.components = map;
+    }
+
+    /**
+     * 惰性感知插件装卸：容器内 SectionComponentProvider bean 集合与当前注册集合不一致时重建。
+     * 无 ApplicationContext（单元测试直接构造）时不做任何事。
+     */
+    private void ensureFresh() {
+        ApplicationContext context = this.applicationContext;
+        if (context == null) {
+            return;
+        }
+        long now = System.nanoTime();
+        if (now - lastCheckNanos < REFRESH_CHECK_INTERVAL_NANOS) {
+            return;
+        }
+        lastCheckNanos = now;
+        try {
+            Map<String, SectionComponentProvider> beans =
+                    context.getBeansOfType(SectionComponentProvider.class);
+            Set<SectionComponentProvider> beanSet = new HashSet<>(beans.values());
+            Set<SectionComponentProvider> currentSet = new HashSet<>(providers);
+            if (!beanSet.equals(currentSet)) {
+                refresh(new ArrayList<>(beans.values()));
+            }
+        } catch (Exception e) {
+            // 容器刷新期（插件装卸进行中）的瞬时异常忽略，下次检查重试
+        }
     }
 
     public List<RegisteredComponent> listComponents() {
+        ensureFresh();
         return new ArrayList<>(components.values());
     }
 
     public Optional<RegisteredComponent> find(String fullId) {
+        ensureFresh();
         return Optional.ofNullable(components.get(fullId));
     }
 
     public ComponentDescriptor getDescriptor(String fullId) {
+        ensureFresh();
         RegisteredComponent rc = components.get(fullId);
         return rc == null ? null : rc.descriptor();
     }
@@ -87,6 +145,7 @@ public class ComponentRegistry {
      * 取组件某个变体的 FTL 源码
      */
     public String getTemplateSource(String fullId, String variantId) {
+        ensureFresh();
         RegisteredComponent rc = components.get(fullId);
         return rc == null ? null : rc.provider().getTemplateSource(rc.descriptor().id(), variantId);
     }
@@ -95,6 +154,7 @@ public class ComponentRegistry {
      * 找出最接近的组件 id（校验失败时给 AI 提示用）
      */
     public List<String> suggestSimilar(String wrongId) {
+        ensureFresh();
         String target = wrongId == null ? "" : wrongId.toLowerCase();
         return components.keySet().stream()
                 .filter(id -> id.toLowerCase().contains(target)
@@ -114,6 +174,7 @@ public class ComponentRegistry {
      * </pre>
      */
     public String buildManifest() {
+        ensureFresh();
         StringBuilder sb = new StringBuilder("## 可用组件清单\n\n");
         for (RegisteredComponent rc : components.values()) {
             ComponentDescriptor d = rc.descriptor();

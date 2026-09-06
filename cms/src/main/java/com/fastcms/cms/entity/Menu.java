@@ -83,6 +83,22 @@ public class Menu implements Serializable, StaticPathHelper, Language {
     private String status;
 
     /**
+     * 专属模板ID：NULL=全局菜单（所有模板共用），非空=仅该模板显示
+     * （当前模板存在专属菜单时，全局菜单整体隐藏，专属菜单完全替代）
+     */
+    private String templateId;
+
+    /**
+     * 排除显示的模板ID列表，逗号分隔（仅全局菜单生效）
+     */
+    private String excludeTemplateIds;
+
+    /**
+     * 排除显示的站点key列表（域名或路径），逗号分隔（仅全局菜单生效）
+     */
+    private String excludeSiteKeys;
+
+    /**
      * 语言
      */
     private String language;
@@ -171,6 +187,30 @@ public class Menu implements Serializable, StaticPathHelper, Language {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getTemplateId() {
+        return templateId;
+    }
+
+    public void setTemplateId(String templateId) {
+        this.templateId = templateId;
+    }
+
+    public String getExcludeTemplateIds() {
+        return excludeTemplateIds;
+    }
+
+    public void setExcludeTemplateIds(String excludeTemplateIds) {
+        this.excludeTemplateIds = excludeTemplateIds;
+    }
+
+    public String getExcludeSiteKeys() {
+        return excludeSiteKeys;
+    }
+
+    public void setExcludeSiteKeys(String excludeSiteKeys) {
+        this.excludeSiteKeys = excludeSiteKeys;
     }
 
     public String getLanguage() {

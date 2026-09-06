@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="产品演示图">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef2ff"/>
+      <stop offset="1" stop-color="#c7d2fe"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <circle cx="1010" cy="140" r="220" fill="#a5b4fc" opacity="0.35"/>
+  <circle cx="170" cy="680" r="180" fill="#818cf8" opacity="0.25"/>
+  <g transform="translate(600 420)">
+    <path d="M-230 -60 L0 -170 L230 -60 L230 130 L0 240 L-230 130 Z" fill="url(#box)" opacity="0.92"/>
+    <path d="M-230 -60 L0 55 L230 -60 L0 -170 Z" fill="#818cf8"/>
+    <path d="M0 55 L0 240 L230 130 L230 -60 Z" fill="#4338ca" opacity="0.85"/>
+    <path d="M-230 -60 L0 55 L0 240 L-230 130 Z" fill="#3730a3" opacity="0.9"/>
+  </g>
+  <g fill="#4338ca" opacity="0.5">
+    <circle cx="330" cy="250" r="10"/>
+    <circle cx="880" cy="560" r="14"/>
+    <circle cx="920" cy="300" r="7"/>
+  </g>
+</svg>

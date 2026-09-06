@@ -1,0 +1,18 @@
+{
+  "id": "content-section",
+  "name": "图文内容区",
+  "description": "标题 + 段落文案的通用内容区块，可配示意图（image 留空时以图标色块占位）",
+  "category": "content",
+  "appliesTo": [],
+  "variants": [
+    { "id": "split", "description": "左文右图分栏（默认）" },
+    { "id": "centered", "description": "居中窄栏段落" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": true, "maxLength": 16, "desc": "区块标题，如：我们的理念" },
+    { "name": "paragraphs", "type": "list", "required": true, "desc": "段落列表（1-3 段，每段 ≤120 字）" },
+    { "name": "image", "type": "string", "required": false, "desc": "示意图 URL（可空，空时以图标色块占位）" },
+    { "name": "icon", "type": "string", "required": false, "maxLength": 4, "desc": "占位图标 emoji（如 🌱），image 为空时显示" }
+  ],
+  "cmsBindings": []
+}

@@ -27,6 +27,8 @@ import com.fastcms.core.auth.AuthUtils;
 import com.fastcms.core.mybatis.PageModel;
 import com.fastcms.core.utils.AttachUtils;
 import com.fastcms.entity.Attachment;
+import com.fastcms.entity.AttachmentDirectory;
+import com.fastcms.service.IAttachmentDirectoryService;
 import com.fastcms.service.IAttachmentService;
 import com.fastcms.utils.I18nUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -36,6 +38,7 @@ import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
+import java.util.List;
 
 import static com.fastcms.service.IAttachmentService.AttachmentI18n.*;
 
@@ -54,20 +57,27 @@ public class AttachmentApi {
 	@Autowired
 	private IAttachmentService attachmentService;
 
+	@Autowired
+	private IAttachmentDirectoryService attachmentDirectoryService;
+
 	/**
 	 * 附件列表
 	 * @param page
+	 * @param fileType  文件类型
 	 * @param fileName  文件名称模糊搜索
+	 * @param directoryId 目录过滤（不传=全部；0=未分类）
 	 * @return
 	 */
 	@RequestMapping("list")
 	public RestResult<Page<Attachment>> list(PageModel page,
 											 @RequestParam(value = "fileType", required = false) String fileType,
-											 @RequestParam(value = "fileName", required = false) String fileName) {
+											 @RequestParam(value = "fileName", required = false) String fileName,
+											 @RequestParam(value = "directoryId", required = false) Long directoryId) {
 		Page<Attachment> pageData = attachmentService.page(page.toPage(),
 				Wrappers.<Attachment>lambdaQuery().eq(Attachment::getCreateUserId, AuthUtils.getUserId())
 						.eq(StringUtils.isNotBlank(fileType), Attachment::getFileType, fileType)
 						.like(StringUtils.isNotBlank(fileName), Attachment::getFileName, fileName)
+						.eq(directoryId != null, Attachment::getDirectoryId, directoryId)
 						.orderByDesc(Attachment::getCreated));
 		return RestResultUtils.success(pageData);
 	}
@@ -75,12 +85,22 @@ public class AttachmentApi {
 	/**
 	 * 上传附件
 	 * @param files     待上传文件
+	 * @param directoryId 归档目录ID（可选，0/null=未分类）
 	 * @return
 	 */
 	@PostMapping("upload")
 	@ExceptionHandler(value = MultipartException.class)
-	public Object upload(@RequestParam("files") MultipartFile files[]) {
-		return AttachUtils.upload(files, attachmentService);
+	public Object upload(@RequestParam("files") MultipartFile files[],
+						 @RequestParam(value = "directoryId", required = false) Long directoryId) {
+		return AttachUtils.upload(files, attachmentService, directoryId);
+	}
+
+	/**
+	 * 目录树（含各目录附件计数，只统计当前用户自己的附件）
+	 */
+	@GetMapping("dir/tree")
+	public RestResult<List<AttachmentDirectory>> dirTree() {
+		return RestResultUtils.success(attachmentDirectoryService.getTree(AuthUtils.getUserId(), false));
 	}
 
 	/**

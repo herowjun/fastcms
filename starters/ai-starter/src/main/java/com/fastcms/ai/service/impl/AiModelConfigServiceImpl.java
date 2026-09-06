@@ -64,15 +64,22 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
 
     @Override
     public AiModelConfig getActiveConfig() {
+        return getActiveConfig(IAiModelConfigService.SCENE_CHAT);
+    }
+
+    @Override
+    public AiModelConfig getActiveConfig(String scene) {
         AiModelConfig active = getOne(Wrappers.<AiModelConfig>lambdaQuery()
                 .eq(AiModelConfig::getActive, true)
+                .eq(AiModelConfig::getScene, scene)
                 .orderByAsc(AiModelConfig::getSortNum)
                 .last("limit 1"));
         if (active != null) {
             return active;
         }
-        // 没有激活的，返回最新的一条
+        // 没有激活的，返回该场景最新的一条
         return getOne(Wrappers.<AiModelConfig>lambdaQuery()
+                .eq(AiModelConfig::getScene, scene)
                 .orderByDesc(AiModelConfig::getId)
                 .last("limit 1"));
     }
@@ -86,12 +93,23 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
         }
         // 原子化激活：两条 UPDATE 在同一事务内完成，避免并发下出现多个激活配置
         // （旧的"先全部置 false 再置 true"两步操作在并发时可能留下中间状态）
-        baseMapper.deactivateOthers(id);
+        // 互斥范围限定在同场景内（chat 与 image 各自独立激活）
+        String scene = normalizeScene(config.getScene());
+        baseMapper.deactivateOthers(id, scene);
         int rows = baseMapper.activateById(id);
         if (rows == 0) {
             throw new IllegalStateException("激活失败: 配置不存在或已并发变更, id=" + id);
         }
-        log.info("AI 模型配置激活: id={}, name={}, model={}", id, config.getName(), config.getModel());
+        log.info("AI 模型配置激活: id={}, name={}, model={}, scene={}", id, config.getName(), config.getModel(), scene);
+    }
+
+    /**
+     * 场景归一化：历史数据 scene 为空视为 chat
+     */
+    static String normalizeScene(String scene) {
+        return IAiModelConfigService.SCENE_IMAGE.equals(scene)
+                ? IAiModelConfigService.SCENE_IMAGE
+                : IAiModelConfigService.SCENE_CHAT;
     }
 
     @Override
@@ -132,16 +150,18 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
         }
         // apiKey 加密落库（幂等：空值或已加密值原样返回；历史明文在本次保存时自动转为密文）
         config.setApiKey(AiApiKeyCipher.encrypt(config.getApiKey()));
+        // 场景归一化：历史数据/前端缺省视为 chat
+        config.setScene(normalizeScene(config.getScene()));
         // 如果是新增且 active 未指定，默认 false
         if (config.getId() == null && config.getActive() == null) {
             config.setActive(false);
         }
-        // 如果本次激活，先把其他全部取消激活（原子 UPDATE，避免并发出现多个激活配置）
+        // 如果本次激活，先把同场景的其他配置取消激活（原子 UPDATE，避免并发出现多个激活配置）
         if (Boolean.TRUE.equals(config.getActive())) {
             if (config.getId() != null) {
-                baseMapper.deactivateOthers(config.getId());
+                baseMapper.deactivateOthers(config.getId(), config.getScene());
             } else {
-                baseMapper.deactivateAll();
+                baseMapper.deactivateAllByScene(config.getScene());
             }
         }
         saveOrUpdate(config);

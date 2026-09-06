@@ -28,11 +28,20 @@ import com.fastcms.ai.template.AiTemplateConstants;
 import com.fastcms.ai.template.AiTemplateFileDto;
 import com.fastcms.ai.template.AiTemplateResponseParser;
 import com.fastcms.ai.template.AiTemplateSessionRequest;
+import com.fastcms.ai.template.ComponentGenPromptBuilder;
 import com.fastcms.ai.template.IAiTemplateGenService;
 import com.fastcms.ai.template.TemplateGenPromptBuilder;
+import com.fastcms.ai.component.PageSpecParser;
+import com.fastcms.ai.component.PageSpecRenderer;
 import com.fastcms.ai.support.FileProgressScanner;
 import com.fastcms.ai.support.ReplyStreamExtractor;
 import com.fastcms.ai.tool.AiToolCallbackProvider;
+import com.fastcms.cms.entity.ArticleCategory;
+import com.fastcms.cms.entity.Menu;
+import com.fastcms.cms.entity.SinglePage;
+import com.fastcms.cms.service.IArticleCategoryService;
+import com.fastcms.cms.service.IMenuService;
+import com.fastcms.cms.service.ISinglePageService;
 import com.fastcms.common.utils.DirUtils;
 import com.fastcms.core.template.Template;
 import com.fastcms.core.template.TemplateService;
@@ -269,6 +278,12 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private AiToolCallbackProvider toolCallbackProvider;
 
     /**
+     * 附件服务（图片槽位点选换图：附件 ID → URL 解析）
+     */
+    @Autowired
+    private com.fastcms.service.IAttachmentService attachmentService;
+
+    /**
      * 组件化生成管线（AI 输出 PageSpec → PageSpecRenderer 渲染）：
      * component（默认）/ html（直写 HTML 的旧分批流水线），可配置回退
      */
@@ -287,6 +302,21 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Autowired
     private com.fastcms.ai.component.PageSpecRenderer pageSpecRenderer;
 
+    @Autowired
+    private com.fastcms.ai.component.AttachmentImageSearcher attachmentImageSearcher;
+
+    /**
+     * 站点数据初始化（应用模板时按 _pagespec.json 的信息架构补建菜单/分类/单页）
+     */
+    @Autowired
+    private IMenuService menuService;
+
+    @Autowired
+    private IArticleCategoryService articleCategoryService;
+
+    @Autowired
+    private ISinglePageService singlePageService;
+
     // ==================== 会话管理 ====================
 
     @Override
@@ -296,6 +326,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         AiTemplateSession session = new AiTemplateSession();
         session.setSessionId(UUID.randomUUID().toString().replace("-", ""));
         session.setRequirement(request.getRequirement());
+        // 移动端适配选项：null 视为 true（兼容旧客户端与调整型会话）
+        session.setMobileAdaptive(request.getMobileAdaptive() == null || request.getMobileAdaptive());
         session.setStatus(AiTemplateConstants.STATUS_ACTIVE);
         session.setUserId(userId);
 
@@ -329,6 +361,13 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Override
     public AiTemplateSession getSession(String sessionId) {
         return sessionService.getBySessionId(sessionId);
+    }
+
+    /**
+     * 会话的移动端适配选项：null 视为 true（旧会话/调整型会话未设置时保持响应式默认）
+     */
+    private boolean isMobileAdaptive(AiTemplateSession session) {
+        return session.getMobileAdaptive() == null || session.getMobileAdaptive();
     }
 
     @Override
@@ -448,10 +487,182 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         return summary;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public java.util.List<String> updateImageSlot(String sessionId, String sectionId, String slot, Long attachmentId) {
+        AiTemplateSession session = getSession(sessionId);
+        if (session == null) {
+            throw new IllegalArgumentException("会话不存在");
+        }
+        if (!StringUtils.hasText(sectionId) || !StringUtils.hasText(slot)) {
+            throw new IllegalArgumentException("缺少图片槽位标识（sectionId/slot）");
+        }
+        if (attachmentId == null) {
+            throw new IllegalArgumentException("缺少附件ID");
+        }
+        Path workDir = resolveEffectiveWorkDir(session);
+        if (!Files.isRegularFile(workDir.resolve(COMPONENT_SPEC_FILE))) {
+            throw new IllegalArgumentException("当前模板未组件化（缺少 " + COMPONENT_SPEC_FILE + "），不支持点选换图");
+        }
+
+        // 附件 → URL（服务端解析，前端只传附件 ID）
+        com.fastcms.entity.Attachment attachment = attachmentService.getById(attachmentId);
+        if (attachment == null) {
+            throw new IllegalArgumentException("附件不存在: " + attachmentId);
+        }
+        String imageUrl;
+        try {
+            imageUrl = attachment.getPath();
+        } catch (Exception e) {
+            // 无应用上下文（理论上不可达，防御式兜底）：站内绝对路径
+            imageUrl = "/" + attachment.getFilePath();
+        }
+
+        // 读 spec → 定位 section 槽位 → 替换值 + imageAssets 解析记录
+        com.fastcms.ai.component.PageSpec spec;
+        try {
+            String raw = Files.readString(workDir.resolve(COMPONENT_SPEC_FILE), StandardCharsets.UTF_8);
+            spec = pageSpecParser.parseResponse(raw).pagespec();
+        } catch (IOException e) {
+            throw new IllegalStateException("读取 PageSpec 失败: " + e.getMessage(), e);
+        }
+        if (spec == null || spec.pages() == null) {
+            throw new IllegalStateException("PageSpec 解析失败，请回到 AI 对话中修复后重试");
+        }
+
+        java.util.Map<String, com.fastcms.ai.component.PageSpecPage> newPages = new java.util.LinkedHashMap<>();
+        boolean updated = false;
+        for (Map.Entry<String, com.fastcms.ai.component.PageSpecPage> entry : spec.pages().entrySet()) {
+            List<com.fastcms.ai.component.SectionSpec> newSections = new ArrayList<>();
+            boolean pageChanged = false;
+            for (com.fastcms.ai.component.SectionSpec section : entry.getValue().safeSections()) {
+                if (sectionId.equals(section.id())) {
+                    Map<String, Object> data = new java.util.LinkedHashMap<>(section.safeData());
+                    data.put(slot, imageUrl);
+                    newSections.add(new com.fastcms.ai.component.SectionSpec(
+                            section.id(), section.component(), section.variant(), data));
+                    pageChanged = true;
+                } else {
+                    newSections.add(section);
+                }
+            }
+            newPages.put(entry.getKey(), pageChanged
+                    ? new com.fastcms.ai.component.PageSpecPage(newSections, entry.getValue().standalone())
+                    : entry.getValue());
+            updated |= pageChanged;
+        }
+        if (!updated) {
+            throw new IllegalArgumentException(
+                    "图片槽位定位失败: " + sectionId + "." + slot + "（模板可能已被 AI 修改，请刷新预览后重试）");
+        }
+
+        // imageAssets 解析记录：旧 URL 记录自然淘汰（不再被引用），新记录供后续微调轮沿用
+        List<com.fastcms.ai.component.ImageAssetSpec> assets = new ArrayList<>(spec.safeImageAssets());
+        final String resolvedUrl = imageUrl;
+        assets.removeIf(a -> resolvedUrl.equals(a.resolved()));
+        assets.add(new com.fastcms.ai.component.ImageAssetSpec(
+                null, imageUrl, com.fastcms.ai.component.ImageAssetSpec.SOURCE_ATTACHMENT, attachmentId));
+        spec = new com.fastcms.ai.component.PageSpec(spec.specVersion(), spec.foundation(),
+                spec.templateName(), spec.siteName(), spec.siteType(), spec.stylePreset(),
+                spec.primaryColor(), spec.safeSite(), newPages, assets);
+
+        // 校验（media 槽位 URL 合法性）→ 重渲染 → 持久化
+        List<String> errors = pageSpecValidator.validate(spec);
+        if (!errors.isEmpty()) {
+            throw new IllegalArgumentException("图片槽位更新未通过校验: " + String.join("; ", errors));
+        }
+        com.fastcms.ai.component.PageSpecRenderer.RenderResult renderResult;
+        try {
+            renderResult = pageSpecRenderer.render(spec, workDir, isMobileAdaptive(session));
+        } catch (IOException e) {
+            throw new IllegalStateException("模板重渲染失败: " + e.getMessage(), e);
+        }
+        List<String> writtenFiles = new ArrayList<>(renderResult.writtenFiles());
+        for (String relPath : writtenFiles) {
+            try {
+                String content = Files.readString(workDir.resolve(relPath), StandardCharsets.UTF_8);
+                fileService.saveOrUpdateFile(sessionId, relPath, content, AiTemplateConstants.ACTION_MODIFY);
+            } catch (Exception e) {
+                log.warn("图片槽位更新产物持久化失败: sessionId={}, path={}", sessionId, relPath, e);
+            }
+        }
+
+        // 消息流留痕（衔接后续 AI 微调与回看）
+        messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
+                "🖼️ 已更换图片槽位 " + sectionId + "." + slot + "（附件: " + attachment.getFileName() + "）");
+        log.info("图片槽位更新完成: sessionId={}, {}.{} -> attachmentId={}, written={}",
+                sessionId, sectionId, slot, attachmentId, writtenFiles.size());
+        return writtenFiles;
+    }
+
+    @Override
+    public void updatePreviewImage(String sessionId, String imageUrl, Long attachmentId) {
+        AiTemplateSession session = getSession(sessionId);
+        if (session == null) {
+            throw new IllegalArgumentException("会话不存在");
+        }
+        if (!StringUtils.hasText(imageUrl)) {
+            throw new IllegalArgumentException("缺少原图片地址");
+        }
+        if (attachmentId == null) {
+            throw new IllegalArgumentException("缺少附件ID");
+        }
+        // 附件 → URL（服务端解析，前端只传附件 ID）
+        com.fastcms.entity.Attachment attachment = attachmentService.getById(attachmentId);
+        if (attachment == null) {
+            throw new IllegalArgumentException("附件不存在: " + attachmentId);
+        }
+        String newUrl;
+        try {
+            newUrl = attachment.getPath();
+        } catch (Exception e) {
+            // 无应用上下文（理论上不可达，防御式兜底）：站内绝对路径
+            newUrl = "/" + attachment.getFilePath();
+        }
+
+        // 读写 workDir 的 _preview_data.json：保留既有演示数据字段，仅更新 imageOverrides 映射
+        Path workDir = resolveEffectiveWorkDir(session);
+        Path file = workDir.resolve(AiTemplateConstants.FILE_PREVIEW_DATA);
+        tools.jackson.databind.node.ObjectNode root;
+        if (Files.isRegularFile(file)) {
+            try {
+                tools.jackson.databind.JsonNode existing =
+                        JSON_MAPPER.readTree(Files.readString(file, StandardCharsets.UTF_8));
+                root = existing != null && existing.isObject()
+                        ? (tools.jackson.databind.node.ObjectNode) existing
+                        : JSON_MAPPER.createObjectNode();
+            } catch (Exception e) {
+                // 不覆盖用户手写的演示数据：解析失败直接报错，提示人工修复
+                throw new IllegalStateException("预览数据文件解析失败: " + file + "，请检查 JSON 格式后重试");
+            }
+        } else {
+            root = JSON_MAPPER.createObjectNode();
+        }
+        // key 为模板渲染输出的原样 URL（含内联 SVG data URI），与 mock 数据构造时的查询键一致
+        tools.jackson.databind.node.ObjectNode overrides =
+                root.has("imageOverrides") && root.get("imageOverrides").isObject()
+                        ? (tools.jackson.databind.node.ObjectNode) root.get("imageOverrides")
+                        : root.putObject("imageOverrides");
+        overrides.put(imageUrl, newUrl);
+        try {
+            Files.writeString(file, JSON_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root),
+                    StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("写入预览数据文件失败: " + e.getMessage(), e);
+        }
+
+        // 消息流留痕（区别于槽位换图：明确告知仅预览生效）
+        messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
+                "🖼️ 已更换预览演示图片（仅预览生效，正式环境的图片由文章数据决定）");
+        log.info("预览演示图片更新完成: sessionId={}, attachmentId={}, keyLength={}",
+                sessionId, attachmentId, imageUrl.length());
+    }
+
     // ==================== SSE 流式对话 ====================
 
     @Override
-    public void chatStream(String sessionId, String userInput, String currentFile, SseEmitter emitter) {
+    public void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
+                           String focusElementHint, SseEmitter emitter) {
         // SSE 通道封装：send 失败/断开回调即标记取消，各生成轮次检测后中断（见 SseChannel）
         SseChannel channel = new SseChannel(emitter);
         AiTemplateSession session = getSession(sessionId);
@@ -467,7 +678,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         try {
             sseExecutor.execute(() -> {
                 try {
-                    doChatStream(session, userInput, currentFile, channel);
+                    doChatStream(session, userInput, currentFile, focusSectionId, focusElementHint, channel);
                 } catch (ChatCancelledException ce) {
                     // 客户端断开/用户停止：已生成的文件已落盘（断点续传语义保留），
                     // 落一条带标记的 assistant 消息，避免刷新后无法追溯这轮为何没有结果
@@ -516,7 +727,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      *     <li>通过 SSE 推送事件给前端</li>
      * </ol>
      */
-    private void doChatStream(AiTemplateSession session, String userInput, String currentFile, SseChannel channel) throws Exception {
+    private void doChatStream(AiTemplateSession session, String userInput, String currentFile,
+                              String focusSectionId, String focusElementHint, SseChannel channel) throws Exception {
         // 0. 配额检查（fastcms.ai.daily-token-quota，超限直接拒绝，不产生模型调用）
         try {
             quotaChecker.check(session.getUserId());
@@ -532,7 +744,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         org.springframework.ai.chat.metadata.Usage[] lastUsage = {null};
 
         try {
-            doChatStreamInternal(session, userInput, currentFile, channel, lastUsage);
+            doChatStreamInternal(session, userInput, currentFile, focusSectionId, focusElementHint, channel, lastUsage);
             succeeded[0] = true;
         } catch (Exception e) {
             errorMessage[0] = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -566,6 +778,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     private void doChatStreamInternal(AiTemplateSession session, String userInput, String currentFile,
+                                      String focusSectionId, String focusElementHint,
                                       SseChannel channel, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
         // 1. 获取激活的模型配置
         AiModelConfig modelConfig = modelConfigService.getActiveConfig();
@@ -583,8 +796,13 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         List<AiTemplateMessage> history = messageService.listBySessionId(session.getSessionId());
         boolean isFirstChat = history.isEmpty();
 
-        // 3. 保存用户消息（分批/单轮两条路径都需要；历史加载在保存之前，不会重复注入）
-        messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_USER, userInput);
+        // 3. 保存用户消息（分批/单轮两条路径都需要；历史加载在保存之前，不会重复注入）。
+        //    带选中区块时加前缀：消息流回看时可辨识本轮针对的区块，后续轮次历史注入也自然携带上下文
+        boolean hasFocus = StringUtils.hasText(focusSectionId);
+        String savedInput = hasFocus
+                ? "（选中区块：" + focusSectionId + "）" + userInput
+                : userInput;
+        messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_USER, savedInput);
 
         // 4. 生成型会话：默认走组件化流水线（AI 输出 PageSpec → 渲染引擎生成模板）。
         //    首次对话生成 PageSpec；已有 _pagespec.json 的会话（组件化微调）同样走该管线，
@@ -594,7 +812,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (!StringUtils.hasText(session.getTemplateId())
                 && "component".equalsIgnoreCase(genMode)
                 && (isFirstChat || hasComponentSpec(session))) {
-            runComponentPipeline(session, modelConfig, chatClient, userInput, history, channel, lastUsage);
+            runComponentPipeline(session, modelConfig, chatClient, userInput, focusSectionId, focusElementHint,
+                    history, channel, lastUsage);
             return;
         }
 
@@ -612,7 +831,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // 5. 单轮路径（调整型会话 / 生成型微调）：构造消息列表。
         //    调整/微调对话需要模型推理（定位问题、多约束权衡），不注入 /no_think
         List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(session.getTemplateName())));
+        messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(session.getTemplateName(), isMobileAdaptive(session))));
 
         // 加入历史消息（保持上下文）；失败标记消息（"生成失败："前缀）对模型是无意义
         // 上下文，跳过注入（仅用于前端展示与失败态判定）
@@ -884,7 +1103,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @param history 本轮用户消息保存之前加载的历史（不含当前输入，与单轮路径一致）
      */
     private void runComponentPipeline(AiTemplateSession session, AiModelConfig modelConfig, ChatClient chatClient,
-                                      String userInput, List<AiTemplateMessage> history, SseChannel channel,
+                                      String userInput, String focusSectionId, String focusElementHint,
+                                      List<AiTemplateMessage> history, SseChannel channel,
                                       org.springframework.ai.chat.metadata.Usage[] usageOut) {
         String systemPrompt = componentGenPromptBuilder.buildSystemPrompt();
         long[] usageAgg = new long[3];
@@ -908,7 +1128,29 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (refine) {
             try {
                 String currentSpec = Files.readString(workDir.resolve(COMPONENT_SPEC_FILE), StandardCharsets.UTF_8);
-                userPrompt = componentGenPromptBuilder.buildRefinePrompt(userInput, currentSpec);
+                // 预览页点选了区块：只注入目标 section 的 spec 片段 + 只改该区块的约束
+                if (StringUtils.hasText(focusSectionId)) {
+                    String focusSection = extractFocusSection(currentSpec, focusSectionId);
+                    if (focusSection != null) {
+                        // 组件源码注入：焦点模式只注入选中区块对应的组件（需求只针对该区块）
+                        List<ComponentGenPromptBuilder.ComponentSource> focusSources = collectComponentSources(
+                                workDir, resolveFocusComponentFile(focusSection));
+                        userPrompt = componentGenPromptBuilder.buildFocusRefinePrompt(
+                                userInput, currentSpec, focusSectionId, focusSection, focusElementHint,
+                                componentGenPromptBuilder.buildComponentSourcesBlock(focusSources));
+                    } else {
+                        // spec 中找不到该区块（AI 上一轮改掉了 id）：退回普通微调并提示
+                        sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                                "（选中区块 " + focusSectionId + " 已不存在，本轮按整页微调处理）\n");
+                        userPrompt = componentGenPromptBuilder.buildRefinePrompt(userInput, currentSpec,
+                                componentGenPromptBuilder.buildComponentSourcesBlock(
+                                        collectComponentSources(workDir, null)));
+                    }
+                } else {
+                    userPrompt = componentGenPromptBuilder.buildRefinePrompt(userInput, currentSpec,
+                            componentGenPromptBuilder.buildComponentSourcesBlock(
+                                    collectComponentSources(workDir, null)));
+                }
             } catch (IOException e) {
                 throw new RuntimeException("读取当前 PageSpec 失败: " + COMPONENT_SPEC_FILE, e);
             }
@@ -928,6 +1170,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         com.fastcms.ai.component.PageSpec spec = null;
         String reply = null;
         ReplyStreamExtractor finalExtractor = null;
+        // 循环外记录每轮最终响应全文（渲染修复轮回喂 AssistantMessage 用）
+        String lastFullResponse = null;
+        // 组件样式补丁应用结果（成功/失败明细，随 assistant 消息落库，下轮对话可见）
+        String patchResultNote = null;
         for (int round = 0; ; round++) {
             if (channel.isCancelled()) {
                 throw new ChatCancelledException();
@@ -975,11 +1221,16 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 }
             }
             finalExtractor = replyExtractor;
+            lastFullResponse = fullResponse;
 
             List<String> errors = spec == null
                     ? List.of("未解析出 pagespec 字段（JSON 可能被截断或格式非法）")
                     : pageSpecValidator.validate(spec);
             if (errors.isEmpty()) {
+                // 组件源码补丁：spec 校验通过才应用（失败轮次的补丁丢弃，fix 轮会重出）
+                if (!parsed.filePatches().isEmpty()) {
+                    patchResultNote = applyComponentPatches(workDir, parsed.filePatches(), channel);
+                }
                 break;
             }
 
@@ -1004,54 +1255,159 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return;
         }
 
-        // ===== 渲染：spec → 模板目录（强制 templateName 与会话一致，保证目录与注册信息对齐；
-        //      调整型会话 templateName 可能为空，此时沿用 AI 输出值，渲染目录以 workDir 为准） =====
-        if (StringUtils.hasText(session.getTemplateName())
-                && !session.getTemplateName().equals(spec.safeTemplateName())) {
-            spec = new com.fastcms.ai.component.PageSpec(spec.specVersion(), spec.foundation(),
-                    session.getTemplateName(), spec.siteName(), spec.siteType(),
-                    spec.stylePreset(), spec.primaryColor(), spec.safeSite(), spec.pages());
-        }
-        com.fastcms.ai.component.PageSpecRenderer.RenderResult renderResult;
-        try {
-            renderResult = pageSpecRenderer.render(spec, workDir);
-        } catch (Exception e) {
-            log.warn("PageSpec 渲染失败: sessionId={}", session.getSessionId(), e);
-            messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
-                    AiTemplateConstants.MSG_FAIL_PREFIX + "模板渲染失败: " + e.getMessage());
-            sendError(channel, "模板渲染失败: " + e.getMessage());
-            return;
-        }
-
-        // ===== 持久化 + 文件事件（预览/应用走既有链路，零改造） =====
+        // ===== 渲染 + 渲染校验修复循环：spec → 模板目录 → 校验，失败回喂模型自动修复 =====
+        // （对齐调整型会话的 MAX_RENDER_FIX_ATTEMPTS 机制；渲染错误含文件与行号，
+        //   组件源码缺陷类错误引导模型换组件/调槽位数据规避）
         int fileCount = 0;
-        for (String relPath : renderResult.writtenFiles()) {
-            try {
-                String content = Files.readString(workDir.resolve(relPath), StandardCharsets.UTF_8);
-                fileService.saveOrUpdateFile(session.getSessionId(), relPath, content,
-                        AiTemplateConstants.ACTION_CREATE);
-                AiTemplateFileDto dto = new AiTemplateFileDto();
-                dto.setPath(relPath);
-                dto.setContent(content);
-                dto.setAction(AiTemplateConstants.ACTION_CREATE);
-                sendFileEvent(channel, dto);
-                fileCount++;
-            } catch (Exception e) {
-                log.warn("组件化渲染产物持久化失败: sessionId={}, path={}", session.getSessionId(), relPath, e);
+        List<String> renderErrors = List.of();
+        int renderRound;
+        for (renderRound = 0; ; renderRound++) {
+            // 渲染前强制 templateName 与会话一致（保证目录与注册信息对齐；
+            // 修复轮模型新输出的 spec 同样要对齐，故放在循环内）
+            if (StringUtils.hasText(session.getTemplateName())
+                    && !session.getTemplateName().equals(spec.safeTemplateName())) {
+                spec = new com.fastcms.ai.component.PageSpec(spec.specVersion(), spec.foundation(),
+                        session.getTemplateName(), spec.siteName(), spec.siteType(),
+                        spec.stylePreset(), spec.primaryColor(), spec.safeSite(), spec.pages(),
+                        spec.imageAssets());
             }
+            // 图片槽位解析：media 槽位 search: 引用 → 附件库搜图 / 演示图兜底（渲染前确定性预处理；
+            // 解析结果随 _pagespec.json 落盘，演示图复制进模板 static/images/ 自包含。
+            // 修复轮重跑幂等：新 spec 的 search: 引用需重新解析）
+            List<String> imageWrittenFiles = List.of();
+            try {
+                com.fastcms.ai.component.AttachmentImageSearcher.Result imageResult =
+                        attachmentImageSearcher.resolve(spec, workDir);
+                spec = imageResult.spec();
+                imageWrittenFiles = imageResult.writtenFiles();
+                // SSE 进度：图片装配摘要（无 media 槽位时不打扰）
+                if (imageResult.attachmentHits() > 0 || imageResult.demoFallbacks() > 0) {
+                    String imageNote = "\n\n🖼️ 图片装配：附件库命中 " + imageResult.attachmentHits() + " 张"
+                            + (imageResult.demoFallbacks() > 0
+                                    ? "，演示图兜底 " + imageResult.demoFallbacks() + " 张" : "");
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, imageNote);
+                }
+            } catch (Exception e) {
+                log.warn("图片槽位解析失败（不影响主流程，未解析引用走组件占位兜底）: sessionId={}",
+                        session.getSessionId(), e);
+            }
+
+            com.fastcms.ai.component.PageSpecRenderer.RenderResult renderResult;
+            try {
+                renderResult = pageSpecRenderer.render(spec, workDir, isMobileAdaptive(session));
+            } catch (Exception e) {
+                log.warn("PageSpec 渲染失败: sessionId={}", session.getSessionId(), e);
+                messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
+                        AiTemplateConstants.MSG_FAIL_PREFIX + "模板渲染失败: " + e.getMessage());
+                sendError(channel, "模板渲染失败: " + e.getMessage());
+                return;
+            }
+
+            // ===== 持久化 + 文件事件（预览/应用走既有链路，零改造） =====
+            List<String> allWrittenFiles = new java.util.ArrayList<>(imageWrittenFiles);
+            allWrittenFiles.addAll(renderResult.writtenFiles());
+            fileCount = 0;
+            for (String relPath : allWrittenFiles) {
+                try {
+                    String content = Files.readString(workDir.resolve(relPath), StandardCharsets.UTF_8);
+                    fileService.saveOrUpdateFile(session.getSessionId(), relPath, content,
+                            AiTemplateConstants.ACTION_CREATE);
+                    AiTemplateFileDto dto = new AiTemplateFileDto();
+                    dto.setPath(relPath);
+                    dto.setContent(content);
+                    dto.setAction(AiTemplateConstants.ACTION_CREATE);
+                    sendFileEvent(channel, dto);
+                    fileCount++;
+                } catch (Exception e) {
+                    log.warn("组件化渲染产物持久化失败: sessionId={}, path={}", session.getSessionId(), relPath, e);
+                }
+            }
+
+            // ===== 渲染校验（与预览同管线）：组件已预校验，此处兜底组件包自身的回归问题 =====
+            // 渲染校验覆盖全部页面 html（基础页 + site 信息架构的 suffix 专属页；
+            // _layout.html 布局宏由页面 import 间接校验，不单独渲染）
+            List<String> pageFiles = renderResult.writtenFiles().stream()
+                    .filter(f -> f.endsWith(".html") && !f.startsWith("_")).toList();
+            renderErrors = previewRenderer.checkRenderedFiles(workDir, pageFiles);
+            if (renderErrors.isEmpty() || renderRound >= MAX_RENDER_FIX_ATTEMPTS) {
+                break;
+            }
+
+            // ===== 自动修复轮：渲染错误（含文件与行号）+ 落盘 spec 回喂模型 =====
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "\n\n（渲染校验发现 " + renderErrors.size() + " 个页面异常，正在自动修复…）\n");
+            if (StringUtils.hasText(reply) && finalExtractor != null && !finalExtractor.wasEmitted()) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, reply);
+            }
+            messages.add(new org.springframework.ai.chat.messages.AssistantMessage(lastFullResponse));
+            String specJsonForFix;
+            try {
+                specJsonForFix = Files.readString(workDir.resolve(COMPONENT_SPEC_FILE), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                specJsonForFix = "";
+            }
+            messages.add(new UserMessage(componentGenPromptBuilder.buildRenderFixPrompt(renderErrors, specJsonForFix)));
+
+            // 修复轮模型调用（输出完整修复 spec）
+            ReplyStreamExtractor fixExtractor = new ReplyStreamExtractor();
+            StringBuilder fixReasoning = new StringBuilder();
+            long[] fixUsage = new long[3];
+            String fixResponse = callModelRound(chatClient, messages, channel, fixExtractor, fixReasoning,
+                    fixUsage, buildPipelineOptions(modelConfig, roundMaxTokens), null);
+            usageAgg[0] += fixUsage[0];
+            usageAgg[1] += fixUsage[1];
+            usageAgg[2] += fixUsage[2];
+            usageOut[0] = aggregateUsage(usageAgg);
+            allReasoning.append(fixReasoning);
+            if (!StringUtils.hasText(fixResponse)) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n（修复响应为空，停止自动修复）\n");
+                break;
+            }
+            com.fastcms.ai.component.PageSpecParser.ParseResult fixParsed = pageSpecParser.parseResponse(fixResponse);
+            com.fastcms.ai.component.PageSpec fixSpec = fixParsed.pagespec();
+            if (fixSpec == null) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n（修复响应未解析出 PageSpec，停止自动修复）\n");
+                break;
+            }
+            List<String> fixErrors = pageSpecValidator.validate(fixSpec);
+            if (!fixErrors.isEmpty()) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n（修复后的 PageSpec 校验未通过，停止自动修复: " + fixErrors.get(0) + "）\n");
+                break;
+            }
+            // 修复 spec 生效，进入下一轮渲染；修复轮输出的组件补丁同样应用
+            // （渲染错误源于组件源码时，模型会借 filePatches 规避/修正）
+            if (!fixParsed.filePatches().isEmpty()) {
+                String fixPatchNote = applyComponentPatches(workDir, fixParsed.filePatches(), channel);
+                if (fixPatchNote != null) {
+                    patchResultNote = fixPatchNote;
+                }
+            }
+            spec = fixSpec;
+            reply = fixParsed.reply();
+            lastFullResponse = fixResponse;
+            finalExtractor = fixExtractor;
         }
 
-        // ===== 渲染校验（与预览同管线）：组件已预校验，此处兜底组件包自身的回归问题 =====
-        // 渲染校验覆盖全部页面 html（基础页 + site 信息架构的 suffix 专属页；
-        // _layout.html 布局宏由页面 import 间接校验，不单独渲染）
-        List<String> pageFiles = renderResult.writtenFiles().stream()
-                .filter(f -> f.endsWith(".html") && !f.startsWith("_")).toList();
-        List<String> renderErrors = previewRenderer.checkRenderedFiles(workDir, pageFiles);
-
-        // ===== 收尾：落库 + 推送 =====
+        // ===== 收尾：落库 + 推送（渲染错误与补丁结果一并落库，保证下轮对话 AI 上下文可见，
+        //      避免"错误只展示给用户、AI 看不见"导致的盲改循环） =====
         String reasoningText = allReasoning.length() > 0 ? allReasoning.toString() : null;
         String assistantMsg = StringUtils.hasText(reply) ? reply
                 : (refine ? "微调完成，已重新渲染" : "已生成组件化模板（" + fileCount + " 个文件）");
+        if (patchResultNote != null) {
+            assistantMsg = assistantMsg + "\n\n【组件补丁】" + patchResultNote;
+        }
+        if (!renderErrors.isEmpty()) {
+            StringBuilder errSb = new StringBuilder();
+            for (int i = 0; i < renderErrors.size(); i++) {
+                errSb.append(i + 1).append(". ").append(renderErrors.get(i)).append('\n');
+            }
+            assistantMsg = assistantMsg + "\n\n【渲染校验异常】已自动修复 " + renderRound
+                    + " 轮，仍有 " + renderErrors.size() + " 个页面渲染失败：\n" + errSb
+                    + "（可让 AI 继续修复：换组件规避或调整槽位数据；或手工修改对应文件）";
+        }
         messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
                 assistantMsg, reasoningText);
 
@@ -1061,19 +1417,17 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
         String summary;
         if (!renderErrors.isEmpty()) {
-            StringBuilder errSb = new StringBuilder();
-            for (int i = 0; i < renderErrors.size(); i++) {
-                errSb.append(i + 1).append(". ").append(renderErrors.get(i)).append('\n');
-            }
-            String failNote = "模板已生成，但渲染校验发现 " + renderErrors.size() + " 个页面异常：\n" + errSb;
-            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n" + failNote);
+            int markerIdx = assistantMsg.indexOf("【渲染校验异常】");
+            String errNote = markerIdx >= 0 ? assistantMsg.substring(markerIdx)
+                    : "仍有 " + renderErrors.size() + " 个页面渲染失败（详见消息）";
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n" + errNote);
             summary = "完成，但有 " + renderErrors.size() + " 个页面渲染异常（详见消息）";
         } else {
             summary = (refine ? "微调完成，已重新渲染 " : "生成完成，共 ") + fileCount + " 个文件";
         }
         sendDone(channel, truncate(summary, 100));
-        log.info("AI 组件化模板生成完成: sessionId={}, refine={}, files={}, renderErrors={}",
-                session.getSessionId(), refine, fileCount, renderErrors.size());
+        log.info("AI 组件化模板生成完成: sessionId={}, refine={}, files={}, renderErrors={}, fixRounds={}",
+                session.getSessionId(), refine, fileCount, renderErrors.size(), renderRound);
     }
 
     // ==================== 分批流水线（生成型会话首次对话） ====================
@@ -1128,7 +1482,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private void runBatchPipeline(AiTemplateSession session, AiModelConfig modelConfig, ChatClient chatClient,
                                   String userInput, SseChannel channel,
                                   org.springframework.ai.chat.metadata.Usage[] usageOut) {
-        String systemPrompt = promptBuilder.buildSystemPrompt(session.getTemplateName());
+        String systemPrompt = promptBuilder.buildSystemPrompt(session.getTemplateName(), isMobileAdaptive(session));
         long[] usageAgg = new long[3];
         // 全流程思考过程（各轮拼接，落库后刷新页面仍可回看）
         StringBuilder allReasoning = new StringBuilder();
@@ -1217,7 +1571,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n📄 正在生成 " + path + " …");
 
             String existingContext = buildGenContext(generatedFiles, layoutContent);
-            String filePrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext, null);
+            String filePrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext, null,
+                    isMobileAdaptive(session));
             AiTemplateFileDto fileDto = generateSingleFile(chatClient, systemPrompt, filePrompt,
                     path, channel, allReasoning, usageAgg, modelConfig, null);
 
@@ -1236,7 +1591,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                         "\n（" + path + " 输出异常，正在重试…）");
                 String retryPrompt = promptBuilder.buildSingleFilePrompt(genRequirement, path, existingContext,
-                        "上一次输出被截断或格式非法。请务必压缩篇幅：删除全部注释、精简样式与结构，确保 JSON 完整且 content 为完整文件内容。");
+                        "上一次输出被截断或格式非法。请务必压缩篇幅：删除全部注释、精简样式与结构，确保 JSON 完整且 content 为完整文件内容。",
+                        isMobileAdaptive(session));
                 Integer retryMaxTokens = modelConfig.getMaxTokens() != null
                         ? Math.max(modelConfig.getMaxTokens() * 2, 32768) : null;
                 fileDto = generateSingleFile(chatClient, systemPrompt, retryPrompt,
@@ -1777,7 +2133,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     // ==================== 应用模板 ====================
 
     @Override
-    public String applyTemplate(String sessionId) {
+    public ApplyResult applyTemplate(String sessionId) {
         AiTemplateSession session = getSession(sessionId);
         if (session == null) {
             throw new IllegalArgumentException("会话不存在: " + sessionId);
@@ -1828,10 +2184,172 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // 更新会话状态
         sessionService.updateStatus(sessionId, AiTemplateConstants.STATUS_APPLIED);
 
-        String result = "模板已应用到 " + targetPath + "，可在模板列表中查看并切换使用";
-        log.info("AI 模板应用成功: sessionId={}, templateName={}, target={}",
-                sessionId, session.getTemplateName(), targetPath);
-        return result;
+        // 按模板目录名匹配新注册的正式模板 ID（前端据此无缝切换到正式模板编辑）
+        String templateId = null;
+        try {
+            for (Template registered : templateService.getTemplateList()) {
+                if (session.getTemplateName().equals(registered.getPathName())) {
+                    templateId = registered.getId();
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("应用后按目录名匹配模板 ID 失败（不影响应用结果）: templateName={}", session.getTemplateName(), e);
+        }
+
+        // 站点数据初始化：按 _pagespec.json 信息架构补建分类/单页/菜单（只补缺不覆盖，失败不影响模板应用）
+        String seedMsg = seedSiteData(workDir, templateId);
+
+        String result = "模板已应用到 " + targetPath + "，可在模板列表中查看并切换使用" + seedMsg;
+        log.info("AI 模板应用成功: sessionId={}, templateName={}, target={}, templateId={}",
+                sessionId, session.getTemplateName(), targetPath, templateId);
+        return new ApplyResult(result, templateId);
+    }
+
+    // ==================== 站点数据初始化（seed） ====================
+
+    /**
+     * 应用模板后按 _pagespec.json 的 site 信息架构初始化站点数据：
+     * 分类、单页为全站共享（按 suffix/path 幂等补缺）；菜单为模板专属
+     * （带 template_id，与预览导航一致，不污染其他模板的菜单）。
+     *
+     * <p>文章不初始化（内容归用户发布）；演示图 imageOverrides 不落库
+     * （仅预览语义，正式环境使用真实文章封面）。任何失败只记日志并附加提示，
+     * 不回滚已应用的模板文件。</p>
+     */
+    String seedSiteData(Path workDir, String templateId) {
+        try {
+            Path specPath = workDir.resolve(COMPONENT_SPEC_FILE);
+            if (!Files.isRegularFile(specPath)) {
+                return "";
+            }
+            com.fastcms.ai.component.PageSpec spec = pageSpecParser
+                    .parseResponse(Files.readString(specPath, StandardCharsets.UTF_8)).pagespec();
+            if (spec == null || spec.safeSite() == null) {
+                return "";
+            }
+            com.fastcms.ai.component.SiteContentSpec site = spec.safeSite();
+            int categories = seedCategories(site.safeCategories());
+            int pages = seedSinglePages(site.safeSinglePages());
+            // 菜单必须挂模板作用域；模板 ID 匹配失败（极端情况）时跳过菜单，避免污染全局菜单
+            int menus = templateId == null ? 0 : seedMenus(site.safeMenus(), templateId);
+            if (categories + pages + menus == 0) {
+                return "";
+            }
+            return String.format("；已按模板信息架构初始化站点数据：菜单 %d、分类 %d、单页 %d（只补缺，不覆盖已有数据）",
+                    menus, categories, pages);
+        } catch (Exception e) {
+            log.warn("AI 模板应用后站点数据初始化失败（不影响模板应用结果）", e);
+            return "；站点数据初始化失败: " + e.getMessage() + "（模板文件已应用成功）";
+        }
+    }
+
+    /**
+     * 分类：suffix + path 设为信息架构标识，前台 /article/category/{path} 按路径解析
+     */
+    private int seedCategories(List<com.fastcms.ai.component.SiteContentSpec.CatalogItem> items) {
+        if (items.isEmpty()) {
+            return 0;
+        }
+        Set<String> existing = articleCategoryService.list().stream()
+                .map(ArticleCategory::getSuffix).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        int created = 0;
+        for (com.fastcms.ai.component.SiteContentSpec.CatalogItem item : items) {
+            if (!StringUtils.hasText(item.suffix()) || existing.contains(item.suffix())) {
+                continue;
+            }
+            ArticleCategory category = new ArticleCategory();
+            category.setParentId(0L);
+            category.setTitle(item.title());
+            category.setSuffix(item.suffix());
+            category.setPath(item.suffix());
+            category.setType(ArticleCategory.CATEGORY_TYPE);
+            category.setSortNum(existing.size() + created);
+            articleCategoryService.save(category);
+            existing.add(item.suffix());
+            created++;
+        }
+        return created;
+    }
+
+    /**
+     * 单页：path 设为信息架构标识（/page/{path} 按路径解析），正文先占位
+     */
+    private int seedSinglePages(List<com.fastcms.ai.component.SiteContentSpec.CatalogItem> items) {
+        if (items.isEmpty()) {
+            return 0;
+        }
+        Set<String> existing = singlePageService.list().stream()
+                .map(SinglePage::getPath).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        int created = 0;
+        for (com.fastcms.ai.component.SiteContentSpec.CatalogItem item : items) {
+            if (!StringUtils.hasText(item.suffix()) || existing.contains(item.suffix())) {
+                continue;
+            }
+            SinglePage page = new SinglePage();
+            page.setTitle(item.title());
+            page.setPath(item.suffix());
+            page.setContentHtml("<p>页面内容编辑中，请到后台「单页管理」补充正文。</p>");
+            page.setSeoKeywords(item.title());
+            page.setSeoDescription(item.title() + " - 页面内容编辑中");
+            page.setStatus(SinglePage.STATUS_PUBLISH);
+            singlePageService.save(page);
+            existing.add(item.suffix());
+            created++;
+        }
+        return created;
+    }
+
+    /**
+     * 菜单：模板专属（template_id 作用域），urlType 按信息架构类型映射，
+     * menuUrl 存 suffix（Menu.getUrl() 按类型拼接 /page/、/article/category/ 等前缀）。
+     * type=index 跳过（导航组件硬编码首页链接，与预览行为一致）。
+     */
+    private int seedMenus(List<com.fastcms.ai.component.SiteContentSpec.NavItem> items, String templateId) {
+        if (items.isEmpty()) {
+            return 0;
+        }
+        Set<String> existing = menuService.list().stream()
+                .filter(menu -> templateId.equals(menu.getTemplateId()))
+                .map(Menu::getMenuName).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        return seedMenuLevel(items, 0L, templateId, existing, new int[]{existing.size()});
+    }
+
+    private int seedMenuLevel(List<com.fastcms.ai.component.SiteContentSpec.NavItem> items, Long parentId,
+                              String templateId, Set<String> existing, int[] sort) {
+        int created = 0;
+        for (com.fastcms.ai.component.SiteContentSpec.NavItem item : items) {
+            if (com.fastcms.ai.component.SiteContentSpec.NavItem.TYPE_INDEX.equals(item.safeType())
+                    || !StringUtils.hasText(item.suffix()) || existing.contains(item.name())) {
+                continue;
+            }
+            Menu menu = new Menu();
+            menu.setParentId(parentId);
+            menu.setMenuName(item.name());
+            menu.setMenuUrl(item.suffix());
+            menu.setUrlType(menuUrlType(item.safeType()));
+            menu.setSortNum(sort[0]++);
+            menu.setTarget("_self");
+            menu.setStatus(Menu.STATUS_SHOW);
+            menu.setTemplateId(templateId);
+            menuService.save(menu);
+            existing.add(item.name());
+            created++;
+            created += seedMenuLevel(item.safeChildren(), menu.getId(), templateId, existing, sort);
+        }
+        return created;
+    }
+
+    /**
+     * 信息架构菜单类型 → 菜单 urlType（决定 Menu.getUrl() 的路径前缀）
+     */
+    private Integer menuUrlType(String type) {
+        return switch (type == null ? "" : type) {
+            case com.fastcms.ai.component.SiteContentSpec.NavItem.TYPE_PAGE -> Menu.PAGE_URL_TYPE;
+            case com.fastcms.ai.component.SiteContentSpec.NavItem.TYPE_ARTICLE -> Menu.ARTICLE_URL_TYPE;
+            // article_list 及未知类型按分类列表处理
+            default -> Menu.CATEGORY_URL_TYPE;
+        };
     }
 
     // ==================== 回滚 ====================
@@ -1891,6 +2409,184 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         String result = "已回滚最近一轮修改：" + String.join("、", restored);
         log.info("AI 模板回滚完成: sessionId={}, messageId={}, files={}", sessionId, messageId, restored.size());
         return result;
+    }
+
+    // ==================== 会话工作目录文件编辑（生成型会话，应用前的手工打磨） ====================
+
+    /**
+     * 会话工作目录可编辑的文本文件后缀白名单（与正式模板编辑保持一致的口径；
+     * 图片等二进制资源走上传接口 + 预览 URL 静态分支，不走文本读写）
+     */
+    private static final Set<String> SESSION_EDITABLE_SUFFIX = Set.of(
+            ".html", ".js", ".css", ".txt", ".json", ".properties", ".md", ".svg", ".xml", ".ftl");
+
+    /**
+     * 校验并返回生成型会话（未绑定正式模板的会话才有独立的可编辑工作目录）
+     */
+    private AiTemplateSession requireGenerativeSession(String sessionId) {
+        AiTemplateSession session = getSession(sessionId);
+        if (session == null) {
+            throw new IllegalArgumentException("会话不存在: " + sessionId);
+        }
+        if (StringUtils.hasText(session.getTemplateId())) {
+            throw new IllegalArgumentException("调整型会话直接修改正式模板，请使用模板编辑功能");
+        }
+        return session;
+    }
+
+    /**
+     * 写操作会话校验：已应用（applied）的会话目录只读，改动应走正式模板编辑
+     */
+    private AiTemplateSession requireWritableGenerativeSession(String sessionId) {
+        AiTemplateSession session = requireGenerativeSession(sessionId);
+        if (AiTemplateConstants.STATUS_APPLIED.equals(session.getStatus())) {
+            throw new IllegalStateException("会话已应用，工作目录只读；请通过正式模板编辑修改");
+        }
+        return session;
+    }
+
+    /**
+     * 文件路径（以模板目录名开头，与文件树约定一致）映射为会话工作目录内的文件：
+     * 前缀截取 + normalize + 防路径穿越；非法路径返回 null
+     */
+    private Path resolveSessionFilePath(AiTemplateSession session, String filePath) {
+        if (!StringUtils.hasText(filePath) || filePath.contains("..")) {
+            return null;
+        }
+        String templateName = session.getTemplateName();
+        if (!StringUtils.hasText(templateName) || !filePath.startsWith(templateName)) {
+            return null;
+        }
+        Path workDir = resolveEffectiveWorkDir(session);
+        Path resolved = workDir.resolve(filePath.substring(templateName.length())).normalize();
+        return resolved.startsWith(workDir) ? resolved : null;
+    }
+
+    /**
+     * 校验文件后缀在会话可编辑白名单内（无点号路径直接拒绝）
+     */
+    private void assertSessionEditableSuffix(String filePath) {
+        int suffixIdx = filePath.lastIndexOf(".");
+        if (suffixIdx < 0) {
+            throw new IllegalArgumentException("文件路径缺少后缀: " + filePath);
+        }
+        if (!SESSION_EDITABLE_SUFFIX.contains(filePath.substring(suffixIdx).toLowerCase())) {
+            throw new IllegalArgumentException("不支持的文件类型: " + filePath.substring(suffixIdx));
+        }
+    }
+
+    @Override
+    public List<TemplateService.FileTreeNode> getSessionFileTree(String sessionId) {
+        AiTemplateSession session = requireGenerativeSession(sessionId);
+        Path workDir = resolveEffectiveWorkDir(session);
+        if (!Files.isDirectory(workDir)) {
+            throw new IllegalStateException("会话工作目录不存在: " + workDir);
+        }
+        try {
+            // 构造轻量 Template 指向会话工作目录，复用正式模板的树构建规则：
+            // filePath 前缀 = 根目录最后一段（即会话的 templateName），与正式模板路径约定一致
+            Template template = new Template();
+            template.setTemplatePath(workDir);
+            return templateService.getTemplateTreeFiles(template);
+        } catch (IOException e) {
+            throw new RuntimeException("加载会话文件树失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String getSessionFile(String sessionId, String filePath) {
+        AiTemplateSession session = requireGenerativeSession(sessionId);
+        Path file = resolveSessionFilePath(session, filePath);
+        if (file == null || Files.isDirectory(file)) {
+            throw new IllegalArgumentException("文件不存在或不可读取: " + filePath);
+        }
+        assertSessionEditableSuffix(filePath);
+        if (!Files.exists(file)) {
+            throw new IllegalArgumentException("文件不存在: " + filePath);
+        }
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("读取文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void saveSessionFile(String sessionId, String filePath, String fileContent) {
+        AiTemplateSession session = requireWritableGenerativeSession(sessionId);
+        if (!StringUtils.hasText(fileContent)) {
+            throw new IllegalArgumentException("文件内容不能为空");
+        }
+        assertSessionEditableSuffix(filePath);
+        Path file = resolveSessionFilePath(session, filePath);
+        if (file == null) {
+            throw new IllegalArgumentException("非法文件路径: " + filePath);
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.write(file, fileContent.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new RuntimeException("保存文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void deleteSessionFile(String sessionId, String filePath) {
+        AiTemplateSession session = requireWritableGenerativeSession(sessionId);
+        Path file = resolveSessionFilePath(session, filePath);
+        if (file == null || !Files.isRegularFile(file)) {
+            throw new IllegalArgumentException("文件不存在: " + filePath);
+        }
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            throw new RuntimeException("删除文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<String> uploadSessionFiles(String sessionId, String dirName, org.springframework.web.multipart.MultipartFile[] files) {
+        AiTemplateSession session = requireWritableGenerativeSession(sessionId);
+        if (files == null || files.length == 0) {
+            throw new IllegalArgumentException("缺少上传文件");
+        }
+        Path workDir = resolveEffectiveWorkDir(session);
+        // 目标子目录：空值/仅模板目录名 → 工作目录根；其余须以模板目录名开头（与文件树路径约定一致）
+        Path targetDir = workDir;
+        if (StringUtils.hasText(dirName)) {
+            if (dirName.contains("..")) {
+                throw new IllegalArgumentException("非法目录路径: " + dirName);
+            }
+            String rel = dirName;
+            String templateName = session.getTemplateName();
+            if (StringUtils.hasText(templateName) && rel.startsWith(templateName)) {
+                rel = rel.substring(templateName.length());
+            }
+            targetDir = workDir.resolve(rel).normalize();
+            if (!targetDir.startsWith(workDir)) {
+                throw new IllegalArgumentException("非法目录路径: " + dirName);
+            }
+        }
+        List<String> written = new ArrayList<>();
+        for (org.springframework.web.multipart.MultipartFile file : files) {
+            // 只取文件名（剥掉客户端可能携带的路径），拒绝异常文件名
+            String fileName = Paths.get(file.getOriginalFilename()).getFileName().toString();
+            if (fileName.isBlank() || fileName.contains("..")) {
+                continue;
+            }
+            try {
+                Path target = targetDir.resolve(fileName).normalize();
+                if (!target.startsWith(workDir)) {
+                    continue;
+                }
+                Files.createDirectories(target.getParent());
+                file.transferTo(target);
+                written.add(workDir.relativize(target).toString().replaceAll("\\\\", "/"));
+            } catch (IOException e) {
+                throw new RuntimeException("上传文件失败: " + fileName + ", " + e.getMessage(), e);
+            }
+        }
+        return written;
     }
 
     // ==================== 辅助方法 ====================
@@ -2001,6 +2697,184 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             normalized = normalized.substring(dirName.length() + 1);
         }
         return normalized;
+    }
+
+    /**
+     * 从 PageSpec JSON 中提取指定 id 的 section 片段
+     *
+     * <p>遍历 pages.{pageKey}.sections[]，返回首个 id 匹配的 section 节点（紧凑 JSON）。
+     * 用于预览页点选区块后把目标片段注入微调提示词，让 AI 聚焦该区块修改。</p>
+     *
+     * @return 命中返回该 section 的 JSON 文本；未命中返回 null（AI 上一轮可能改掉了 id）
+     */
+    private String extractFocusSection(String specJson, String sectionId) {
+        try {
+            tools.jackson.databind.JsonNode root = JSON_MAPPER.readTree(specJson);
+            tools.jackson.databind.JsonNode pages = root == null ? null : root.get("pages");
+            if (pages == null || !pages.isObject()) {
+                return null;
+            }
+            for (var pageEntry : pages.properties()) {
+                tools.jackson.databind.JsonNode page = pageEntry.getValue();
+                tools.jackson.databind.JsonNode sections = page == null ? null : page.get("sections");
+                if (sections == null || !sections.isArray()) {
+                    continue;
+                }
+                for (tools.jackson.databind.JsonNode section : sections) {
+                    tools.jackson.databind.JsonNode id = section == null ? null : section.get("id");
+                    if (id != null && sectionId.equals(id.asString())) {
+                        return section.toString();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析 PageSpec 提取选中区块失败: sectionId={}", sectionId, e);
+        }
+        return null;
+    }
+
+    // ==================== 组件源码补丁（filePatches） ====================
+
+    /**
+     * 组件源码补丁路径合法格式：_components/ 下的 .ftl 文件（文件名为包前缀__组件__变体）
+     */
+    private static final java.util.regex.Pattern COMPONENT_PATCH_PATH_PATTERN =
+            java.util.regex.Pattern.compile("^_components/[A-Za-z0-9_\\-]+\\.ftl$");
+
+    /**
+     * 收集工作目录下的组件源码（渲染产物落盘版，含点选标记），供 refine 提示词注入
+     *
+     * <p>焦点模式传入目标组件文件名时只收集该组件（需求只针对选中区块）；
+     * 否则收集全部组件源码（需求可能指向任意区块）。</p>
+     */
+    private List<ComponentGenPromptBuilder.ComponentSource> collectComponentSources(Path workDir, String focusComponentFile) {
+        Path componentsDir = workDir.resolve("_components");
+        if (!Files.isDirectory(componentsDir)) {
+            return List.of();
+        }
+        List<ComponentGenPromptBuilder.ComponentSource> sources = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(componentsDir)) {
+            for (Path file : stream.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().endsWith(".ftl"))
+                    .sorted().toList()) {
+                String name = file.getFileName().toString();
+                if (focusComponentFile != null && !focusComponentFile.equals(name)) {
+                    continue;
+                }
+                try {
+                    sources.add(new ComponentGenPromptBuilder.ComponentSource(
+                            "_components/" + name, Files.readString(file, StandardCharsets.UTF_8)));
+                } catch (IOException e) {
+                    log.warn("读取组件源码失败，跳过: {}", file, e);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("扫描组件目录失败: {}", componentsDir, e);
+        }
+        return sources;
+    }
+
+    /**
+     * 从选中区块的 spec 片段解析对应组件文件名（焦点模式精准注入组件源码用）
+     *
+     * <p>文件名规则与 PageSpecRenderer 一致：component 的 ':' 换 '__' + variant + .ftl。
+     * spec 片段无 component 字段时返回 null（调用方回退全量注入）。</p>
+     */
+    private String resolveFocusComponentFile(String focusSectionJson) {
+        try {
+            tools.jackson.databind.JsonNode section = JSON_MAPPER.readTree(focusSectionJson);
+            String component = section == null ? null : section.path("component").asString(null);
+            if (!StringUtils.hasText(component)) {
+                return null;
+            }
+            String variant = section.path("variant").asString(null);
+            return variant == null || variant.isBlank()
+                    ? null
+                    : component.replace(":", "__") + "__" + variant.trim() + ".ftl";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 应用组件源码补丁：校验（路径合法/文件已存在/search 唯一匹配/标记保留）通过后
+     * 写入 _component_overrides/，渲染时优先于组件包原版生效
+     *
+     * <p>基于 _components/ 当前落盘版（含系统注入标记）做替换；同一文件多个补丁串行应用。
+     * 单个补丁失败不影响其余补丁，失败原因记入返回清单（SSE 提示 + 落库供下轮修复）。</p>
+     *
+     * @return 应用结果消息（成功数 + 失败明细，全部成功且无补丁时返回 null）
+     */
+    private String applyComponentPatches(Path workDir, List<PageSpecParser.FilePatch> patches, SseChannel channel) {
+        if (patches == null || patches.isEmpty()) {
+            return null;
+        }
+        Path overridesDir = workDir.resolve(PageSpecRenderer.COMPONENT_OVERRIDES_DIR);
+        int ok = 0;
+        List<String> failures = new ArrayList<>();
+        // 文件级缓存：同一文件多补丁串行应用（前一个补丁的结果是后一个的输入）
+        Map<String, String> fileContents = new java.util.HashMap<>();
+        for (PageSpecParser.FilePatch patch : patches) {
+            try {
+                if (!COMPONENT_PATCH_PATH_PATTERN.matcher(patch.path()).matches()) {
+                    failures.add(patch.path() + ": 路径非法（只允许 _components/ 下的组件 .ftl）");
+                    continue;
+                }
+                Path target = workDir.resolve(patch.path()).normalize();
+                if (!target.startsWith(workDir)) {
+                    failures.add(patch.path() + ": 路径越界");
+                    continue;
+                }
+                if (!Files.isRegularFile(target)) {
+                    failures.add(patch.path() + ": 组件文件不存在");
+                    continue;
+                }
+                String content = fileContents.containsKey(patch.path())
+                        ? fileContents.get(patch.path())
+                        : Files.readString(target, StandardCharsets.UTF_8);
+                int first = content.indexOf(patch.search());
+                if (patch.search().isEmpty() || first < 0) {
+                    failures.add(patch.path() + ": search 片段在源码中未找到");
+                    continue;
+                }
+                if (content.indexOf(patch.search(), first + 1) >= 0) {
+                    failures.add(patch.path() + ": search 片段匹配多处（须唯一，请扩大片段范围）");
+                    continue;
+                }
+                String patched = content.substring(0, first) + patch.replace()
+                        + content.substring(first + patch.search().length());
+                // 标记保留校验：点选标记丢了会破坏换图/选区功能
+                if (content.contains("data-ai-section-root") && !patched.contains("data-ai-section-root")) {
+                    failures.add(patch.path() + ": 替换后丢失 data-ai-section-root 标记（预览点选依赖）");
+                    continue;
+                }
+                Files.createDirectories(overridesDir);
+                Files.writeString(overridesDir.resolve(target.getFileName()), patched, StandardCharsets.UTF_8);
+                fileContents.put(patch.path(), patched);
+                ok++;
+            } catch (Exception e) {
+                log.warn("组件补丁应用失败: {}", patch.path(), e);
+                failures.add(patch.path() + ": " + e.getMessage());
+            }
+        }
+        StringBuilder msg = new StringBuilder();
+        if (ok > 0) {
+            msg.append("已应用 ").append(ok).append(" 个组件样式补丁");
+        }
+        if (!failures.isEmpty()) {
+            if (msg.length() > 0) {
+                msg.append("，");
+            }
+            msg.append("失败 ").append(failures.size()).append(" 个：");
+            for (int i = 0; i < failures.size(); i++) {
+                msg.append("\n").append(i + 1).append(". ").append(failures.get(i));
+            }
+        }
+        String result = msg.length() > 0 ? msg.toString() : null;
+        if (result != null) {
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "\n\n🎨 " + result + "\n");
+        }
+        return result;
     }
 
     /**

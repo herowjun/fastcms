@@ -88,7 +88,9 @@ public class TemplateIndexController extends TemplateBaseController {
 
     @RequestMapping({"/", "index"})
     public String index() {
-        if (ApplicationUtils.getBean(FastcmsStaticHtmlManager.class).isEnable()) {
+        // 浏览态（/{模板pathName}/，见 TemplateBrowseController）不走静态化：
+        // 静态页仅针对当前启用模板生成，被浏览的（未启用）模板没有对应静态页
+        if (!isBrowseMode() && ApplicationUtils.getBean(FastcmsStaticHtmlManager.class).isEnable()) {
             return UrlBasedViewResolver.FORWARD_URL_PREFIX.concat(getTemplate().getPath()).concat("index.html");
         }
 
