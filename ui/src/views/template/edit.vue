@@ -4,24 +4,7 @@
         <div class="toolbar">
             <el-row :gutter="35" class="toolbar-row">
                 <el-col :sm="5" class="mb20">
-                    <!-- 会话编辑模式：AI 生成模板（未应用）横幅，应用后无缝切回正式模板编辑 -->
-                    <div v-if="state.sessionMode" class="session-banner">
-                        <el-tag size="default" type="warning" class="session-banner-tag">AI 模板：{{ state.currentAiSession?.templateName }}</el-tag>
-                        <el-tag v-if="state.currentAiSession?.status === 'applied'" size="default" type="success">已应用（只读）</el-tag>
-                        <template v-else>
-                            <el-button size="default" type="success" :loading="state.sessionApplying" @click="onApplySessionTemplate">
-                                <el-icon><ele-Check /></el-icon>应用模板
-                            </el-button>
-                        </template>
-                        <el-button size="default" type="warning" plain @click="state.aiDrawerVisible = true"
-                                   title="打开 AI 对话抽屉：左边实时预览，右边 AI 对话调整">
-                            <el-icon><ele-ChatDotRound /></el-icon>AI 对话
-                        </el-button>
-                        <el-button size="default" @click="exitSessionMode" title="退出会话编辑，回到正式模板编辑">
-                            <el-icon><ele-Back /></el-icon>退出编辑
-                        </el-button>
-                    </div>
-                    <el-select v-else v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
+                    <el-select v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
                                    :label="item.name + (item.active ? '（使用中）' : '')" />
                     </el-select>
@@ -44,18 +27,18 @@
                             <el-button size="default" type="primary"><el-icon><ele-Plus /></el-icon>上传模板文件</el-button>
                         </el-upload>
                         <el-divider direction="vertical" />
-                        <el-button @click="onPreview" :disabled="!state.sessionMode && !state.loadedTemplateId">
+                        <el-button @click="onPreview" :disabled="!state.loadedTemplateId">
                             <el-icon><ele-View /></el-icon>预览
                         </el-button>
-                        <el-button v-if="!state.sessionMode" type="warning" plain @click="onOpenAiAdjust" :disabled="!state.loadedTemplateId">
+                        <el-button type="warning" plain @click="onOpenAiAdjust" :disabled="!state.loadedTemplateId">
                             <el-icon><ele-MagicStick /></el-icon>AI 调整
                         </el-button>
-                        <el-button v-if="!state.sessionMode" type="warning" @click="onOpenAiCreate">
+                        <el-button type="warning" @click="onOpenAiCreate">
                             <el-icon><ele-MagicStick /></el-icon>AI 新建模板
                         </el-button>
                         <el-divider direction="vertical" />
-                        <el-button type="primary" @click="onSaveFile" :disabled="!state.currEditFile || sessionReadonly">保 存</el-button>
-                        <el-button type="danger" @click="onDelFile" :disabled="!state.currEditFile || sessionReadonly">删 除</el-button>
+                        <el-button type="primary" @click="onSaveFile" :disabled="!state.currEditFile">保 存</el-button>
+                        <el-button type="danger" @click="onDelFile" :disabled="!state.currEditFile">删 除</el-button>
                         <span v-if="state.isDirty" class="dirty-tip">● 有未保存的修改</span>
                     </div>
                 </el-col>
@@ -124,7 +107,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="img-edit-form" v-if="!state.sessionMode">
+                        <div class="img-edit-form">
                             <el-input v-model="state.imageEdit.prompt" type="textarea" :rows="2" maxlength="500" show-word-limit
                                       placeholder="描述修图要求，例如：把背景换成浅蓝色，去掉右下角的水印" />
                             <div class="img-edit-actions">
@@ -167,30 +150,21 @@
             </el-row>
         </el-form>
 
-        <!-- AI 对话抽屉（全屏覆盖；调整型/会话编辑：左预览右对话，AI 每写一个文件自动刷新预览） -->
+        <!-- AI 对话抽屉（全屏覆盖，完全独立于主编辑界面：调整型/会话编辑视图为左预览右对话，
+             AI 每写一个文件自动刷新预览；关闭抽屉不影响主界面任何状态） -->
         <el-drawer v-model="state.aiDrawerVisible" size="100%" :close-on-click-modal="false" custom-class="ai-template-drawer">
             <template #header>
                 <div class="drawer-header">
-                    <span class="drawer-title">{{ state.sessionMode ? '编辑 AI 模板' : (state.aiMode === 'adjust' ? 'AI 调整模板' : 'AI 生成模板') }}</span>
+                    <span class="drawer-title">{{ state.sessionView ? '编辑 AI 模板' : (state.aiMode === 'adjust' ? 'AI 调整模板' : 'AI 生成模板') }}</span>
                 </div>
             </template>
-            <div class="ai-drawer-body" :class="{ split: state.aiMode === 'adjust' || state.sessionMode }">
-                <div v-if="state.aiMode === 'adjust' || state.sessionMode" class="ai-preview-col" :class="{ 'chat-collapsed': state.aiChatCollapsed }">
+            <div class="ai-drawer-body" :class="{ split: state.aiMode === 'adjust' || state.sessionView }">
+                <div v-if="state.aiMode === 'adjust' || state.sessionView" class="ai-preview-col" :class="{ 'chat-collapsed': state.aiChatCollapsed }">
                     <div class="preview-toolbar">
                         <el-select v-model="state.aiPreviewEntry" size="small" filterable placeholder="选择预览页面">
                             <el-option v-for="p in previewPageOptions" :key="p" :value="p" :label="p" />
                         </el-select>
-                        <el-button size="small" :type="state.imagePickMode ? 'primary' : ''"
-                                   :title="state.imagePickMode ? '换图模式已开启：点击预览页中的图片进行更换' : '开启换图模式：点选预览页中的图片进行更换'"
-                                   @click="toggleImagePickMode">
-                            <el-icon><ele-PictureFilled /></el-icon>换图
-                        </el-button>
-                        <el-button v-if="state.sessionMode && !sessionReadonly" size="small"
-                                   :type="state.sectionSelectMode ? 'primary' : ''"
-                                   :title="state.sectionSelectMode ? '选区模式已开启：点击预览页中的区块锁定为 AI 对话目标' : '开启选区模式：点选预览页中的区块，后续 AI 对话只修改该区块'"
-                                   @click="toggleSectionSelectMode">
-                            <el-icon><ele-Position /></el-icon>选区
-                        </el-button>
+                        <!-- 换图/选区按钮在右侧 AI 聊天操作行（与发送按钮同排，随聊天列收缩） -->
                         <el-button size="small" @click="refreshAiPreview" title="刷新预览">
                             <el-icon><ele-Refresh /></el-icon>
                         </el-button>
@@ -198,16 +172,18 @@
                             <el-icon><ele-FullScreen /></el-icon>
                         </el-button>
                     </div>
-                    <div class="preview-frame-wrap" :class="{ picking: state.imagePickMode, sectioning: state.sectionSelectMode }">
+                    <div class="preview-frame-wrap">
                         <iframe v-if="aiPreviewUrl" ref="aiPreviewFrameRef" :src="aiPreviewUrl"
                                 class="preview-frame" frameborder="0" @load="onPreviewFrameLoad"></iframe>
-                        <div v-if="state.imagePickMode" class="pick-mode-tip">换图模式：点击预览页中高亮的图片（再次点击「换图」按钮退出）</div>
-                        <div v-else-if="state.sectionSelectMode" class="pick-mode-tip">选区模式：点击预览页中的区块锁定为 AI 对话目标（再次点击「选区」按钮退出）</div>
+                        <!-- 预览空白占位：新会话生成中（尚无页面文件）或无可路由 HTML 时 -->
+                        <div v-else class="preview-empty">
+                            <el-empty :description="previewEmptyTip" :image-size="80" />
+                        </div>
                     </div>
                 </div>
-                <div class="ai-chat-col" :class="{ collapsed: (state.aiMode === 'adjust' || state.sessionMode) && state.aiChatCollapsed }">
-                    <!-- adjust/会话编辑模式：收缩/展开切换按钮 -->
-                    <div v-if="state.aiMode === 'adjust' || state.sessionMode" class="chat-collapse-bar">
+                <div class="ai-chat-col" :class="{ collapsed: (state.aiMode === 'adjust' || state.sessionView) && state.aiChatCollapsed }">
+                    <!-- adjust/会话编辑视图：收缩/展开切换按钮 -->
+                    <div v-if="state.aiMode === 'adjust' || state.sessionView" class="chat-collapse-bar">
                         <el-button size="small" text :title="state.aiChatCollapsed ? '展开 AI 对话框' : '收缩 AI 对话框'"
                                    @click="state.aiChatCollapsed = !state.aiChatCollapsed">
                             <el-icon :size="16">
@@ -230,9 +206,12 @@
                                  :focus-section="state.selectedSection?.sectionId || ''"
                                  :focus-element-hint="state.selectedSection?.elementHint || ''"
                                  :sessions="state.aiSessions" :creating-session="state.creatingAiSession"
+                                 :session-active="state.sessionView"
+                                 :image-pick-mode="state.imagePickMode" :section-select-mode="state.sectionSelectMode"
                                  @select-session="onSelectAiSession" @new-session="onNewAiSession"
                                  @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @applied="onAiTemplateApplied"
-                                 @edit-files="onEditSessionFiles" />
+                                 @edit-files="onEditSessionFiles"
+                                 @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
                     </div>
                 </div>
             </div>
@@ -354,24 +333,40 @@
                 </el-form-item>
             </el-form>
             <template v-else>
-                <el-table :data="state.createDialog.sessions" v-loading="state.createDialog.historyLoading" stripe size="small"
-                          max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
-                    <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
-                    <el-table-column label="状态" width="80">
-                        <template #default="scope">
-                            <el-tag size="small" :type="scope.row.status === 'applied' ? 'success' : 'warning'">
-                                {{ scope.row.status === 'applied' ? '已应用' : '未应用' }}
-                            </el-tag>
+                <!-- 已应用/未应用分页签：未应用是活跃工作集（默认），已应用仅回看 -->
+                <el-tabs v-model="state.createDialog.historyTab">
+                    <el-tab-pane name="pending">
+                        <template #label>
+                            未应用<el-badge v-if="pendingSessions.length" :value="pendingSessions.length" type="warning" class="history-tab-badge" />
                         </template>
-                    </el-table-column>
-                    <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
-                    <el-table-column label="创建时间" width="130">
-                        <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
-                    </el-table-column>
-                </el-table>
-                <el-empty v-if="!state.createDialog.historyLoading && state.createDialog.sessions.length === 0"
-                          description="暂无生成记录" :image-size="60" />
-                <div class="history-tip">点击记录打开 AI 抽屉：未应用的可继续对话或应用；已应用的仅回看</div>
+                        <el-table :data="pendingSessions" v-loading="state.createDialog.historyLoading" stripe size="small"
+                                  max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
+                            <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
+                            <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
+                            <el-table-column label="创建时间" width="130">
+                                <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
+                            </el-table-column>
+                        </el-table>
+                        <el-empty v-if="!state.createDialog.historyLoading && pendingSessions.length === 0"
+                                  description="暂无未应用的生成记录" :image-size="60" />
+                    </el-tab-pane>
+                    <el-tab-pane name="applied">
+                        <template #label>
+                            已应用<el-badge v-if="appliedSessions.length" :value="appliedSessions.length" type="success" class="history-tab-badge" />
+                        </template>
+                        <el-table :data="appliedSessions" v-loading="state.createDialog.historyLoading" stripe size="small"
+                                  max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
+                            <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
+                            <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
+                            <el-table-column label="创建时间" width="130">
+                                <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
+                            </el-table-column>
+                        </el-table>
+                        <el-empty v-if="!state.createDialog.historyLoading && appliedSessions.length === 0"
+                                  description="暂无已应用的生成记录" :image-size="60" />
+                    </el-tab-pane>
+                </el-tabs>
+                <div class="history-tip">点击记录直接进入编辑视图（左预览右对话）：未应用的可继续打磨或应用；已应用的仅回看</div>
             </template>
             <template #footer>
                 <template v-if="state.createDialog.view === 'create'">
@@ -448,15 +443,18 @@ const state = reactive({
     aiSessions: [] as any[],
     currentAiSessionId: '',
     currentAiSession: null as any,
-    // ===== 会话编辑模式（生成型会话应用前的手工打磨） =====
-    // true 时文件树/编辑器/预览/保存/删除/上传全部切到会话工作目录
-    sessionMode: false,
-    // banner「应用模板」按钮 loading
-    sessionApplying: false,
+    // ===== 会话编辑视图（抽屉内，生成型会话应用前的查看与打磨） =====
+    // true 时抽屉切换为「编辑 AI 模板」：左预览右对话，预览走会话路由；
+    // 纯抽屉内状态，主编辑界面不受任何影响，关闭抽屉即重置
+    sessionView: false,
+    // 会话工作目录文件树（仅服务抽屉左侧预览页面下拉，与主页面文件树无关）
+    sessionFileTree: [] as any[],
     // AI 新建模板对话框（create：新建表单；history：历史生成记录列表）
     createDialog: {
         visible: false,
         view: 'create' as 'create' | 'history',
+        // 历史记录页签（pending：未应用，默认；applied：已应用仅回看）
+        historyTab: 'pending' as 'pending' | 'applied',
         templateName: '',
         requirement: '',
         // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
@@ -472,7 +470,8 @@ const state = reactive({
     aiPreviewEntry: '',
     aiPreviewKey: 0,
     // ===== 预览页点选换图 =====
-    // 换图模式：开启后向预览 iframe 注入点选钩子（高亮 data-ai-slot 图片，点击弹操作窗）
+    // 换图模式：开启后向预览 iframe 注入点选钩子（全部图片边框高亮可点选——
+    // 槽位图 data-ai-slot 主色粗虚线、演示图浅色细虚线，点击弹操作窗）
     imagePickMode: false,
     // ===== 预览页选区修改 =====
     // 选区模式：开启后向预览 iframe 注入区块钩子（hover 高亮 data-ai-section-root 区块，点击锁定为 AI 对话目标）
@@ -552,6 +551,8 @@ const isRoutableHtml = (file: string) =>
 
 /**
  * 实时预览可选页面：文件树中的可路由 HTML（含模板目录前缀，预览后端会截掉）
+ *
+ * 会话编辑视图用会话工作目录的文件树（sessionFileTree），其余用主页面正式模板文件树
  */
 const previewPageOptions = computed<string[]>(() => {
     const result: string[] = [];
@@ -564,18 +565,18 @@ const previewPageOptions = computed<string[]>(() => {
             }
         }
     };
-    walk(state.treeTableData as any[]);
+    walk((state.sessionView ? state.sessionFileTree : state.treeTableData) as any[]);
     return result;
 });
 
 /**
  * 实时预览 iframe 地址：刷新键变化（AI 写盘/手动刷新）即重载
  *
- * 会话编辑模式走会话预览路由（按 sessionId 定位工作目录），
+ * 会话编辑视图走会话预览路由（按 sessionId 定位工作目录），
  * 文件路径含模板目录前缀，后端 AiTemplatePreviewController 会截掉
  */
 const aiPreviewUrl = computed(() => {
-    if (state.sessionMode) {
+    if (state.sessionView) {
         const sess = state.currentAiSession;
         if (!sess?.sessionId || !sess.templateName || !state.aiPreviewEntry) return '';
         return '/ai/template/preview/' + sess.sessionId + '/' + sess.templateName + '/' + state.aiPreviewEntry + '?t=' + state.aiPreviewKey;
@@ -584,38 +585,41 @@ const aiPreviewUrl = computed(() => {
     return '/template/preview/' + state.loadedTemplateId + '/' + state.aiPreviewEntry + '?t=' + state.aiPreviewKey;
 });
 
-// ==================== 会话编辑模式：接口分流 ====================
+/** 上传地址（主编辑界面只上传正式模板目录） */
+const uploadAction = computed(() => state.uploadUrl);
 
-/** 上传地址：会话编辑模式传会话工作目录，否则传正式模板目录 */
-const uploadAction = computed(() =>
-    state.sessionMode && state.currentAiSession?.sessionId
-        ? aiApi.sessionUploadUrl(state.currentAiSession.sessionId)
-        : state.uploadUrl
-);
+/** 上传附加参数 */
+const uploadData = computed(() => ({ dirName: state.uploadParam.dirName, templateId: state.uploadParam.templateId }));
 
-/** 上传附加参数：会话模式仅需 dirName（sessionId 在 URL 中）；正式模式带 templateId */
-const uploadData = computed(() =>
-    state.sessionMode
-        ? { dirName: state.uploadParam.dirName }
-        : { dirName: state.uploadParam.dirName, templateId: state.uploadParam.templateId }
-);
-
-/** 会话编辑模式下已应用的会话：只读（后端拒绝写入，前端同步禁用保存/删除/上传） */
-const sessionReadonly = computed(() => state.sessionMode && state.currentAiSession?.status === 'applied');
+/** 会话编辑视图下已应用的会话：只读（禁用选区等需要写会话的交互入口） */
+const sessionReadonly = computed(() => state.sessionView && state.currentAiSession?.status === 'applied');
 
 /**
- * 初始化实时预览入口：优先当前编辑的可路由 HTML，其次 index.html，最后取第一个可选页
+ * 预览空白占位文案：会话尚无任何文件（新会话生成中）显示引导提示，
+ * 其余（树已就绪但无可路由 HTML）用通用提示
+ */
+const previewEmptyTip = computed(() => {
+    if (state.sessionView && (state.sessionFileTree || []).length === 0) {
+        return 'AI 正在生成文件，首个页面完成后将在此显示实时预览';
+    }
+    return '暂无可预览页面';
+});
+
+/**
+ * 初始化实时预览入口：优先当前编辑的可路由 HTML（仅非会话视图），其次首页（index.html），
+ * 最后取第一个可选页
+ *
+ * 文件树路径含模板目录前缀（如 my-company/index.html），首页匹配须按后缀而非全等，
+ * 否则永远回退到文件树第一个页面（字母序在前，如 article.html）
  */
 const initAiPreviewEntry = () => {
     const options = previewPageOptions.value;
-    if (isRoutableHtml(state.currEditFile) && options.includes(state.currEditFile)) {
+    // 会话编辑视图预览的是会话工作目录，主编辑器当前文件（正式模板）不适用
+    if (!state.sessionView && isRoutableHtml(state.currEditFile) && options.includes(state.currEditFile)) {
         state.aiPreviewEntry = state.currEditFile;
-    } else if (options.includes('index.html')) {
-        state.aiPreviewEntry = 'index.html';
-    } else if (options.length > 0) {
-        state.aiPreviewEntry = options[0];
     } else {
-        state.aiPreviewEntry = '';
+        const indexEntry = options.find((p: string) => p === 'index.html' || p.endsWith('/index.html'));
+        state.aiPreviewEntry = indexEntry || (options.length > 0 ? options[0] : '');
     }
     state.aiPreviewKey = Date.now();
 };
@@ -631,7 +635,8 @@ const openAiPreviewNewWindow = () => {
 // ==================== 预览页点选换图 ====================
 
 /**
- * 切换换图模式：开启后预览 iframe 中带 data-ai-slot 标记的图片高亮可点选
+ * 切换换图模式：开启后预览 iframe 中全部图片边框高亮可点选
+ * （槽位图 data-ai-slot 主色粗虚线、演示图浅色细虚线），关闭时移除高亮
  *
  * 预览页与本页同源（/template/preview/**），通过 contentDocument 直接注入
  * 样式与 click 捕获监听；iframe 因刷新键变化重载时在 @load 中重新注入。
@@ -639,7 +644,13 @@ const openAiPreviewNewWindow = () => {
 const toggleImagePickMode = () => {
     state.imagePickMode = !state.imagePickMode;
     if (state.imagePickMode && !state.currentAiSession?.sessionId) {
-        ElMessage.warning('当前无 AI 调整会话，请先打开 AI 调整');
+        ElMessage.warning('当前无 AI 会话，请先打开 AI 调整');
+        state.imagePickMode = false;
+        return;
+    }
+    // 已应用的生成会话仅回看：沙箱目录与正式目录已分叉，换图改沙箱不生效
+    if (state.imagePickMode && sessionReadonly.value) {
+        ElMessage.warning('该会话已应用，仅支持回看；如需调整请在正式模板上使用「AI 调整」');
         state.imagePickMode = false;
         return;
     }
@@ -670,12 +681,12 @@ const onPreviewFrameLoad = () => {
 
 /**
  * 从预览路由路径反解页面 entry（与 aiPreviewUrl 构造互逆）：
- * 会话模式 /ai/template/preview/{sessionId}/{templateName}/{entry}，
+ * 会话视图 /ai/template/preview/{sessionId}/{templateName}/{entry}，
  * 调整模式 /template/preview/{templateId}/{entry}（entry 含模板目录前缀）
  */
 const extractPreviewEntry = (pathname: string): string => {
     try {
-        if (state.sessionMode) {
+        if (state.sessionView) {
             const sess = state.currentAiSession;
             if (!sess?.sessionId || !sess.templateName) return '';
             const prefix = '/ai/template/preview/' + sess.sessionId + '/' + sess.templateName + '/';
@@ -758,6 +769,8 @@ const applyImagePickHooks = () => {
             const style = doc.createElement('style');
             style.id = styleId;
             style.textContent = `
+                img { outline: 2px dashed #e6a23c !important; outline-offset: 2px; cursor: pointer !important; }
+                img:hover { outline-style: solid !important; filter: brightness(1.08); }
                 [data-ai-slot] { outline: 2px dashed var(--el-color-primary, #409eff) !important; outline-offset: 2px; cursor: pointer !important; }
                 [data-ai-slot]:hover { outline-style: solid !important; filter: brightness(1.08); }
             `;
@@ -834,10 +847,22 @@ const SECTION_SELECTED_CLASS = '__ai_section_selected__';
  * 切换选区模式：开启后预览 iframe 中的组件区块（data-ai-section-root 根标记）
  * hover 高亮，点击锁定为 AI 对话目标（后续对话只修改该区块）
  *
- * 仅会话编辑模式可用（按钮有 v-if 门控；组件化会话走 PageSpec 往返，AI 可按 section 修改）
+ * 调整模式与会话编辑视图均可用：组件化模板走后端定位（调整=提示词约束路线 B，
+ * 会话=PageSpec 往返），非组件化模板点选时提示不可用
  */
 const toggleSectionSelectMode = () => {
     state.sectionSelectMode = !state.sectionSelectMode;
+    if (state.sectionSelectMode && !state.currentAiSession?.sessionId) {
+        ElMessage.warning('当前无 AI 会话，请先打开 AI 调整');
+        state.sectionSelectMode = false;
+        return;
+    }
+    // 已应用的生成会话仅回看：不允许锁定选区发起对话
+    if (state.sectionSelectMode && sessionReadonly.value) {
+        ElMessage.warning('该会话已应用，仅支持回看；如需调整请在正式模板上使用「AI 调整」');
+        state.sectionSelectMode = false;
+        return;
+    }
     if (state.sectionSelectMode && (state.imagePickMode)) {
         // 两个点选模式互斥
         state.imagePickMode = false;
@@ -1129,9 +1154,17 @@ const onPickUploadError = () => {
 };
 
 /**
- * AI 每写完一个文件（SSE file 事件）的实时回调：刷新右侧预览
+ * AI 每写完一个文件（SSE file 事件）的实时回调：刷新左侧预览
+ *
+ * 会话编辑视图下若预览入口尚未初始化（新会话首个页面还没写盘），
+ * 先刷新会话文件树并初始化预览入口——首个可路由 HTML 落地的瞬间预览自动出现；
+ * 入口就绪后仅刷新预览键（key 变化重载 iframe）
  */
 const onAiFileWritten = (_path: string) => {
+    if (state.sessionView && !state.aiPreviewEntry) {
+        loadSessionFileTree().then(() => initAiPreviewEntry());
+        return;
+    }
     state.aiPreviewKey = Date.now();
 };
 
@@ -1140,17 +1173,11 @@ const onAiFileWritten = (_path: string) => {
  *
  * 当前编辑的文件是可路由 HTML（非 _ 开头的布局/宏文件）时预览该文件，
  * 否则预览首页 index.html。
- * 会话编辑模式走会话预览路由（/ai/template/preview/{sessionId}/{templateName}/**）
  */
 const onPreview = () => {
     let entry = 'index.html';
     if (isRoutableHtml(state.currEditFile)) {
         entry = state.currEditFile;
-    }
-    if (state.sessionMode && state.currentAiSession?.sessionId) {
-        const sess = state.currentAiSession;
-        window.open('/ai/template/preview/' + sess.sessionId + '/' + sess.templateName + '/' + entry, '_blank');
-        return;
     }
     if (!state.loadedTemplateId) return;
     window.open('/template/preview/' + encodeURIComponent(state.loadedTemplateId) + '/' + entry, '_blank');
@@ -1165,6 +1192,8 @@ const onPreview = () => {
 const onOpenAiAdjust = async () => {
     if (!state.loadedTemplateId) return;
     state.aiMode = 'adjust';
+    // 每次打开抽屉都从初始视图开始（会话编辑视图随上次关闭已重置）
+    state.sessionView = false;
     try {
         const res = await aiApi.listSessions();
         // 按创建时间倒序（最近的在最前），默认选中也取第一个
@@ -1211,6 +1240,8 @@ const onOpenAiCreate = () => {
  */
 const onShowHistory = async () => {
     state.createDialog.view = 'history';
+    // 默认展示未应用页签（活跃工作集），每次打开重置避免上次停留页签造成误导
+    state.createDialog.historyTab = 'pending';
     state.createDialog.historyLoading = true;
     try {
         const res = await aiApi.listSessions();
@@ -1222,16 +1253,23 @@ const onShowHistory = async () => {
     }
 };
 
+/** 历史记录按状态分流：未应用（可继续打磨/应用）与已应用（仅回看） */
+const pendingSessions = computed(() => state.createDialog.sessions.filter((s: any) => s.status !== 'applied'));
+const appliedSessions = computed(() => state.createDialog.sessions.filter((s: any) => s.status === 'applied'));
+
 /**
- * 打开历史生成会话：进入 generate 模式抽屉恢复会话（不自动发送消息）
+ * 打开历史生成会话：直接进入会话编辑视图恢复会话（不自动发送消息）；
+ * 未应用的可继续对话打磨，已应用的只读回看（预览照常显示）
  */
 const onOpenHistorySession = (row: any) => {
     state.createDialog.visible = false;
     state.aiMode = 'generate';
+    state.sessionView = true;
     state.aiSessions = state.createDialog.sessions;
     state.currentAiSessionId = row.sessionId;
     state.currentAiSession = row;
     state.aiDrawerVisible = true;
+    loadSessionFileTree().then(() => initAiPreviewEntry());
 };
 
 /** 历史记录创建时间格式化（月-日 时:分） */
@@ -1277,14 +1315,18 @@ const onCreateConfirm = async () => {
             ElMessage.error(res.msg || '创建会话失败');
             return;
         }
-        // 会话创建成功：切换到生成模式并打开抽屉
+        // 会话创建成功：切换到生成模式，直接进入会话编辑视图（左预览右对话），
+        // 生成过程中 AI 每写完一个文件实时刷新预览
         state.aiMode = 'generate';
+        state.sessionView = true;
         const listRes = await aiApi.listSessions();
         state.aiSessions = (listRes.data || []).filter((s: any) => !s.templateId);
         state.currentAiSessionId = res.data.sessionId;
         state.currentAiSession = res.data;
         state.createDialog.visible = false;
         state.aiDrawerVisible = true;
+        // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
+        loadSessionFileTree().then(() => initAiPreviewEntry());
         // 抽屉渲染后自动发送首条需求（aiChat 内部会等待会话历史加载完成）
         nextTick(() => {
             aiChatRef.value?.autoSend(requirement);
@@ -1321,24 +1363,36 @@ const onNewAiSession = async () => {
 /**
  * 切换 AI 会话
  *
- * 会话编辑模式下切到其他生成会话：文件树/预览随之切到新会话的工作目录；
- * 切到已应用的会话则退出会话编辑（只读，回到正式模板编辑）
+ * 会话编辑视图下切到其他生成会话：左侧预览随之切到新会话的工作目录；
+ * 已应用的会话保持编辑视图只读回看（sessionReadonly）
  */
 const onSelectAiSession = (sessionId: string) => {
     const session = state.aiSessions.find((s: any) => s.sessionId === sessionId);
     state.currentAiSession = session || null;
-    if (!state.sessionMode) return;
-    if (!session?.sessionId || session.status === 'applied') {
-        exitSessionMode();
+    // 切换会话即切换预览工作目录：旧会话锁定的选区对新会话无意义，一并清除
+    if (state.sectionSelectMode || state.selectedSection) {
+        state.sectionSelectMode = false;
+        clearSelectedSection();
+    }
+    if (!state.sessionView) return;
+    if (!session?.sessionId) {
+        exitSessionView();
         return;
     }
-    loadFileTree(true)?.then?.(() => initAiPreviewEntry());
+    // 已应用会话同样保持编辑视图（sessionReadonly 只读回看，预览照常显示）
+    loadSessionFileTree().then(() => initAiPreviewEntry());
 };
 
 /**
- * AI 写盘后联动：刷新文件树；当前编辑的文件被 AI 修改过则重新加载内容
+ * AI 写盘后联动：
+ * - 会话编辑视图：AI 改的是会话工作目录 → 刷新会话文件树（预览页面下拉随之更新）
+ * - 调整模式：AI 直写正式模板目录 → 刷新主页面文件树，当前编辑的文件被改过则重新加载内容
  */
 const onAiFilesChanged = () => {
+    if (state.sessionView) {
+        loadSessionFileTree();
+        return;
+    }
     loadFileTree();
     if (!state.currEditFile) return;
     loadFileContent(state.currEditFile).then((res: any) => {
@@ -1358,115 +1412,72 @@ const onAiFilesChanged = () => {
     });
 };
 
-// ==================== 会话编辑模式（生成型会话，应用前编辑） ====================
+// ==================== 会话编辑视图（抽屉内，生成型会话应用前查看打磨） ====================
 
 /**
- * 进入会话编辑模式（aiChat「编辑文件」入口）
- *
- * 文件树/编辑器/保存/删除/上传/预览全部切换到会话工作目录（沙箱），
- * AI 抽屉同步变为「左预览 + 右对话」的分栏布局；
- * 正式模板上下文（loadedTemplateId）临时置空防误操作，退出时恢复
+ * 加载会话工作目录文件树（仅用于抽屉左侧预览的页面下拉，与主编辑界面无关）
  */
-const onEditSessionFiles = () => {
+const loadSessionFileTree = () => {
+    const sessionId = state.currentAiSession?.sessionId;
+    if (!sessionId) return Promise.resolve();
+    return aiApi.getSessionFileTree(sessionId).then((res: any) => {
+        state.sessionFileTree = res.data || [];
+    }).catch(() => {
+        state.sessionFileTree = [];
+    });
+};
+
+/**
+ * 退出会话编辑视图：抽屉回到 aiChat 独占全宽（无左侧预览）
+ */
+const exitSessionView = () => {
+    state.sessionView = false;
+    state.sessionFileTree = [];
+    // 选区锁定随会话上下文一并清除
+    state.sectionSelectMode = false;
+    clearSelectedSection();
+};
+
+/**
+ * 进入会话编辑视图（aiChat「编辑文件」入口，兜底路径）：抽屉切换为「编辑 AI 模板」——左预览右对话
+ *
+ * generate 会话现在创建/恢复时即直接进入编辑视图，本入口仅在极端情况下（sessionView 被重置）可达；
+ * 纯抽屉内状态切换，主编辑界面（正式模板的文件树/编辑器/按钮）不受任何影响；
+ * 关闭抽屉即回到主界面原样，想再次进入走「AI 新建模板 → 历史生成记录」
+ */
+const onEditSessionFiles = async () => {
     const session = state.currentAiSession;
     if (!session?.sessionId || !session.templateName) return;
     if (session.status === 'applied') {
         ElMessage.warning('该会话已应用，如需继续调整请应用后在正式模板上使用「AI 调整」');
         return;
     }
-    const doEnter = () => {
-        state.sessionMode = true;
-        // 正式模板上下文置空：所有读写已按 sessionMode 分流，置空兜底防误操作
-        state.loadedTemplateId = '';
-        state.currEditFile = '';
-        state.content = '';
-        state.savedContent = '';
-        closeImageWorkbench();
-        checkDirty();
-        // 会话文件树加载完成后初始化抽屉左侧预览入口
-        loadFileTree(true)?.then?.(() => initAiPreviewEntry());
-    };
-    if (checkDirty()) {
-        confirmDiscard().then(doEnter).catch(() => {});
-    } else {
-        doEnter();
-    }
-};
-
-/**
- * 退出会话编辑模式：恢复原先选中的正式模板（文件树/编辑器/预览切回正式目录）
- */
-const exitSessionMode = () => {
-    const doExit = () => {
-        state.sessionMode = false;
-        state.currEditFile = '';
-        state.content = '';
-        state.savedContent = '';
-        state.uploadParam.dirName = '';
-        // 会话上下文结束：选区锁定一并清除
-        state.sectionSelectMode = false;
-        clearSelectedSection();
-        closeImageWorkbench();
-        checkDirty();
-        // 恢复正式模板上下文（templateId 在会话编辑期间未被改动）
-        state.loadedTemplateId = state.templateId;
-        state.uploadParam.templateId = state.templateId;
-        loadFileTree(true);
-    };
-    if (checkDirty()) {
-        confirmDiscard().then(doExit).catch(() => {});
-    } else {
-        doExit();
-    }
-};
-
-/**
- * banner「应用模板」：应用当前生成会话到正式模板目录，成功后无缝切换
- */
-const onApplySessionTemplate = () => {
-    const session = state.currentAiSession;
-    if (!session?.sessionId) return;
-    ElMessageBox.confirm('确认将此模板应用到正式模板目录？应用后将切换到正式模板编辑。', '提示', {
-        type: 'warning',
-    }).then(async () => {
-        state.sessionApplying = true;
-        try {
-            const res: any = await aiApi.applyTemplate(session.sessionId);
-            if (res.data) {
-                ElMessage.success(res.data.message || '应用成功');
-                onAiTemplateApplied(res.data.templateId);
-            } else if (res.msg) {
-                ElMessage.error(res.msg);
-            }
-        } catch (e: any) {
-            ElMessage.error(e?.message || '应用失败');
-        } finally {
-            state.sessionApplying = false;
-        }
-    }).catch(() => {});
+    state.sessionView = true;
+    await loadSessionFileTree();
+    // 会话文件树就绪后初始化左侧预览入口
+    initAiPreviewEntry();
 };
 
 /**
  * 生成型会话应用模板成功：无缝切换
  *
- * 应用后即「预览态」：关闭 AI 对话抽屉（无 AI 对话），退出会话编辑模式，
- * 直接载入应用后的正式模板（templateId 来自后端 ApplyResult）；
+ * 应用后关闭 AI 抽屉（会话编辑视图一并重置），载入应用后的正式模板
+ * （templateId 来自后端 ApplyResult）；主界面如有未保存修改先确认再切换；
  * 后续如需 AI 继续调整，走正式模板的「AI 调整」（新建调整型会话）
  */
 const onAiTemplateApplied = (templateId?: string) => {
     // 会话标记为已应用（若抽屉内还有引用，标签/输入禁用即时生效）
     if (state.currentAiSession) state.currentAiSession.status = 'applied';
     state.aiDrawerVisible = false;
-    if (state.sessionMode) {
-        state.sessionMode = false;
-        state.currEditFile = '';
-        state.content = '';
-        state.savedContent = '';
-        closeImageWorkbench();
-        checkDirty();
-    }
+    state.sessionView = false;
+    state.sessionFileTree = [];
     // 刷新模板列表并选中应用后的模板（preferId 缺省回落到当前激活模板）
-    loadTemplateList(templateId || undefined);
+    const doLoad = () => loadTemplateList(templateId || undefined);
+    if (checkDirty()) {
+        confirmDiscard().then(doLoad).catch(() => {});
+    } else {
+        doLoad();
+    }
 };
 
 /**
@@ -1501,17 +1512,14 @@ const loadTemplateList = (preferId?: string) => {
 }
 
 /**
- * 加载文件树（会话编辑模式加载会话工作目录，否则加载正式模板目录）
+ * 加载文件树（主编辑界面只加载正式模板目录）
  * @param openDefault  是否同时默认打开 index.html（仅首次进入/切换模板时传 true，
  *                     AI 写盘后的树刷新不能重置用户正在编辑的文件）
  * @returns 加载 Promise（供调用方在树就绪后初始化预览入口）
  */
 const loadFileTree = (openDefault = false) => {
     state.treeLoading = true;
-    const req = state.sessionMode && state.currentAiSession?.sessionId
-        ? aiApi.getSessionFileTree(state.currentAiSession.sessionId)
-        : templateApi.getTemplateFileTree(state.loadedTemplateId || undefined);
-    return req.then((res: any) => {
+    return templateApi.getTemplateFileTree(state.loadedTemplateId || undefined).then((res: any) => {
         state.treeTableData = res.data;
         // 默认展开第一层（顶层节点）
         state.expandedKeys = (res.data || []).map((n: any) => n.filePath);
@@ -1524,13 +1532,11 @@ const loadFileTree = (openDefault = false) => {
 }
 
 /**
- * 读取文件内容（会话编辑模式读会话工作目录，否则读正式模板目录）
+ * 读取文件内容（正式模板目录）
  * filePath 约定与文件树一致：以模板目录名开头
  */
 const loadFileContent = (filePath: string) => {
-    return state.sessionMode && state.currentAiSession?.sessionId
-        ? aiApi.getSessionFile(state.currentAiSession.sessionId, filePath)
-        : templateApi.getTemplateFile(filePath, state.loadedTemplateId || undefined);
+    return templateApi.getTemplateFile(filePath, state.loadedTemplateId || undefined);
 };
 
 /**
@@ -1551,7 +1557,6 @@ const openDefaultFile = () => {
     const node = find(state.treeTableData as any[]);
     if (node) {
         state.currEditFile = node.filePath;
-        // 会话编辑模式读会话工作目录，否则读正式模板目录
         loadFileContent(node.filePath).then((res: any) => {
             state.content = res.data;
             state.savedContent = res.data;
@@ -1573,18 +1578,12 @@ const doSave = () => {
     if (state.savedContent.indexOf('\r\n') >= 0) {
         contentToSave = normalizeEol(state.content).replace(/\n/g, '\r\n');
     }
-    // 会话编辑模式保存到会话工作目录（沙箱），否则保存到正式模板目录
-    const req = state.sessionMode && state.currentAiSession?.sessionId
-        ? aiApi.saveSessionFile(state.currentAiSession.sessionId, {
-            filePath: state.currEditFile,
-            fileContent: contentToSave
-        })
-        : templateApi.saveTemplateFile({
-            filePath: state.currEditFile,
-            fileContent: contentToSave,
-            templateId: state.loadedTemplateId
-        });
-    return req.then(() => {
+    // 主编辑界面只保存正式模板目录
+    return templateApi.saveTemplateFile({
+        filePath: state.currEditFile,
+        fileContent: contentToSave,
+        templateId: state.loadedTemplateId
+    }).then(() => {
         state.savedContent = contentToSave;
         checkDirty();
         ElMessage.success("保存成功");
@@ -1639,11 +1638,7 @@ const onDelFile = () => {
         cancelButtonText: '取消',
         type: 'warning',
     }).then(() => {
-        // 会话编辑模式删会话工作目录的文件，否则删正式模板目录的文件
-        const req = state.sessionMode && state.currentAiSession?.sessionId
-            ? aiApi.delSessionFile(state.currentAiSession.sessionId, state.currEditFile)
-            : templateApi.delTemplateFile(state.currEditFile, state.loadedTemplateId || undefined);
-        req.then(() => {
+        templateApi.delTemplateFile(state.currEditFile, state.loadedTemplateId || undefined).then(() => {
             ElMessage.success("删除成功");
             state.content = '';
             state.savedContent = '';
@@ -1669,18 +1664,12 @@ const isImageFile = (filePath: string) => {
 };
 
 /**
- * 图片预览地址：复用预览路由的静态文件分支，
+ * 图片预览地址：复用预览路由的静态文件分支（主编辑界面只处理正式模板图片），
  * filePath 含模板目录前缀（与文件树一致），后端会截掉前缀解析；
- * 会话编辑模式走会话预览路由（/ai/template/preview/{sessionId}/{templateName}/**），
- * 否则走正式模板预览路由（/template/preview/{templateId}/**）；
  * 逐段编码（保留 / 分隔符，避免 %2F 被 Tomcat 拒绝）
  */
 const buildImageUrl = (filePath: string) => {
     const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-    if (state.sessionMode && state.currentAiSession?.sessionId) {
-        const sess = state.currentAiSession;
-        return '/ai/template/preview/' + encodeURIComponent(sess.sessionId) + '/' + encodeURIComponent(sess.templateName) + '/' + encodedPath + '?t=' + state.imagePreview.key;
-    }
     return '/template/preview/' + encodeURIComponent(state.loadedTemplateId) + '/' + encodedPath + '?t=' + state.imagePreview.key;
 };
 
@@ -1730,11 +1719,6 @@ const openResultRaw = () => {
 
 /** 提交模板图片 AI 修图任务（结果先存附件库展示对比，用户应用后才回写） */
 const submitTemplateImageEdit = async () => {
-    if (state.sessionMode) {
-        // 会话工作目录的图片不支持 AI 修图（修图回写走正式模板文件接口）
-        ElMessage.warning('会话编辑模式下暂不支持 AI 修图，可应用模板后再使用');
-        return;
-    }
     const prompt = state.imageEdit.prompt.trim();
     if (!prompt) {
         ElMessage.warning('请描述修图要求');
@@ -1857,11 +1841,6 @@ const applyImageEdit = async () => {
 /** 恢复 AI 修图前的原图（.bak 备份覆盖回原路径），同时清掉未应用的生成结果 */
 const restoreTemplateImage = () => {
     if (!state.imagePreview.filePath) return;
-    // 会话工作目录无 .bak 备份机制（AI 修图仅支持正式模板），按钮已隐藏，此处兜底拦截
-    if (state.sessionMode) {
-        ElMessage.warning('会话编辑模式下不支持恢复原图');
-        return;
-    }
     state.imagePreview.restoring = true;
     templateApi.restoreImage(state.imagePreview.filePath, state.loadedTemplateId || undefined).then((res: any) => {
         if (res.data !== undefined && res.data !== null) {
@@ -1986,13 +1965,17 @@ onMounted(() => {
     window.addEventListener('keydown', onSectionEscKey);
 });
 
-// AI 抽屉关闭：退出换图/选区模式 + 停止生图轮询 + 关闭换图操作窗
+// AI 抽屉关闭：退出换图/选区模式 + 停止生图轮询 + 关闭换图操作窗 + 重置会话编辑视图
+// （抽屉是完全独立的临时工作台：关闭即整体关闭，主编辑界面不受任何影响；
+//   想再次进入走「AI 新建模板 → 历史生成记录」）
 watch(() => state.aiDrawerVisible, (visible) => {
     if (!visible) {
         state.imagePickMode = false;
         state.sectionSelectMode = false;
         state.imagePickDialog.visible = false;
         stopImageGenPolling();
+        state.sessionView = false;
+        state.sessionFileTree = [];
     }
 });
 
@@ -2037,22 +2020,6 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
     gap: 0;
 }
-// 会话编辑模式横幅（替代模板选择下拉）：模板名 + 应用/AI 对话/退出
-.session-banner {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: 100%;
-
-    .session-banner-tag {
-        // 模板名可能较长，超出省略
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
 .tree-card-header {
     display: flex;
     align-items: center;
@@ -2080,6 +2047,17 @@ onBeforeUnmount(() => {
 // 历史生成记录列表（el-dialog 同样 teleport 到 body，需全局选择器）
 .history-session-table {
     cursor: pointer;
+}
+
+// 页签 label 内 badge：与文字垂直居中、间距收紧
+.history-tab-badge {
+    margin-left: 6px;
+    vertical-align: 2px;
+
+    :deep(.el-badge__content) {
+        position: relative;
+        transform: none;
+    }
 }
 
 .history-tip {
@@ -2213,20 +2191,16 @@ onBeforeUnmount(() => {
                 display: block;
             }
 
-            // 换图模式提示条（覆盖在预览区顶部）
-            .pick-mode-tip {
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                padding: 4px 12px;
-                background: var(--el-color-primary-light-9);
-                color: var(--el-color-primary);
-                font-size: 12px;
-                border-bottom: 1px dashed var(--el-color-primary-light-7);
-                pointer-events: none;
-                z-index: 5;
+            // 预览空白占位（新会话生成中 / 无可路由 HTML）
+            .preview-empty {
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--el-fill-color-lighter);
             }
+
         }
     }
 }

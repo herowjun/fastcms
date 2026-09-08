@@ -334,16 +334,36 @@ public class TemplateGenPromptBuilder {
      * <p>调整型会话的文件源是正式模板目录，用户可能在两轮对话之间通过编辑器手工修改过文件，
      * 因此每轮都从磁盘读取最新内容注入，保证 AI 始终基于最新状态调整。</p>
      *
-     * @param requirement 用户的调整需求
+     * <p>预览页点选区块时注入选区上下文：定位到的组件源码文件 + 元素语义提示，
+     * 在提示词层面约束 AI 只修改该区块相关文件（不走 PageSpec 往返，输出仍是文件补丁）。</p>
+     *
+     * @param requirement            用户的调整需求
      * @param currentFilesWithContent 当前模板文件及完整内容（从磁盘实时读取）
+     * @param currentFile            用户当前聚焦的页面（可空）
+     * @param focusSectionId         预览页点选的区块 ID（可空：未选区时无选区约束）
+     * @param focusElementHint       点选命中的元素语义提示（可空，如 标题「xx」）
+     * @param focusComponentFile     选区对应的组件源码文件名（_components/ 下；focusSectionId 非空时非空）
      */
-    public String buildAdjustPrompt(String requirement, String currentFilesWithContent, String currentFile) {
+    public String buildAdjustPrompt(String requirement, String currentFilesWithContent, String currentFile,
+                                    String focusSectionId, String focusElementHint, String focusComponentFile) {
+        String focusSectionBlock = (focusSectionId == null || focusSectionId.isBlank()) ? ""
+                : "## 用户选中的区块（本轮修改目标）\n\n"
+                + "用户在预览页点选了区块 `" + focusSectionId + "`"
+                + (focusElementHint == null || focusElementHint.isBlank() ? "" : "（命中元素：" + focusElementHint + "）")
+                + "。该区块的组件源码文件为 `_components/" + focusComponentFile + "`，"
+                + "由页面/布局文件通过 `<#include>` 引用，区块的文案/图片等槽位数据在引用处的 `<#assign comp = ...>` 中。\n\n"
+                + "本轮约束：\n"
+                + "1. 只修改该区块相关的文件：优先修改 `_components/" + focusComponentFile + "`；"
+                + "确需调整文案/图片数据时，可一并修改引用它的页面文件中的 comp assign\n"
+                + "2. 严禁修改其他区块的组件文件与无关页面\n"
+                + "3. 保留 data-ai-slot / data-ai-section / data-ai-section-root 标记（预览点选依赖，删除会导致点选功能失效）\n\n";
         String currentFileSection = (currentFile == null || currentFile.isBlank()) ? ""
                 : "## 用户当前正在查看的页面\n\n"
                 + "用户当前正在编辑/预览 `" + currentFile + "`，未明确指定其他页面时请优先调整该页面。\n\n"
                 + "注意：页面渲染依赖公共布局文件（如 _layout.html），若调整需求涉及公共部分（导航、页脚等），应修改布局文件而非每个页面。\n\n";
         return "请基于当前正式模板的文件内容进行调整，调整结果将直接写入正式模板。\n\n"
                 + "## 调整需求\n\n" + requirement + "\n\n"
+                + focusSectionBlock
                 + currentFileSection
                 + "## 数据与展示的边界（重要）\n\n"
                 + "模板中菜单、分类、标签、单页、文章标题等演示内容由 `_preview_data.json` 驱动（预览数据源）。"

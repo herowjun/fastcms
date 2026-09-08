@@ -36,7 +36,7 @@ class ComponentGenPromptBuilderTest {
     void promptsShouldCarryKeyRequirements() {
         assertTrue(builder.buildFirstGenPrompt("demo", "餐饮网站")
                 .contains("demo"));
-        assertTrue(builder.buildRefinePrompt("换主色", "{}").contains("换主色"));
+        assertTrue(builder.buildRefinePrompt("换主色", "{}", "").contains("换主色"));
         assertTrue(builder.buildFixPrompt(List.of("组件不存在: tw:not-exist"))
                 .contains("tw:not-exist"));
     }

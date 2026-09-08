@@ -67,11 +67,16 @@ public class PageSpecParser {
     /**
      * 解析结果：reply（自然语言，可能为 null）+ pagespec（可能为 null）
      * + filePatches（组件源码补丁，可能为空列表）
+     * + parseError（pagespec 为 null 时的具体原因：JSON 语法错误原文等，用于修正轮回喂精确定位）
      */
-    public record ParseResult(String reply, PageSpec pagespec, java.util.List<FilePatch> filePatches) {
+    public record ParseResult(String reply, PageSpec pagespec, java.util.List<FilePatch> filePatches, String parseError) {
 
         public ParseResult(String reply, PageSpec pagespec) {
-            this(reply, pagespec, java.util.List.of());
+            this(reply, pagespec, java.util.List.of(), null);
+        }
+
+        public ParseResult(String reply, PageSpec pagespec, java.util.List<FilePatch> filePatches) {
+            this(reply, pagespec, filePatches, null);
         }
     }
 
@@ -82,12 +87,12 @@ public class PageSpecParser {
      */
     public ParseResult parseResponse(String raw) {
         if (raw == null || raw.isBlank()) {
-            return new ParseResult(null, null);
+            return new ParseResult(null, null, java.util.List.of(), "响应为空");
         }
         String json = extractJson(raw);
         if (json == null) {
             log.warn("AI 响应中未找到 JSON，原始内容前 200 字符: {}", raw.substring(0, Math.min(200, raw.length())));
-            return new ParseResult(null, null);
+            return new ParseResult(null, null, java.util.List.of(), "响应中未找到 JSON 对象（无 { 开头的内容）");
         }
         try {
             JsonNode root = MAPPER.readTree(json);
@@ -99,16 +104,22 @@ public class PageSpecParser {
 
                 JsonNode specNode = root.get("pagespec");
                 if (specNode == null || !specNode.isObject()) {
-                    // 兼容：PageSpec 直接作为根对象（无 reply 包裹）
-                    return new ParseResult(reply,
-                            looksLikePageSpec(root) ? MAPPER.convertValue(root, PageSpec.class) : null, patches);
+                    // 兼容：PageSpec 直接作为根对象（无 reply 包裹）；根对象不含 pages
+                    // 键时 spec 为 null，parseError 记录原因（纯咨询契约下属正常，由调用方分流）
+                    PageSpec rootSpec = looksLikePageSpec(root) ? MAPPER.convertValue(root, PageSpec.class) : null;
+                    return new ParseResult(reply, rootSpec, patches,
+                            rootSpec == null ? "响应中缺少 pagespec 字段（根对象也不是 PageSpec）" : null);
                 }
                 return new ParseResult(reply, MAPPER.convertValue(specNode, PageSpec.class), patches);
             }
-            return new ParseResult(null, null);
+            return new ParseResult(null, null, java.util.List.of(), "JSON 根节点不是对象");
         } catch (Exception e) {
             log.warn("解析 PageSpec JSON 响应失败: {}", e.getMessage());
-            return new ParseResult(null, null);
+            // 具体语法错误原文透传（如 Unexpected close marker '}' expected ']'——
+            // 数组未正确闭合），修正轮回喂后模型可精确定位，避免笼统提示下
+            // 模型误判为截断而重复犯同样的结构错误
+            return new ParseResult(null, null, java.util.List.of(),
+                    "JSON 语法错误（非截断，是你的括号/结构写错了）: " + e.getMessage());
         }
     }
 

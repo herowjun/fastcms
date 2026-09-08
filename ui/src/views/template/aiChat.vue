@@ -26,6 +26,15 @@
 			<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
+		<!-- 旧模板确定性升级横幅（面板顶部）：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉。
+		     不依赖文件列表存在：新建调整会话尚无 AI 修改文件时也要能看到入口 -->
+		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
+			<span class="legacy-upgrade-tip">检测到旧版模板，可一键升级为组件化版本：保留站点名、菜单与预览数据，原文件自动备份，升级后可直接对话微调</span>
+			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
+				<el-icon><ele-MagicStick /></el-icon>升级为组件版
+			</el-button>
+		</div>
+
 		<!-- 对话区域 -->
 		<div class="chat-area" ref="chatAreaRef" @scroll="onChatAreaScroll">
 			<div v-for="(msg, msgIndex) in state.messages" :key="msgIndex" class="chat-message" :class="msg.role">
@@ -79,6 +88,15 @@
 				<el-icon class="is-loading"><ele-Loading /></el-icon>
 				<span>{{ state.statusText }}</span>
 			</div>
+			<!-- 点选模式提示条（正上方引导：看完提示顺势在输入框描述需求，随聊天列收缩） -->
+			<div v-if="imagePickMode" class="pick-mode-tip">
+				<el-icon><ele-InfoFilled /></el-icon>
+				<span>换图模式：点击预览页中高亮的图片进行更换（点击「退出换图模式」结束）</span>
+			</div>
+			<div v-else-if="sectionSelectMode" class="pick-mode-tip">
+				<el-icon><ele-InfoFilled /></el-icon>
+				<span>选区模式：点击预览页中的区块，锁定后在下方输入框描述修改需求（点击「退出选区模式」结束）</span>
+			</div>
 			<div v-if="mode === 'generate' && isFailed" class="regen-bar">
 				<span class="regen-tip">上次生成失败（详见上方错误信息）。模型配置修复后可重新生成。</span>
 				<el-button type="primary" size="small" @click="onRegenerate" :loading="state.chatting">
@@ -97,25 +115,31 @@
 				:disabled="state.chatting || isApplied"
 			/>
 			<div class="chat-actions">
-				<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
-					<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
+				<!-- 点选工具（换图/选区）：与发送按钮同排靠左；模式开关与预览 iframe 钩子注入由父组件处理 -->
+				<div v-if="pickToolsVisible" class="chat-tools">
+					<el-button size="small" :type="imagePickMode ? 'primary' : ''" :disabled="pickDisabled"
+					:title="imagePickMode ? '换图模式已开启：点击预览页中的图片进行更换' : '开启换图模式：点选预览页中的图片进行更换'"
+					@click="emit('toggle-image-pick')">
+					<el-icon><ele-PictureFilled /></el-icon>{{ imagePickMode ? '退出换图模式' : '换图' }}
 				</el-button>
-				<el-button v-if="state.chatting" type="danger" @click="onStop">
-					<el-icon><ele-VideoPause /></el-icon>停止
+				<el-button size="small" :type="sectionSelectMode ? 'primary' : ''" :disabled="pickDisabled"
+					:title="sectionSelectMode ? '选区模式已开启：点击预览页中的区块锁定为 AI 对话目标' : '开启选区模式：点选预览页中的区块，后续 AI 对话只修改该区块'"
+					@click="emit('toggle-section-select')">
+					<el-icon><ele-Position /></el-icon>{{ sectionSelectMode ? '退出选区模式' : '选区' }}
 				</el-button>
+				</div>
+				<div class="chat-send">
+					<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
+						<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
+					</el-button>
+					<el-button v-if="state.chatting" type="danger" @click="onStop">
+						<el-icon><ele-VideoPause /></el-icon>停止
+					</el-button>
+				</div>
 			</div>
 		</div>
 
-		<!-- 旧模板确定性升级横幅：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉。
-		     独立于文件区显示：新建调整会话尚无 AI 修改文件时也要能看到入口 -->
-		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
-			<span class="legacy-upgrade-tip">检测到旧版模板，可一键升级为组件化版本：保留站点名、菜单与预览数据，原文件自动备份，升级后可直接对话微调</span>
-			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
-				<el-icon><ele-MagicStick /></el-icon>升级为组件版
-			</el-button>
-		</div>
-
-		<!-- 文件列表区域 -->
+		<!-- 文件列表区域：对话下方（限高滚动） -->
 		<div class="files-area" v-if="state.files.length > 0">
 			<div class="files-header">
 				<span>{{ mode === 'adjust' ? '本轮 AI 修改的文件（' + state.files.length + '）' : '生成文件（' + state.files.length + '）' }}</span>
@@ -126,7 +150,7 @@
 						<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
 					</el-button>
-					<el-button v-if="mode === 'generate' && !isApplied && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
+					<el-button v-if="mode === 'generate' && !isApplied && !sessionActive && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
 						<el-icon><ele-Edit /></el-icon>编辑文件
 					</el-button>
 					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
@@ -134,7 +158,8 @@
 					</el-button>
 				</div>
 			</div>
-			<el-table :data="state.files" stripe size="small" max-height="180">
+			<!-- 限高 180px 内部滚动，避免长列表把输入区挤出视口 -->
+			<el-table :data="state.files" stripe size="small" :max-height="180">
 				<el-table-column prop="filePath" label="文件路径" min-width="200" show-overflow-tooltip />
 				<el-table-column prop="action" label="操作" width="90">
 					<template #default="scope">
@@ -190,6 +215,12 @@ const props = defineProps<{
 	sessions?: any[];
 	/** 新建会话请求进行中（按钮 loading） */
 	creatingSession?: boolean;
+	/** 父组件已处于会话编辑模式：隐藏「编辑文件」入口（已在编辑，点击反而会清空当前编辑文件） */
+	sessionActive?: boolean;
+	/** 换图模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
+	imagePickMode?: boolean;
+	/** 选区模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
+	sectionSelectMode?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -205,6 +236,10 @@ const emit = defineEmits<{
 	(e: 'select-session', sessionId: string): void;
 	/** 新建会话 */
 	(e: 'new-session'): void;
+	/** 切换换图模式（预览页点选图片更换） */
+	(e: 'toggle-image-pick'): void;
+	/** 切换选区模式（预览页点选区块锁定为 AI 对话目标） */
+	(e: 'toggle-section-select'): void;
 }>();
 
 const templateApi = AiTemplateApi();
@@ -286,6 +321,12 @@ const state = reactive({
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
+
+/** 点选工具（换图/选区）可见：仅预览列存在的模式（adjust / 会话编辑视图）下才有可点选的预览页 */
+const pickToolsVisible = computed(() => props.mode === 'adjust' || !!props.sessionActive);
+
+/** 点选工具禁用：对话进行中（避免与 AI 写盘冲突）/ 已应用会话（仅回看）/ 无会话 */
+const pickDisabled = computed(() => state.chatting || isApplied.value || !props.session?.sessionId);
 
 /**
  * 清洗历史 assistant 消息内容：旧版本解析失败时曾把原始 JSON 响应全文存库
@@ -575,17 +616,18 @@ const onSend = async () => {
 					scrollToBottom();
 					break;
 				case 'file':
-				// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）
-				try {
-					const info = JSON.parse(data);
-					if (info.path) {
-						upsertFile(info.path, info.action || 'modify');
-						emit('file-written', info.path);
+					// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
+					// 阶段状态条不在此清除：由后端状态链负责（新 status 覆盖旧文案，结束时发空 status 清除）
+					try {
+						const info = JSON.parse(data);
+						if (info.path) {
+							upsertFile(info.path, info.action || 'modify');
+							emit('file-written', info.path);
+						}
+					} catch (err) {
+						/* 忽略格式异常的 file 事件 */
 					}
-				} catch (err) {
-					/* 忽略格式异常的 file 事件 */
-				}
-				break;
+					break;
 			case 'progress':
 				// 分批流水线进度快照（全量文件清单及状态），更新 AI 消息内的进度卡
 				try {
@@ -1059,25 +1101,6 @@ const breakSentences = (s: string): string =>
 		}
 	}
 
-	// 旧模板升级横幅（输入区下方）：不依赖文件列表存在，新建调整会话即可见
-	.legacy-upgrade-bar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		margin-top: 8px;
-		margin-bottom: 8px;
-		padding: 8px 10px;
-		background: var(--el-color-warning-light-9);
-		border-left: 3px solid var(--el-color-warning);
-		border-radius: 4px;
-
-		.legacy-upgrade-tip {
-			font-size: 12px;
-			color: var(--el-color-warning-dark-2);
-		}
-	}
-
 	.typing-cursor {
 		color: var(--el-color-primary);
 		animation: cursor-blink 1s step-end infinite;
@@ -1177,9 +1200,52 @@ const breakSentences = (s: string): string =>
 }
 
 .chat-input {
+	// 点选模式提示条（输入框正上方）：模式开启时引导用户去预览页点选
+	.pick-mode-tip {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-bottom: 6px;
+		padding: 4px 8px;
+		font-size: 12px;
+		color: var(--el-color-primary);
+		background: var(--el-color-primary-light-9);
+		border-radius: 4px;
+	}
+
 	.chat-actions {
 		margin-top: 8px;
-		text-align: right;
+		display: flex;
+		align-items: center;
+
+		.chat-tools {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		// 工具按钮不存在时也保持发送按钮靠右
+		.chat-send {
+			margin-left: auto;
+		}
+	}
+}
+
+// 旧模板升级横幅（面板顶部，panel-header 之下）：不依赖文件列表存在，新建调整会话即可见
+.legacy-upgrade-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 8px;
+	padding: 8px 10px;
+	background: var(--el-color-warning-light-9);
+	border-left: 3px solid var(--el-color-warning);
+	border-radius: 4px;
+
+	.legacy-upgrade-tip {
+		font-size: 12px;
+		color: var(--el-color-warning-dark-2);
 	}
 }
 
@@ -1190,6 +1256,8 @@ const breakSentences = (s: string): string =>
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
 		margin-bottom: 8px;
 		font-weight: 500;
 	}

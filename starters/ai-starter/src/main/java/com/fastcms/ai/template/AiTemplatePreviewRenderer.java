@@ -63,10 +63,22 @@ public class AiTemplatePreviewRenderer {
      * @throws Exception 渲染失败（FreeMarker 解析/执行异常等）
      */
     public String renderPage(String urlPrefix, Path workDir, String relPath) throws Exception {
+        return renderPage(urlPrefix, null, workDir, relPath);
+    }
+
+    /**
+     * 渲染指定模板文件并返回完整 HTML（含根链接重写）
+     *
+     * @param dirPrefix 页面链接的目录前缀（文件树约定的模板目录名，如 cxtjhgd09081511）；
+     *                  预览页内导航 URL 须与前端文件树 entry 约定一致（带目录前缀），
+     *                  否则点击导航后前端反解 entry 会丢前缀、页面下拉显示裸文件名；
+     *                  null/空表示不加前缀（渲染校验等不进浏览器的场景）
+     */
+    public String renderPage(String urlPrefix, String dirPrefix, Path workDir, String relPath) throws Exception {
         List<String> htmlFiles = scanHtmlFiles(workDir);
-        Map<String, String> pageUrls = resolvePageUrls(urlPrefix, htmlFiles);
+        Map<String, String> pageUrls = resolvePageUrls(urlPrefix, dirPrefix, htmlFiles);
         AiTemplatePreviewMockSupport.PreviewContext ctx = new AiTemplatePreviewMockSupport.PreviewContext(
-                urlPrefix, pageUrls, Set.copyOf(htmlFiles));
+                urlPrefix, dirPrefix, pageUrls, Set.copyOf(htmlFiles));
         AiTemplatePreviewMockSupport.PreviewDataConfig config =
                 AiTemplatePreviewMockSupport.loadPreviewDataConfig(workDir);
         Configuration cfg = getConfiguration(urlPrefix + "/static", workDir, ctx, config);
@@ -169,20 +181,27 @@ public class AiTemplatePreviewRenderer {
      * <p>解析规则：优先精确文件名（index.html/article_list.html/article.html/page.html），
      * 其次按前缀取排序后的第一个（article 排除 article_list* 前缀），都找不到时回退首页，
      * 保证链接指向的页面一定可渲染。</p>
+     *
+     * <p>页面链接带目录前缀（dirPrefix，与前端文件树 entry 约定一致）：点击导航后
+     * iframe URL 的 entry 段与文件树 filePath 对齐，前端页面下拉反解不丢前缀。</p>
      */
-    private Map<String, String> resolvePageUrls(String urlPrefix, List<String> htmlFiles) {
+    private Map<String, String> resolvePageUrls(String urlPrefix, String dirPrefix, List<String> htmlFiles) {
         String indexFile = pickPageFile(htmlFiles, "index", null);
         String articleListFile = pickPageFile(htmlFiles, "article_list", null);
         // article 前缀包含 article_list*，需显式排除
         String articleFile = pickPageFile(htmlFiles, "article", "article_list");
         String pageFile = pickPageFile(htmlFiles, "page", null);
 
+        // 页面 URL 基段：urlPrefix/{dirPrefix}/xxx.html（dirPrefix 空时为 urlPrefix/xxx.html）
+        String pageBase = (dirPrefix == null || dirPrefix.isBlank())
+                ? urlPrefix : urlPrefix + "/" + dirPrefix.trim();
+
         Map<String, String> urls = new LinkedHashMap<>();
-        String indexUrl = indexFile != null ? urlPrefix + "/" + indexFile : urlPrefix;
+        String indexUrl = indexFile != null ? pageBase + "/" + indexFile : urlPrefix;
         urls.put("index", indexUrl);
-        urls.put("article_list", articleListFile != null ? urlPrefix + "/" + articleListFile : indexUrl);
-        urls.put("article", articleFile != null ? urlPrefix + "/" + articleFile : indexUrl);
-        urls.put("page", pageFile != null ? urlPrefix + "/" + pageFile : indexUrl);
+        urls.put("article_list", articleListFile != null ? pageBase + "/" + articleListFile : indexUrl);
+        urls.put("article", articleFile != null ? pageBase + "/" + articleFile : indexUrl);
+        urls.put("page", pageFile != null ? pageBase + "/" + pageFile : indexUrl);
         return urls;
     }
 
