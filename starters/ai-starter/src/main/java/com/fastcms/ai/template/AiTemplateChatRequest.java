@@ -54,6 +54,12 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private String focusElementHint;
 
+    /**
+     * 样式组件化升级标志（旧模板专用）：true 时后端走升级管线
+     * （确定性前置 + AI 分批改造 + 锚点校验），忽略常规对话语义。
+     */
+    private Boolean styleUpgrade;
+
     public String getInput() {
         return input;
     }
@@ -84,6 +90,14 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setFocusElementHint(String focusElementHint) {
         this.focusElementHint = focusElementHint;
+    }
+
+    public Boolean getStyleUpgrade() {
+        return styleUpgrade;
+    }
+
+    public void setStyleUpgrade(Boolean styleUpgrade) {
+        this.styleUpgrade = styleUpgrade;
     }
 
 }

@@ -180,7 +180,9 @@ public class AiTemplateController {
         templateGenService.chatStream(sessionId, request == null ? null : request.getInput(),
                 request == null ? null : request.getCurrentFile(),
                 request == null ? null : request.getFocusSectionId(),
-                request == null ? null : request.getFocusElementHint(), emitter);
+                request == null ? null : request.getFocusElementHint(),
+                request != null && Boolean.TRUE.equals(request.getStyleUpgrade()),
+                emitter);
         return emitter;
     }
 
@@ -320,38 +322,20 @@ public class AiTemplateController {
     }
 
     /**
-     * 旧模板升级状态（前端据此展示「升级为组件版」按钮）
+     * 旧模板升级状态（前端据此展示「样式组件化升级」横幅）
      *
-     * <p>判定标准：会话工作目录有 html 页面且无 _pagespec.json（组件化标志物）。
-     * 已组件化的模板返回 false，按钮隐藏。</p>
+     * <p>判定标准：会话工作目录有 html 页面、无 _pagespec.json（组件化标志物）
+     * 且样式升级未完成（_style_upgrade.json 的 pending 不为空）。
+     * 返回进度数据（pendingCount/doneCount/totalFiles），横幅区分
+     * "未升级"与"上次升级未完成，可断点续传"。</p>
      */
     @GetMapping("sessions/{sessionId}/legacy-status")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_LIST, resource = "ai:template:list", action = ActionTypes.READ)
-    public RestResult<Boolean> legacyStatus(@PathVariable("sessionId") String sessionId) {
+    public RestResult<com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeStatusInfo> legacyStatus(@PathVariable("sessionId") String sessionId) {
         if (requireOwnedSession(sessionId) == null) {
             return RestResultUtils.failed("会话不存在");
         }
-        return RestResultUtils.success(templateGenService.isLegacyTemplate(sessionId));
-    }
-
-    /**
-     * 旧模板确定性升级为组件化模板（不经 AI）
-     *
-     * <p>从 _preview_data.json 提取站点名等内容资产 → 默认 PageSpec（导航+首屏+文章流+页脚）
-     * → 校验 → 旧文本文件备份 → 渲染 → 清理（二进制资源保留）。
-     * 秒级完成；升级后可直接对话微调（换主色/加组件/改文案）。</p>
-     */
-    @PostMapping("sessions/{sessionId}/upgrade")
-    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_APPLY, resource = "ai:template:apply", action = ActionTypes.WRITE)
-    public RestResult<String> upgrade(@PathVariable("sessionId") String sessionId) {
-        if (requireOwnedSession(sessionId) == null) {
-            return RestResultUtils.failed("会话不存在");
-        }
-        try {
-            return RestResultUtils.success(templateGenService.upgradeLegacyTemplate(sessionId));
-        } catch (Exception e) {
-            return RestResultUtils.failed(e.getMessage());
-        }
+        return RestResultUtils.success(templateGenService.getLegacyUpgradeStatus(sessionId));
     }
 
     /**

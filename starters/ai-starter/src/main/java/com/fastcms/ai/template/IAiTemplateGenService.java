@@ -104,10 +104,11 @@ public interface IAiTemplateGenService {
      * @param focusSectionId 预览页点选的目标区块 sectionId（可空；组件化会话微调时注入该 section 的
      *                       spec 片段，AI 只修改该区块，其他 section 原样保留）
      * @param focusElementHint 用户点选区块时命中的具体元素描述（可空；元素级语义提示）
+     * @param styleUpgrade 样式组件化升级标志（true 且为旧模板时走升级管线，忽略常规对话）
      * @param emitter   SSE emitter
      */
     void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
-                    String focusElementHint, SseEmitter emitter);
+                    String focusElementHint, boolean styleUpgrade, SseEmitter emitter);
 
     /**
      * 将会话工作目录的模板文件应用到 fastcms 正式模板目录
@@ -148,28 +149,14 @@ public interface IAiTemplateGenService {
      */
     String rollbackLast(String sessionId);
     /**
-     * 会话对应模板是否为可升级的旧模板（有 html 页面且无 _pagespec.json）
+     * 旧模板「样式组件化升级」状态查询（前端横幅展示：未开始 / 未完成续传）
      *
-     * <p>前端据此决定是否展示「升级为组件版」按钮。</p>
+     * <p>upgradable = 会话工作目录有 html 页面、无 _pagespec.json（组件化标志物）
+     * 且样式升级未完成（_style_upgrade.json 的 pending 不为空）。
+     * 已组件化或升级已完成的模板返回 upgradable=false；带 pendingCount/doneCount/totalFiles
+     * 进度数据，用于横幅区分"未升级"与"上次升级未完成，可断点续传"。</p>
      */
-    boolean isLegacyTemplate(String sessionId);
-
-    /**
-     * 旧模板确定性升级为组件化模板（不经 AI，前端按钮触发）
-     *
-     * <p>升级流程（LegacyTemplateUpgrader）：
-     * 从 _preview_data.json 提取站点名/副标题等内容资产 → 构建默认 PageSpec
-     * （navbar + hero + article-list + footer）→ 校验 → 旧文本文件备份 → 渲染 →
-     * 清理旧文本文件（二进制资源保留）→ 同步 ai_template_file 记录。
-     * 旧预览数据（菜单/文章 mock）回写保留，保证升级后预览效果完整。</p>
-     *
-     * <p>升级成功后会话进入组件化闭环：后续对话微调 = PageSpec 往返
-     * （换主色/加组件/改文案一次输出全量生效）。</p>
-     *
-     * @param sessionId 会话 ID
-     * @return 升级结果描述（文件数、备份位置）
-     */
-    String upgradeLegacyTemplate(String sessionId);
+    com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeStatusInfo getLegacyUpgradeStatus(String sessionId);
 
     /**
      * 更新图片槽位（AI 调整页点选图片换图，不经 AI 对话）

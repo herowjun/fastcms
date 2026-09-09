@@ -78,9 +78,10 @@ public class TemplateController {
     /**
      * 允许在线编辑的文件后缀（读取与保存共用同一白名单，防止保存接口绕过后缀限制覆写任意文件）。
      * json/properties：AI 模板生成的 _preview_data.json（预览演示数据）与
-     * _template.properties（模板元信息）均需在线可编辑
+     * _template.properties（模板元信息）均需在线可编辑；
+     * ftl：AI 组件化模板的 _components/*.ftl 等模板源文件（与会话工作目录白名单口径一致）
      */
-    private static final List<String> EDITABLE_SUFFIX = Arrays.asList(".html", ".js", ".css", ".txt", ".json", ".properties");
+    private static final List<String> EDITABLE_SUFFIX = Arrays.asList(".html", ".js", ".css", ".txt", ".json", ".properties", ".ftl");
 
     /**
      * 模板列表
@@ -207,7 +208,7 @@ public class TemplateController {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SUFFIX_NOT_NULL));
         }
 
-        String suffix = filePath.substring(suffixIdx);
+        String suffix = filePath.substring(suffixIdx).toLowerCase();
         if (!EDITABLE_SUFFIX.contains(suffix)) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_SUPPORT_EDIT));
         }
@@ -263,7 +264,7 @@ public class TemplateController {
         if(suffixIdx < 0) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_SUFFIX_NOT_NULL));
         }
-        String suffix = filePath.substring(suffixIdx);
+        String suffix = filePath.substring(suffixIdx).toLowerCase();
         if(!EDITABLE_SUFFIX.contains(suffix)) {
             return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_FILE_NOT_SUPPORT_EDIT));
         }

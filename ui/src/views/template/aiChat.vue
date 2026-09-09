@@ -26,12 +26,20 @@
 			<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
-		<!-- 旧模板确定性升级横幅（面板顶部）：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉。
-		     不依赖文件列表存在：新建调整会话尚无 AI 修改文件时也要能看到入口 -->
+		<!-- 旧模板「样式组件化升级」横幅（面板顶部）：保留网站功能（JS/元素锚点/FreeMarker），组件库 CSS 焕新视觉。
+		     升级走 AI 改造管线（分批重写页面 HTML，写盘前校验 JS 锚点存活），进度在对话流实时展示；
+		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传 -->
 		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
-			<span class="legacy-upgrade-tip">检测到旧版模板，可一键升级为组件化版本：保留站点名、菜单与预览数据，原文件自动备份，升级后可直接对话微调</span>
+			<span class="legacy-upgrade-tip">
+				<template v-if="state.legacyTotal > 0 && state.legacyDone > 0">
+					上次升级未完成（已完成 {{ state.legacyDone }}/{{ state.legacyTotal }} 个页面），点击继续将从剩余 {{ state.legacyPending }} 个页面断点续传
+				</template>
+				<template v-else>
+					检测到旧版模板，可升级为组件化样式：保留全部 JS 功能与元素结构锚点，引入组件库 CSS 焕新视觉，原文件自动备份
+				</template>
+			</span>
 			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
-				<el-icon><ele-MagicStick /></el-icon>升级为组件版
+				<el-icon><ele-MagicStick /></el-icon>{{ state.legacyTotal > 0 && state.legacyDone > 0 ? '继续升级' : '样式组件化升级' }}
 			</el-button>
 		</div>
 
@@ -315,9 +323,15 @@ const state = reactive({
 	loadingFiles: false,
 	applying: false,
 	rollingBack: false,
-	// 旧模板确定性升级：探测结果（目录有 html 无 _pagespec.json）与执行中状态
+	// 旧模板样式组件化升级：探测结果（目录有 html 无 _pagespec.json 且升级未完成）与执行中状态
 	legacyUpgradable: false,
 	upgrading: false,
+	// 升级进度（legacy-status 返回）：用于横幅区分"未升级"与"未完成续传"
+	legacyPending: 0,
+	legacyDone: 0,
+	legacyTotal: 0,
+	// 本轮 chat 请求是否为样式组件化升级（onUpgradeLegacy 设置，onSend 发出后复位）
+	pendingStyleUpgrade: false,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
@@ -357,6 +371,27 @@ const cleanHistoryContent = (m: any): string => {
 };
 
 /**
+ * 应用升级状态查询结果（legacy-status 返回 {upgradable, pendingCount, doneCount, totalFiles}）
+ *
+ * 兼容旧版布尔返回（升级完成横幅消失语义一致）；进度数据驱动横幅
+ * 区分"未升级"与"上次升级未完成，可断点续传"两种文案形态。
+ */
+const applyLegacyStatus = (data: any) => {
+	if (data && typeof data === 'object') {
+		state.legacyUpgradable = data.upgradable === true;
+		state.legacyPending = data.pendingCount || 0;
+		state.legacyDone = data.doneCount || 0;
+		state.legacyTotal = data.totalFiles || 0;
+	} else {
+		// 旧版布尔返回或异常空值：仅控制横幅显隐
+		state.legacyUpgradable = data === true;
+		state.legacyPending = 0;
+		state.legacyDone = 0;
+		state.legacyTotal = 0;
+	}
+};
+
+/**
  * 加载会话消息与文件列表
  *
  * 注意：必须声明在下方 watch 之前——watch 带 immediate: true 会在 setup 阶段同步执行回调，
@@ -373,7 +408,7 @@ const loadSessionData = async () => {
 			// 旧模板探测：决定文件区"升级为组件版"按钮显隐；接口异常时静默降级为不显示
 			templateApi.legacyStatus(props.session.sessionId).catch(() => null),
 		]);
-		state.legacyUpgradable = legacyRes?.data === true;
+		applyLegacyStatus(legacyRes?.data);
 		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）；
 		// content 经 cleanHistoryContent 清洗（兜底旧版本存库的原始 JSON 全文）
 		if (messagesRes.data) {
@@ -478,6 +513,7 @@ const onSend = async () => {
 	});
 
 	const userInput = state.inputText;
+	const styleUpgrade = state.pendingStyleUpgrade;
 	state.inputText = '';
 	state.chatting = true;
 
@@ -504,6 +540,7 @@ const onSend = async () => {
 		state.abortController = null;
 		state.chatting = false;
 		state.statusText = '';
+		state.upgrading = false;
 	};
 
 	const refreshFiles = () => {
@@ -532,6 +569,12 @@ const onSend = async () => {
 		}
 		finish();
 		refreshFiles();
+		// 升级轮结束后刷新升级状态（升级完成则横幅消失；中断续传则横幅显示剩余进度）
+		if (styleUpgrade && props.session?.sessionId) {
+			templateApi.legacyStatus(props.session.sessionId).then((res: any) => {
+				applyLegacyStatus(res?.data);
+			}).catch(() => {});
+		}
 		// AI 已写盘，通知父组件刷新文件树/编辑器
 		emit('files-changed');
 	};
@@ -554,6 +597,13 @@ const onSend = async () => {
 		}
 		ElMessage.error(msg);
 		finish();
+		// 升级轮失败（如某文件改造解析失败中断）：刷新升级状态，
+		// 横幅转为"继续升级"形态展示剩余进度（用户可一键续传）
+		if (styleUpgrade && props.session?.sessionId) {
+			templateApi.legacyStatus(props.session.sessionId).then((res: any) => {
+				applyLegacyStatus(res?.data);
+			}).catch(() => {});
+		}
 	};
 
 	try {
@@ -568,10 +618,13 @@ const onSend = async () => {
 				input: userInput,
 				currentFile: props.currentFile || '',
 				focusSectionId: props.focusSection || '',
-				focusElementHint: props.focusElementHint || ''
+				focusElementHint: props.focusElementHint || '',
+				styleUpgrade
 			}),
 			signal: controller.signal
 		});
+		// 请求已发出，升级标志复位（下一轮普通对话不带该标志）
+		state.pendingStyleUpgrade = false;
 
 		if (!resp.ok || !resp.body) {
 			let msg = '请求失败（' + resp.status + '）';
@@ -781,36 +834,29 @@ const onApplyTemplate = () => {
 };
 
 /**
- * 旧模板确定性升级为组件化模板（不经 AI）
+ * 旧模板「样式组件化升级」（AI 改造管线）
  *
- * 后端从 _preview_data.json 提取站点名等内容资产 → 默认 PageSpec（导航+首屏+文章流+页脚）
- * → 校验 → 旧文本文件备份（同级 _legacy_backup_时间戳 目录）→ 渲染 → 清理。
- * 升级后进入组件化闭环：直接对话即可微调（换主色/加组件/改文案）。
+ * 流程：确认后走 chat SSE（styleUpgrade 标志）：后端确定性前置（备份/锚点扫描/组件 CSS 引入）
+ * → AI 分批改造页面（保留 id/JS 锚点/脚本/FreeMarker，追加 utility class）→ 写盘前锚点校验
+ * → 渲染校验。进度在对话流实时展示；中断后再次发起从断点续传。
  */
 const onUpgradeLegacy = () => {
-	if (!props.session?.sessionId) return;
+	if (!props.session?.sessionId || state.chatting) return;
+	const resuming = state.legacyTotal > 0 && state.legacyDone > 0;
 	ElMessageBox.confirm(
-		'将把此模板升级为组件化版本：保留站点名、菜单与预览数据，用组件库重新生成页面视觉；原文件自动备份，图片等资源保留。是否继续？',
-		'升级为组件版',
-		{ confirmButtonText: '升 级', cancelButtonText: '取 消', type: 'warning' }
-	).then(async () => {
+		resuming
+			? `上次样式组件化升级未完成（已完成 ${state.legacyDone}/${state.legacyTotal} 个页面）。继续升级将从剩余 ${state.legacyPending} 个页面断点续传：保留全部 JS 功能、元素 id 与脚本，引入组件库 CSS 焕新页面视觉。是否继续？`
+			: '将对此模板执行样式组件化升级：保留全部 JS 功能、元素 id 与脚本，引入组件库 CSS 焕新页面视觉。原文件自动备份，改造过程由 AI 分批完成（可在对话中看到进度，中断后可续传）。是否继续？',
+		resuming ? '继续样式组件化升级' : '样式组件化升级',
+		{ confirmButtonText: resuming ? '继续升级' : '开始升级', cancelButtonText: '取 消', type: 'warning' }
+	).then(() => {
 		state.upgrading = true;
-		try {
-			const res = await templateApi.upgradeLegacy(props.session.sessionId);
-			if (res.data) {
-				ElMessage.success(res.data);
-				state.legacyUpgradable = false;
-				// 刷新消息（升级留痕消息）与文件列表（旧文件清理 + 组件化产物），通知父组件刷新文件树
-				await loadSessionData();
-				emit('files-changed');
-			} else if (res.msg) {
-				ElMessage.error(res.msg);
-			}
-		} catch (e: any) {
-			ElMessage.error(e?.message || '升级失败');
-		} finally {
-			state.upgrading = false;
-		}
+		// 走标准 chat 流：输入框填入升级指令并携带 styleUpgrade 标志发送
+		state.inputText = resuming
+			? '继续样式组件化升级（从剩余页面断点续传，保留网站功能，焕新页面视觉）'
+			: '开始样式组件化升级（保留网站功能，焕新页面视觉）';
+		state.pendingStyleUpgrade = true;
+		onSend();
 	}).catch(() => {});
 };
 const onPreviewTemplate = () => {

@@ -772,8 +772,16 @@ public class PageSpecRenderer {
     private void writeTemplateProperties(PageSpec spec, Path targetDir, List<String> written) throws IOException {
         // 手写 UTF-8（历史教训：Properties 默认 ISO-8859-1 读写中文乱码，此处写端保证 UTF-8）
         String name = spec.safeTemplateName();
+        // template.id 是模板的注册身份（数据库 TEMPLATE_ENABLE_ID 按它匹配激活状态），
+        // 重渲染不得篡改：目录已有 _template.properties 时沿用其 id（如升级场景
+        // www.xjd2022.com），仅首次渲染时才以目录名生成新 id——否则重启后旧 id
+        // 失配，激活模板被 setDefaultTemplate 重置为列表第一个
+        String id = readExistingTemplateId(targetDir);
+        if (id == null || id.isBlank()) {
+            id = name;
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append("template.id=").append(name).append("\n");
+        sb.append("template.id=").append(id).append("\n");
         sb.append("template.name=").append(name).append("\n");
         sb.append("template.path=/").append(name).append("/\n");
         sb.append("template.version=0.0.1\n");
@@ -782,6 +790,29 @@ public class PageSpecRenderer {
         sb.append("template.description=AI 组件化生成模板\n");
         Files.writeString(targetDir.resolve("_template.properties"), sb.toString(), StandardCharsets.UTF_8);
         written.add("_template.properties");
+    }
+
+    /**
+     * 读取目录中已有 _template.properties 的 template.id（UTF-8，容忍注释与空行）
+     *
+     * @return 已注册的模板 id；文件不存在或无 template.id 行时返回 null
+     */
+    private String readExistingTemplateId(Path targetDir) {
+        Path file = targetDir.resolve("_template.properties");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("template.id=")) {
+                    return trimmed.substring("template.id=".length()).trim();
+                }
+            }
+        } catch (IOException e) {
+            log.warn("读取已有 _template.properties 失败，template.id 将以目录名重新生成: {}", e.getMessage());
+        }
+        return null;
     }
 
     private void writePreviewData(PageSpec spec, Path targetDir, List<String> written) throws IOException {
