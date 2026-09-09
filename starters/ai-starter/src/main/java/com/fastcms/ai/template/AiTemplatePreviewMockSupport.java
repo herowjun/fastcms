@@ -125,12 +125,23 @@ final class AiTemplatePreviewMockSupport {
     }
 
     /**
-     * 预览上下文：URL 前缀 + 四类页面默认导航 URL + 模板目录 html 文件名集合
+     * 预览上下文：URL 前缀 + 页面链接目录前缀 + 四类页面默认导航 URL + 模板目录 html 文件名集合
      *
      * <p>htmlFiles 用于 suffix 解析（如 page_about.html），保证带 suffix 的链接
      * 只在对应模板文件真实存在时才指向它，否则回退该类型的默认 URL。</p>
+     *
+     * <p>页面 URL 统一带目录前缀（与前端文件树 entry 约定一致）：pageBase() 是唯一拼接入
+     * 口，点击导航后 iframe URL 与文件树 filePath 对齐，前端页面下拉反解不丢前缀；
+     * mock request.requestURI 同样基于 pageBase() 构造，保证菜单选中态 starts_with 命中。</p>
      */
-    record PreviewContext(String urlPrefix, Map<String, String> pageUrls, Set<String> htmlFiles) {
+    record PreviewContext(String urlPrefix, String dirPrefix, Map<String, String> pageUrls, Set<String> htmlFiles) {
+
+        /**
+         * 页面链接基段：urlPrefix/{dirPrefix}（dirPrefix 为空时不加前缀）
+         */
+        String pageBase() {
+            return (dirPrefix == null || dirPrefix.isBlank()) ? urlPrefix : urlPrefix + "/" + dirPrefix.trim();
+        }
 
         String indexUrl() {
             return pageUrls.getOrDefault("index", urlPrefix);
@@ -408,7 +419,7 @@ final class AiTemplatePreviewMockSupport {
             return fallback;
         }
         String file = type + "_" + suffix.trim() + ".html";
-        return ctx.htmlFiles().contains(file) ? ctx.urlPrefix() + "/" + file : fallback;
+        return ctx.htmlFiles().contains(file) ? ctx.pageBase() + "/" + file : fallback;
     }
 
     /**
@@ -485,9 +496,10 @@ final class AiTemplatePreviewMockSupport {
         }
 
         // mock request：注入当前预览页地址，模板按 request.requestURI / request.url
-        // 前缀匹配菜单 URL 即可输出选中态（预览菜单 URL 与页面同前缀构造，starts_with 可命中）。
-        // 正式环境 request 由框架注入真实对象；此处补齐预览侧，导航选中态两端一致。
-        String pageUrl = ctx.urlPrefix() + "/" + relPath;
+        // 前缀匹配菜单 URL 即可输出选中态（菜单 URL 与 requestURI 均基于 pageBase() 构造，
+        // 同前缀保证 starts_with 命中）。正式环境 request 由框架注入真实对象；此处补齐预览侧，
+        // 导航选中态两端一致
+        String pageUrl = ctx.pageBase() + "/" + relPath;
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("contextPath", "");
         request.put("requestURI", pageUrl);

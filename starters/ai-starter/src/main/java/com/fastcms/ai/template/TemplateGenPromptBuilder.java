@@ -334,16 +334,36 @@ public class TemplateGenPromptBuilder {
      * <p>调整型会话的文件源是正式模板目录，用户可能在两轮对话之间通过编辑器手工修改过文件，
      * 因此每轮都从磁盘读取最新内容注入，保证 AI 始终基于最新状态调整。</p>
      *
-     * @param requirement 用户的调整需求
+     * <p>预览页点选区块时注入选区上下文：定位到的组件源码文件 + 元素语义提示，
+     * 在提示词层面约束 AI 只修改该区块相关文件（不走 PageSpec 往返，输出仍是文件补丁）。</p>
+     *
+     * @param requirement            用户的调整需求
      * @param currentFilesWithContent 当前模板文件及完整内容（从磁盘实时读取）
+     * @param currentFile            用户当前聚焦的页面（可空）
+     * @param focusSectionId         预览页点选的区块 ID（可空：未选区时无选区约束）
+     * @param focusElementHint       点选命中的元素语义提示（可空，如 标题「xx」）
+     * @param focusComponentFile     选区对应的组件源码文件名（_components/ 下；focusSectionId 非空时非空）
      */
-    public String buildAdjustPrompt(String requirement, String currentFilesWithContent, String currentFile) {
+    public String buildAdjustPrompt(String requirement, String currentFilesWithContent, String currentFile,
+                                    String focusSectionId, String focusElementHint, String focusComponentFile) {
+        String focusSectionBlock = (focusSectionId == null || focusSectionId.isBlank()) ? ""
+                : "## 用户选中的区块（本轮修改目标）\n\n"
+                + "用户在预览页点选了区块 `" + focusSectionId + "`"
+                + (focusElementHint == null || focusElementHint.isBlank() ? "" : "（命中元素：" + focusElementHint + "）")
+                + "。该区块的组件源码文件为 `_components/" + focusComponentFile + "`，"
+                + "由页面/布局文件通过 `<#include>` 引用，区块的文案/图片等槽位数据在引用处的 `<#assign comp = ...>` 中。\n\n"
+                + "本轮约束：\n"
+                + "1. 只修改该区块相关的文件：优先修改 `_components/" + focusComponentFile + "`；"
+                + "确需调整文案/图片数据时，可一并修改引用它的页面文件中的 comp assign\n"
+                + "2. 严禁修改其他区块的组件文件与无关页面\n"
+                + "3. 保留 data-ai-slot / data-ai-section / data-ai-section-root 标记（预览点选依赖，删除会导致点选功能失效）\n\n";
         String currentFileSection = (currentFile == null || currentFile.isBlank()) ? ""
                 : "## 用户当前正在查看的页面\n\n"
                 + "用户当前正在编辑/预览 `" + currentFile + "`，未明确指定其他页面时请优先调整该页面。\n\n"
                 + "注意：页面渲染依赖公共布局文件（如 _layout.html），若调整需求涉及公共部分（导航、页脚等），应修改布局文件而非每个页面。\n\n";
         return "请基于当前正式模板的文件内容进行调整，调整结果将直接写入正式模板。\n\n"
                 + "## 调整需求\n\n" + requirement + "\n\n"
+                + focusSectionBlock
                 + currentFileSection
                 + "## 数据与展示的边界（重要）\n\n"
                 + "模板中菜单、分类、标签、单页、文章标题等演示内容由 `_preview_data.json` 驱动（预览数据源）。"
@@ -361,6 +381,73 @@ public class TemplateGenPromptBuilder {
                 + "4. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次调整内容，files 字段为变更文件数组）\n"
                 + "5. 请全程使用中文思考和回复\n"
                 + "6. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
+    }
+
+    /**
+     * 构建「样式组件化升级」改造轮提示（旧模板升级，保留功能、焕新视觉）
+     *
+     * <p>硬性契约：JS 功能锚点（元素 id + JS 选择器依赖的 class）与内联脚本一个不能丢；
+     * FreeMarker 指令原样保留；结构可语义化重组并追加 Tailwind utility class。</p>
+     *
+     * @param filesWithContent 本批待改造文件（相对路径 + 完整内容）
+     * @param anchors          全站 JS 依赖锚点清单（"id:xxx" / "class:xxx"）
+     * @param doneCount        已完成改造的页面数（进度提示用）
+     * @param totalFiles       页面总数
+     */
+    public String buildStyleUpgradePrompt(String filesWithContent, List<String> anchors,
+                                          int doneCount, int totalFiles) {
+        String anchorList = anchors == null || anchors.isEmpty() ? "（无）"
+                : String.join("、", anchors);
+        return "请对本批旧模板页面执行「样式组件化升级」：视觉焕新为组件库风格，网站功能必须原样保留。\n\n"
+                + "当前进度：已完成 " + doneCount + " / " + totalFiles + " 个页面。\n\n"
+                + "## 改造目标\n\n"
+                + "1. 用 Tailwind utility class 重新设计页面视觉（布局、间距、字体、配色、圆角、阴影），"
+                + "组件库 CSS（tokens.css + pack-tailwind-v4.css + site.css）已在 _layout.html 引入，无需再写 <link>\n"
+                + "2. HTML 结构可以语义化重组（如用 <section>/<article>/<nav> 包裹、提取重复结构），"
+                + "但必须遵守下方铁律\n"
+                + "3. 配色使用 tokens.css 的 CSS 变量（如 style=\"color: var(--color-primary)\"）或对应 utility class\n\n"
+                + "## 铁律（违反任何一条即失败）\n\n"
+                + "1. **严禁删除或修改任何 id 属性**：旧文件中出现的所有 id=\"xxx\" 必须在新文件中原样存在\n"
+                + "2. **严禁丢失 JS 依赖锚点 class**：以下 class 被 JS 脚本引用（选择器），对应元素上必须原样保留——\n"
+                + "   " + anchorList + "\n"
+                + "   （旧文件中存在的锚点，新文件中必须仍在对应元素上；清单中旧文件本来就没有的无需处理）\n"
+                + "3. **严禁删除或修改任何 <script> 块**：页面内联脚本（Swiper/SuperSlide/fancybox 初始化等）"
+                + "必须原样保留在页面中，一条不能少\n"
+                + "4. **严禁修改 FreeMarker 指令**：<#...>、${...}、<@...> 及变量名原样保留"
+                + "（这是数据渲染与网站功能的核心）\n"
+                + "5. **严禁动 _layout.html 的引入**：公共布局已由系统处理，本批只改下列页面文件\n"
+                + "6. 旧的纯样式 class（不在锚点清单中的）可以移除，视觉由 utility class 接管\n\n"
+                + "## 本批待改造文件（相对路径 + 完整内容）\n\n" + filesWithContent + "\n\n"
+                + "## 输出要求\n\n"
+                + "1. files 数组输出本批全部文件的 modify（完整改造后内容），一个文件都不能漏\n"
+                + "2. 严格按照约定的 JSON 对象格式输出（reply 字段简述本批改造要点，files 字段为文件数组）\n"
+                + "3. 优先使用常见 utility class：布局 flex/grid/items-center/justify-between、间距 p-*/m-*/gap-*、"
+                + "字体 text-*/font-*、配色 bg-*/text-*、圆角 rounded-*、阴影 shadow-*、宽度 max-w-*/w-full、"
+                + "栅格 grid-cols-*、悬停 hover:*\n"
+                + "4. 请全程使用中文思考和回复\n"
+                + "5. 控制思考时间在最短必要范围：按铁律逐条核对后直接输出\n";
+    }
+
+    /**
+     * 构建锚点存活校验失败的修复提示（升级管线专用）
+     *
+     * @param missingAnchors 本次改造丢失的锚点清单
+     * @param filesWithContent 改造后的文件内容（含丢失锚点的最新版本）
+     */
+    public String buildAnchorFixPrompt(List<String> missingAnchors, String filesWithContent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("系统校验发现你的改造丢失了 JS 依赖锚点，以下锚点被 JS 脚本引用，必须找回：\n\n");
+        for (int i = 0; i < missingAnchors.size(); i++) {
+            sb.append(i + 1).append(". ").append(missingAnchors.get(i)).append('\n');
+        }
+        sb.append("\n规则：id:xxx 表示需要 id=\"xxx\" 的元素存在；class:xxx 表示需要有元素携带 class \"xxx\"。\n")
+                .append("请在对应功能元素（轮播容器、导航、表单等）上补回这些 id/class，其余改造结果保持不变。\n\n")
+                .append("## 改造后的文件（需要修正的最新版本）\n\n")
+                .append(filesWithContent).append("\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. files 数组输出修正后的完整文件（action=modify）\n")
+                .append("2. 严格按照约定的 JSON 对象格式输出\n");
+        return sb.toString();
     }
 
     /**

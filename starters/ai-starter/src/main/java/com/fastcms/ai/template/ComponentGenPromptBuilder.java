@@ -253,7 +253,10 @@ public class ComponentGenPromptBuilder {
                 + "5. 需求路由：结构/文案/槽位数据/主色等 spec 能表达的 → 只改 PageSpec；\n"
                 + "   组件源码内写死的样式（如导航选中态颜色与 hover 不一致、选中态加粗黑色、\n"
                 + "   固定圆角间距字号等 spec 无对应槽位）→ 输出 filePatches 直接改组件源码，\n"
-                + "   此时 pagespec 原样带回。两类需求并存时同时输出\n"
+                + "   此时 pagespec 原样带回。两类需求并存时同时输出；\n"
+                + "   纯咨询/信息查询类需求（问答、解释、查询当前状态，无需修改模板）→\n"
+                + "   只输出 reply 字段，直接省略 pagespec 与 filePatches（系统跳过渲染，不写任何文件）。\n"
+                + "   只要需求涉及任何模板修改，必须输出完整 pagespec，不得省略\n"
                 + "6. filePatches 格式（可选字段）：[{\"path\": \"_components/组件文件名.ftl\",\n"
                 + "   \"search\": \"当前源码中的原文精确片段（须全文唯一）\", \"replace\": \"替换后片段\"}]。\n"
                 + "   search 必须与上方组件源码逐字一致（含空格缩进）；不要删除源码中\n"
@@ -314,7 +317,10 @@ public class ComponentGenPromptBuilder {
                 .append("不要删除 data-ai-section-root / data-ai-slot 标记。类名约束：优先复用源码")
                 .append("已有的类；可用 text/bg/border-primary-50~900（含 ! 变体）、标准刻度类 ")
                 .append("px/py/p/m/gap/w/h-0~64、text-xs~9xl、font-thin~black、rounded-none~full")
-                .append("（全站已兜底）；禁用任意值语法（py-[13px] 等）及自造类名（会静默失效）\n")
+                .append("（全站已兜底）；禁用任意值语法（py-[13px] 等）及自造类名（会静默失效）。")
+                .append("纯咨询/信息查询类需求（问答、解释、查询选中区块，无需修改模板）→ ")
+                .append("只输出 reply 字段，直接省略 pagespec 与 filePatches（系统跳过渲染，不写任何文件）；")
+                .append("只要需求涉及任何模板修改，必须输出完整 pagespec，不得省略\n")
                 .append("6. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出选中区块），不要包裹 markdown 代码块\n")
                 .append("7. 请全程使用中文思考和回复\n");
         return sb.toString();
@@ -373,7 +379,11 @@ public class ComponentGenPromptBuilder {
             sb.append(i + 1).append(". ").append(errors.get(i)).append("\n");
         }
         sb.append("\n请输出修正后的完整 PageSpec（严格按错误提示修正，其余部分保持原样）。\n")
-                .append("常见错误：组件全名写错（必须与组件菜单完全一致，含包前缀）、")
+                .append("若错误为 JSON 语法类（如 Unexpected close marker / expected ']'）：")
+                .append("这是括号配对错误，不是截断——数组必须以 ] 闭合、对象必须以 } 闭合。")
+                .append("重写时逐层核对每个 [ 和 { 的闭合：sections 数组、每页 pages 对象、")
+                .append("槽位数组结束后先补 ] 再补外层的 }，切勿在数组内直接用 } 收尾。\n")
+                .append("常见业务错误：组件全名写错（必须与组件菜单完全一致，含包前缀）、")
                 .append("变体名不存在、必填槽位缺失、主色格式非法（需 #RRGGBB）、")
                 .append("图片槽位值非法（应填 search:关键词 或 图片URL）。\n")
                 .append("严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块。\n");

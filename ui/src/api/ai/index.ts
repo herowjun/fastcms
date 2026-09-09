@@ -186,17 +186,6 @@ export function AiTemplateApi() {
 		},
 
 		/**
-		 * 旧模板确定性升级为组件化模板（不经 AI，秒级完成：
-		 * 提取内容资产 → 默认 PageSpec → 备份 → 渲染 → 清理旧文件）
-		 */
-		upgradeLegacy(sessionId: string) {
-			return request({
-				url: '/admin/ai/template/sessions/' + sessionId + '/upgrade',
-				method: 'post'
-			});
-		},
-
-		/**
 		 * 构造 SSE 对话的 POST URL
 		 *
 		 * <p>对话接口已改为 POST：input 通过 JSON 请求体传递，认证走

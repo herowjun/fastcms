@@ -26,6 +26,23 @@
 			<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
+		<!-- 旧模板「样式组件化升级」横幅（面板顶部）：保留网站功能（JS/元素锚点/FreeMarker），组件库 CSS 焕新视觉。
+		     升级走 AI 改造管线（分批重写页面 HTML，写盘前校验 JS 锚点存活），进度在对话流实时展示；
+		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传 -->
+		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
+			<span class="legacy-upgrade-tip">
+				<template v-if="state.legacyTotal > 0 && state.legacyDone > 0">
+					上次升级未完成（已完成 {{ state.legacyDone }}/{{ state.legacyTotal }} 个页面），点击继续将从剩余 {{ state.legacyPending }} 个页面断点续传
+				</template>
+				<template v-else>
+					检测到旧版模板，可升级为组件化样式：保留全部 JS 功能与元素结构锚点，引入组件库 CSS 焕新视觉，原文件自动备份
+				</template>
+			</span>
+			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
+				<el-icon><ele-MagicStick /></el-icon>{{ state.legacyTotal > 0 && state.legacyDone > 0 ? '继续升级' : '样式组件化升级' }}
+			</el-button>
+		</div>
+
 		<!-- 对话区域 -->
 		<div class="chat-area" ref="chatAreaRef" @scroll="onChatAreaScroll">
 			<div v-for="(msg, msgIndex) in state.messages" :key="msgIndex" class="chat-message" :class="msg.role">
@@ -79,6 +96,15 @@
 				<el-icon class="is-loading"><ele-Loading /></el-icon>
 				<span>{{ state.statusText }}</span>
 			</div>
+			<!-- 点选模式提示条（正上方引导：看完提示顺势在输入框描述需求，随聊天列收缩） -->
+			<div v-if="imagePickMode" class="pick-mode-tip">
+				<el-icon><ele-InfoFilled /></el-icon>
+				<span>换图模式：点击预览页中高亮的图片进行更换（点击「退出换图模式」结束）</span>
+			</div>
+			<div v-else-if="sectionSelectMode" class="pick-mode-tip">
+				<el-icon><ele-InfoFilled /></el-icon>
+				<span>选区模式：点击预览页中的区块，锁定后在下方输入框描述修改需求（点击「退出选区模式」结束）</span>
+			</div>
 			<div v-if="mode === 'generate' && isFailed" class="regen-bar">
 				<span class="regen-tip">上次生成失败（详见上方错误信息）。模型配置修复后可重新生成。</span>
 				<el-button type="primary" size="small" @click="onRegenerate" :loading="state.chatting">
@@ -97,25 +123,31 @@
 				:disabled="state.chatting || isApplied"
 			/>
 			<div class="chat-actions">
-				<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
-					<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
+				<!-- 点选工具（换图/选区）：与发送按钮同排靠左；模式开关与预览 iframe 钩子注入由父组件处理 -->
+				<div v-if="pickToolsVisible" class="chat-tools">
+					<el-button size="small" :type="imagePickMode ? 'primary' : ''" :disabled="pickDisabled"
+					:title="imagePickMode ? '换图模式已开启：点击预览页中的图片进行更换' : '开启换图模式：点选预览页中的图片进行更换'"
+					@click="emit('toggle-image-pick')">
+					<el-icon><ele-PictureFilled /></el-icon>{{ imagePickMode ? '退出换图模式' : '换图' }}
 				</el-button>
-				<el-button v-if="state.chatting" type="danger" @click="onStop">
-					<el-icon><ele-VideoPause /></el-icon>停止
+				<el-button size="small" :type="sectionSelectMode ? 'primary' : ''" :disabled="pickDisabled"
+					:title="sectionSelectMode ? '选区模式已开启：点击预览页中的区块锁定为 AI 对话目标' : '开启选区模式：点选预览页中的区块，后续 AI 对话只修改该区块'"
+					@click="emit('toggle-section-select')">
+					<el-icon><ele-Position /></el-icon>{{ sectionSelectMode ? '退出选区模式' : '选区' }}
 				</el-button>
+				</div>
+				<div class="chat-send">
+					<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
+						<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
+					</el-button>
+					<el-button v-if="state.chatting" type="danger" @click="onStop">
+						<el-icon><ele-VideoPause /></el-icon>停止
+					</el-button>
+				</div>
 			</div>
 		</div>
 
-		<!-- 旧模板确定性升级横幅：不经 AI，保留内容资产（站点名/菜单/预览数据），组件库焕新视觉。
-		     独立于文件区显示：新建调整会话尚无 AI 修改文件时也要能看到入口 -->
-		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
-			<span class="legacy-upgrade-tip">检测到旧版模板，可一键升级为组件化版本：保留站点名、菜单与预览数据，原文件自动备份，升级后可直接对话微调</span>
-			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
-				<el-icon><ele-MagicStick /></el-icon>升级为组件版
-			</el-button>
-		</div>
-
-		<!-- 文件列表区域 -->
+		<!-- 文件列表区域：对话下方（限高滚动） -->
 		<div class="files-area" v-if="state.files.length > 0">
 			<div class="files-header">
 				<span>{{ mode === 'adjust' ? '本轮 AI 修改的文件（' + state.files.length + '）' : '生成文件（' + state.files.length + '）' }}</span>
@@ -126,7 +158,7 @@
 						<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
 					</el-button>
-					<el-button v-if="mode === 'generate' && !isApplied && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
+					<el-button v-if="mode === 'generate' && !isApplied && !sessionActive && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
 						<el-icon><ele-Edit /></el-icon>编辑文件
 					</el-button>
 					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
@@ -134,7 +166,8 @@
 					</el-button>
 				</div>
 			</div>
-			<el-table :data="state.files" stripe size="small" max-height="180">
+			<!-- 限高 180px 内部滚动，避免长列表把输入区挤出视口 -->
+			<el-table :data="state.files" stripe size="small" :max-height="180">
 				<el-table-column prop="filePath" label="文件路径" min-width="200" show-overflow-tooltip />
 				<el-table-column prop="action" label="操作" width="90">
 					<template #default="scope">
@@ -190,6 +223,12 @@ const props = defineProps<{
 	sessions?: any[];
 	/** 新建会话请求进行中（按钮 loading） */
 	creatingSession?: boolean;
+	/** 父组件已处于会话编辑模式：隐藏「编辑文件」入口（已在编辑，点击反而会清空当前编辑文件） */
+	sessionActive?: boolean;
+	/** 换图模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
+	imagePickMode?: boolean;
+	/** 选区模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
+	sectionSelectMode?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -205,6 +244,10 @@ const emit = defineEmits<{
 	(e: 'select-session', sessionId: string): void;
 	/** 新建会话 */
 	(e: 'new-session'): void;
+	/** 切换换图模式（预览页点选图片更换） */
+	(e: 'toggle-image-pick'): void;
+	/** 切换选区模式（预览页点选区块锁定为 AI 对话目标） */
+	(e: 'toggle-section-select'): void;
 }>();
 
 const templateApi = AiTemplateApi();
@@ -280,12 +323,24 @@ const state = reactive({
 	loadingFiles: false,
 	applying: false,
 	rollingBack: false,
-	// 旧模板确定性升级：探测结果（目录有 html 无 _pagespec.json）与执行中状态
+	// 旧模板样式组件化升级：探测结果（目录有 html 无 _pagespec.json 且升级未完成）与执行中状态
 	legacyUpgradable: false,
 	upgrading: false,
+	// 升级进度（legacy-status 返回）：用于横幅区分"未升级"与"未完成续传"
+	legacyPending: 0,
+	legacyDone: 0,
+	legacyTotal: 0,
+	// 本轮 chat 请求是否为样式组件化升级（onUpgradeLegacy 设置，onSend 发出后复位）
+	pendingStyleUpgrade: false,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
+
+/** 点选工具（换图/选区）可见：仅预览列存在的模式（adjust / 会话编辑视图）下才有可点选的预览页 */
+const pickToolsVisible = computed(() => props.mode === 'adjust' || !!props.sessionActive);
+
+/** 点选工具禁用：对话进行中（避免与 AI 写盘冲突）/ 已应用会话（仅回看）/ 无会话 */
+const pickDisabled = computed(() => state.chatting || isApplied.value || !props.session?.sessionId);
 
 /**
  * 清洗历史 assistant 消息内容：旧版本解析失败时曾把原始 JSON 响应全文存库
@@ -316,6 +371,27 @@ const cleanHistoryContent = (m: any): string => {
 };
 
 /**
+ * 应用升级状态查询结果（legacy-status 返回 {upgradable, pendingCount, doneCount, totalFiles}）
+ *
+ * 兼容旧版布尔返回（升级完成横幅消失语义一致）；进度数据驱动横幅
+ * 区分"未升级"与"上次升级未完成，可断点续传"两种文案形态。
+ */
+const applyLegacyStatus = (data: any) => {
+	if (data && typeof data === 'object') {
+		state.legacyUpgradable = data.upgradable === true;
+		state.legacyPending = data.pendingCount || 0;
+		state.legacyDone = data.doneCount || 0;
+		state.legacyTotal = data.totalFiles || 0;
+	} else {
+		// 旧版布尔返回或异常空值：仅控制横幅显隐
+		state.legacyUpgradable = data === true;
+		state.legacyPending = 0;
+		state.legacyDone = 0;
+		state.legacyTotal = 0;
+	}
+};
+
+/**
  * 加载会话消息与文件列表
  *
  * 注意：必须声明在下方 watch 之前——watch 带 immediate: true 会在 setup 阶段同步执行回调，
@@ -332,7 +408,7 @@ const loadSessionData = async () => {
 			// 旧模板探测：决定文件区"升级为组件版"按钮显隐；接口异常时静默降级为不显示
 			templateApi.legacyStatus(props.session.sessionId).catch(() => null),
 		]);
-		state.legacyUpgradable = legacyRes?.data === true;
+		applyLegacyStatus(legacyRes?.data);
 		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）；
 		// content 经 cleanHistoryContent 清洗（兜底旧版本存库的原始 JSON 全文）
 		if (messagesRes.data) {
@@ -437,6 +513,7 @@ const onSend = async () => {
 	});
 
 	const userInput = state.inputText;
+	const styleUpgrade = state.pendingStyleUpgrade;
 	state.inputText = '';
 	state.chatting = true;
 
@@ -463,6 +540,7 @@ const onSend = async () => {
 		state.abortController = null;
 		state.chatting = false;
 		state.statusText = '';
+		state.upgrading = false;
 	};
 
 	const refreshFiles = () => {
@@ -491,6 +569,12 @@ const onSend = async () => {
 		}
 		finish();
 		refreshFiles();
+		// 升级轮结束后刷新升级状态（升级完成则横幅消失；中断续传则横幅显示剩余进度）
+		if (styleUpgrade && props.session?.sessionId) {
+			templateApi.legacyStatus(props.session.sessionId).then((res: any) => {
+				applyLegacyStatus(res?.data);
+			}).catch(() => {});
+		}
 		// AI 已写盘，通知父组件刷新文件树/编辑器
 		emit('files-changed');
 	};
@@ -513,6 +597,13 @@ const onSend = async () => {
 		}
 		ElMessage.error(msg);
 		finish();
+		// 升级轮失败（如某文件改造解析失败中断）：刷新升级状态，
+		// 横幅转为"继续升级"形态展示剩余进度（用户可一键续传）
+		if (styleUpgrade && props.session?.sessionId) {
+			templateApi.legacyStatus(props.session.sessionId).then((res: any) => {
+				applyLegacyStatus(res?.data);
+			}).catch(() => {});
+		}
 	};
 
 	try {
@@ -527,10 +618,13 @@ const onSend = async () => {
 				input: userInput,
 				currentFile: props.currentFile || '',
 				focusSectionId: props.focusSection || '',
-				focusElementHint: props.focusElementHint || ''
+				focusElementHint: props.focusElementHint || '',
+				styleUpgrade
 			}),
 			signal: controller.signal
 		});
+		// 请求已发出，升级标志复位（下一轮普通对话不带该标志）
+		state.pendingStyleUpgrade = false;
 
 		if (!resp.ok || !resp.body) {
 			let msg = '请求失败（' + resp.status + '）';
@@ -575,17 +669,18 @@ const onSend = async () => {
 					scrollToBottom();
 					break;
 				case 'file':
-				// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）
-				try {
-					const info = JSON.parse(data);
-					if (info.path) {
-						upsertFile(info.path, info.action || 'modify');
-						emit('file-written', info.path);
+					// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
+					// 阶段状态条不在此清除：由后端状态链负责（新 status 覆盖旧文案，结束时发空 status 清除）
+					try {
+						const info = JSON.parse(data);
+						if (info.path) {
+							upsertFile(info.path, info.action || 'modify');
+							emit('file-written', info.path);
+						}
+					} catch (err) {
+						/* 忽略格式异常的 file 事件 */
 					}
-				} catch (err) {
-					/* 忽略格式异常的 file 事件 */
-				}
-				break;
+					break;
 			case 'progress':
 				// 分批流水线进度快照（全量文件清单及状态），更新 AI 消息内的进度卡
 				try {
@@ -739,36 +834,29 @@ const onApplyTemplate = () => {
 };
 
 /**
- * 旧模板确定性升级为组件化模板（不经 AI）
+ * 旧模板「样式组件化升级」（AI 改造管线）
  *
- * 后端从 _preview_data.json 提取站点名等内容资产 → 默认 PageSpec（导航+首屏+文章流+页脚）
- * → 校验 → 旧文本文件备份（同级 _legacy_backup_时间戳 目录）→ 渲染 → 清理。
- * 升级后进入组件化闭环：直接对话即可微调（换主色/加组件/改文案）。
+ * 流程：确认后走 chat SSE（styleUpgrade 标志）：后端确定性前置（备份/锚点扫描/组件 CSS 引入）
+ * → AI 分批改造页面（保留 id/JS 锚点/脚本/FreeMarker，追加 utility class）→ 写盘前锚点校验
+ * → 渲染校验。进度在对话流实时展示；中断后再次发起从断点续传。
  */
 const onUpgradeLegacy = () => {
-	if (!props.session?.sessionId) return;
+	if (!props.session?.sessionId || state.chatting) return;
+	const resuming = state.legacyTotal > 0 && state.legacyDone > 0;
 	ElMessageBox.confirm(
-		'将把此模板升级为组件化版本：保留站点名、菜单与预览数据，用组件库重新生成页面视觉；原文件自动备份，图片等资源保留。是否继续？',
-		'升级为组件版',
-		{ confirmButtonText: '升 级', cancelButtonText: '取 消', type: 'warning' }
-	).then(async () => {
+		resuming
+			? `上次样式组件化升级未完成（已完成 ${state.legacyDone}/${state.legacyTotal} 个页面）。继续升级将从剩余 ${state.legacyPending} 个页面断点续传：保留全部 JS 功能、元素 id 与脚本，引入组件库 CSS 焕新页面视觉。是否继续？`
+			: '将对此模板执行样式组件化升级：保留全部 JS 功能、元素 id 与脚本，引入组件库 CSS 焕新页面视觉。原文件自动备份，改造过程由 AI 分批完成（可在对话中看到进度，中断后可续传）。是否继续？',
+		resuming ? '继续样式组件化升级' : '样式组件化升级',
+		{ confirmButtonText: resuming ? '继续升级' : '开始升级', cancelButtonText: '取 消', type: 'warning' }
+	).then(() => {
 		state.upgrading = true;
-		try {
-			const res = await templateApi.upgradeLegacy(props.session.sessionId);
-			if (res.data) {
-				ElMessage.success(res.data);
-				state.legacyUpgradable = false;
-				// 刷新消息（升级留痕消息）与文件列表（旧文件清理 + 组件化产物），通知父组件刷新文件树
-				await loadSessionData();
-				emit('files-changed');
-			} else if (res.msg) {
-				ElMessage.error(res.msg);
-			}
-		} catch (e: any) {
-			ElMessage.error(e?.message || '升级失败');
-		} finally {
-			state.upgrading = false;
-		}
+		// 走标准 chat 流：输入框填入升级指令并携带 styleUpgrade 标志发送
+		state.inputText = resuming
+			? '继续样式组件化升级（从剩余页面断点续传，保留网站功能，焕新页面视觉）'
+			: '开始样式组件化升级（保留网站功能，焕新页面视觉）';
+		state.pendingStyleUpgrade = true;
+		onSend();
 	}).catch(() => {});
 };
 const onPreviewTemplate = () => {
@@ -1059,25 +1147,6 @@ const breakSentences = (s: string): string =>
 		}
 	}
 
-	// 旧模板升级横幅（输入区下方）：不依赖文件列表存在，新建调整会话即可见
-	.legacy-upgrade-bar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		margin-top: 8px;
-		margin-bottom: 8px;
-		padding: 8px 10px;
-		background: var(--el-color-warning-light-9);
-		border-left: 3px solid var(--el-color-warning);
-		border-radius: 4px;
-
-		.legacy-upgrade-tip {
-			font-size: 12px;
-			color: var(--el-color-warning-dark-2);
-		}
-	}
-
 	.typing-cursor {
 		color: var(--el-color-primary);
 		animation: cursor-blink 1s step-end infinite;
@@ -1177,9 +1246,52 @@ const breakSentences = (s: string): string =>
 }
 
 .chat-input {
+	// 点选模式提示条（输入框正上方）：模式开启时引导用户去预览页点选
+	.pick-mode-tip {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-bottom: 6px;
+		padding: 4px 8px;
+		font-size: 12px;
+		color: var(--el-color-primary);
+		background: var(--el-color-primary-light-9);
+		border-radius: 4px;
+	}
+
 	.chat-actions {
 		margin-top: 8px;
-		text-align: right;
+		display: flex;
+		align-items: center;
+
+		.chat-tools {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		// 工具按钮不存在时也保持发送按钮靠右
+		.chat-send {
+			margin-left: auto;
+		}
+	}
+}
+
+// 旧模板升级横幅（面板顶部，panel-header 之下）：不依赖文件列表存在，新建调整会话即可见
+.legacy-upgrade-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 8px;
+	padding: 8px 10px;
+	background: var(--el-color-warning-light-9);
+	border-left: 3px solid var(--el-color-warning);
+	border-radius: 4px;
+
+	.legacy-upgrade-tip {
+		font-size: 12px;
+		color: var(--el-color-warning-dark-2);
 	}
 }
 
@@ -1190,6 +1302,8 @@ const breakSentences = (s: string): string =>
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
 		margin-bottom: 8px;
 		font-weight: 500;
 	}

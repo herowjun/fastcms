@@ -99,7 +99,8 @@ public class AiTemplatePreviewController {
             relPath = relPath.substring(templateName.length() + 1);
         }
 
-        servePreview(workDir, PREVIEW_URL_PREFIX + sessionId + "/" + templateName, templateName, relPath, response);
+        servePreview(workDir, PREVIEW_URL_PREFIX + sessionId + "/" + templateName, templateName,
+                templateName, relPath, response);
     }
 
     /**
@@ -139,7 +140,8 @@ public class AiTemplatePreviewController {
             relPath = relPath.substring(pathName.length() + 1);
         }
 
-        servePreview(workDir, TEMPLATE_PREVIEW_URL_PREFIX + templateId, templateId, relPath, response);
+        servePreview(workDir, TEMPLATE_PREVIEW_URL_PREFIX + templateId, templateId,
+                template.getPathName(), relPath, response);
     }
 
     /**
@@ -148,9 +150,11 @@ public class AiTemplatePreviewController {
      * @param workDir     模板根目录
      * @param urlPrefix   预览 URL 前缀（不含结尾斜杠），用于覆盖 ctx() 的静态资源基路径
      * @param displayName 错误页展示的模板标识
+     * @param dirPrefix   页面链接的目录前缀（文件树 filePath 约定的模板目录名；
+     *                    会话预览 = templateName，正式模板预览 = pathName），null/空不加前缀
      * @param relPath     模板内相对路径
      */
-    private void servePreview(Path workDir, String urlPrefix, String displayName,
+    private void servePreview(Path workDir, String urlPrefix, String displayName, String dirPrefix,
                               String relPath, HttpServletResponse response) throws IOException {
         if (!StringUtils.hasText(relPath)) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND, "缺少预览文件路径");
@@ -165,7 +169,7 @@ public class AiTemplatePreviewController {
         }
 
         if (relPath.toLowerCase().endsWith(".html")) {
-            renderTemplate(urlPrefix, displayName, workDir, relPath, response);
+            renderTemplate(urlPrefix, displayName, dirPrefix, workDir, relPath, response);
         } else {
             serveStaticFile(target, response);
         }
@@ -178,12 +182,12 @@ public class AiTemplatePreviewController {
      * 每次渲染重新加载模板目录下的 {@code _preview_data.json}（存在时），
      * 手工编辑或 AI 修改该文件后刷新预览立即生效，无需重启。</p>
      */
-    private void renderTemplate(String urlPrefix, String displayName, Path workDir,
+    private void renderTemplate(String urlPrefix, String displayName, String dirPrefix, Path workDir,
                                 String relPath, HttpServletResponse response) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         try {
-            String html = previewRenderer.renderPage(urlPrefix, workDir, relPath);
+            String html = previewRenderer.renderPage(urlPrefix, dirPrefix, workDir, relPath);
             response.getWriter().write(html);
             response.getWriter().flush();
         } catch (Exception e) {
