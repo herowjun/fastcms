@@ -182,6 +182,8 @@ public class AiTemplateController {
                 request == null ? null : request.getFocusSectionId(),
                 request == null ? null : request.getFocusElementHint(),
                 request != null && Boolean.TRUE.equals(request.getStyleUpgrade()),
+                request != null && Boolean.TRUE.equals(request.getDeepRefresh()),
+                request != null && Boolean.TRUE.equals(request.getFullRefresh()),
                 emitter);
         return emitter;
     }

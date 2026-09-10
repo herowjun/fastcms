@@ -28,17 +28,34 @@
 
 		<!-- 旧模板「样式组件化升级」横幅（面板顶部）：保留网站功能（JS/元素锚点/FreeMarker），组件库 CSS 焕新视觉。
 		     升级走 AI 改造管线（分批重写页面 HTML，写盘前校验 JS 锚点存活），进度在对话流实时展示；
-		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传 -->
-		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
+		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传；
+		     升级完成后横幅变为"深度焕新"形态（重置计划，全部文件含 _layout.html 再改造一轮） -->
+		<div v-if="(state.legacyUpgradable || state.legacyRefinable) && !state.chatting && !isApplied" class="legacy-upgrade-bar">
 			<span class="legacy-upgrade-tip">
-				<template v-if="state.legacyTotal > 0 && state.legacyDone > 0">
+				<template v-if="state.legacyRefinable && !state.legacyUpgradable">
+					<template v-if="state.legacyRefreshCount >= 2">
+						已深度焕新 {{ state.legacyRefreshCount }} 次。仍不满意？建议直接对话描述具体问题（如「首页 banner 太单调，加强视觉层次」），AI 只改相关页面，更快更准；或再次焕新（将自动换用新的设计方向）
+					</template>
+					<template v-else>
+						样式组件化升级已完成。对效果不满意？智能焕新：AI 评估哪些页面与新方向强耦合，只重做这些页面（必含公共布局），其余保留并自动换肤，速度快
+					</template>
+				</template>
+				<template v-else-if="state.legacyTotal > 0 && state.legacyDone > 0">
 					上次升级未完成（已完成 {{ state.legacyDone }}/{{ state.legacyTotal }} 个页面），点击继续将从剩余 {{ state.legacyPending }} 个页面断点续传
 				</template>
 				<template v-else>
 					检测到旧版模板，可升级为组件化样式：保留全部 JS 功能与元素结构锚点，引入组件库 CSS 焕新视觉，原文件自动备份
 				</template>
 			</span>
-			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
+			<template v-if="state.legacyRefinable && !state.legacyUpgradable">
+				<el-button type="warning" size="small" :loading="state.upgrading" @click="onDeepRefresh">
+					<el-icon><ele-MagicStick /></el-icon>{{ state.legacyRefreshCount > 0 ? '再次智能焕新' : '智能焕新' }}
+				</el-button>
+				<el-button size="small" :loading="state.upgrading" @click="onFullRefresh" title="跳过范围评估，全部页面恢复原始底稿整体重做（适合彻底换风格，耗时数倍）">
+					全量焕新
+				</el-button>
+			</template>
+			<el-button v-else type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
 				<el-icon><ele-MagicStick /></el-icon>{{ state.legacyTotal > 0 && state.legacyDone > 0 ? '继续升级' : '样式组件化升级' }}
 			</el-button>
 		</div>
@@ -197,7 +214,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { AiTemplateApi } from '/@/api/ai/index';
-import { Local } from '/@/utils/storage';
+import { Local, Session } from '/@/utils/storage';
 
 /**
  * AI 模板对话面板（模板编辑页内嵌组件）
@@ -330,8 +347,16 @@ const state = reactive({
 	legacyPending: 0,
 	legacyDone: 0,
 	legacyTotal: 0,
+	// 升级已完成且可深度焕新（计划存在 + 无待改造文件）：横幅变为"深度焕新"形态
+	legacyRefinable: false,
+	// 已完成的深度焕新轮次（后端计划文件记录；用于横幅文案与焕新引导）
+	legacyRefreshCount: 0,
 	// 本轮 chat 请求是否为样式组件化升级（onUpgradeLegacy 设置，onSend 发出后复位）
 	pendingStyleUpgrade: false,
+	// 本轮 chat 请求是否为深度焕新（配合 styleUpgrade：升级完成后重置计划再改造一轮）
+	pendingDeepRefresh: false,
+	// 本轮 chat 请求是否为全量焕新（配合 deepRefresh：跳过 AI 范围评估，全部计划文件重做）
+	pendingFullRefresh: false,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
@@ -379,15 +404,19 @@ const cleanHistoryContent = (m: any): string => {
 const applyLegacyStatus = (data: any) => {
 	if (data && typeof data === 'object') {
 		state.legacyUpgradable = data.upgradable === true;
+		state.legacyRefinable = data.refinable === true;
 		state.legacyPending = data.pendingCount || 0;
 		state.legacyDone = data.doneCount || 0;
 		state.legacyTotal = data.totalFiles || 0;
+		state.legacyRefreshCount = data.refreshCount || 0;
 	} else {
 		// 旧版布尔返回或异常空值：仅控制横幅显隐
 		state.legacyUpgradable = data === true;
+		state.legacyRefinable = false;
 		state.legacyPending = 0;
 		state.legacyDone = 0;
 		state.legacyTotal = 0;
+		state.legacyRefreshCount = 0;
 	}
 };
 
@@ -513,7 +542,9 @@ const onSend = async () => {
 	});
 
 	const userInput = state.inputText;
-	const styleUpgrade = state.pendingStyleUpgrade;
+		const styleUpgrade = state.pendingStyleUpgrade;
+		const deepRefresh = state.pendingDeepRefresh;
+		const fullRefresh = state.pendingFullRefresh;
 	state.inputText = '';
 	state.chatting = true;
 
@@ -619,12 +650,16 @@ const onSend = async () => {
 				currentFile: props.currentFile || '',
 				focusSectionId: props.focusSection || '',
 				focusElementHint: props.focusElementHint || '',
-				styleUpgrade
-			}),
-			signal: controller.signal
-		});
+			styleUpgrade,
+			deepRefresh,
+			fullRefresh
+		}),
+		signal: controller.signal
+	});
 		// 请求已发出，升级标志复位（下一轮普通对话不带该标志）
 		state.pendingStyleUpgrade = false;
+		state.pendingDeepRefresh = false;
+		state.pendingFullRefresh = false;
 
 		if (!resp.ok || !resp.body) {
 			let msg = '请求失败（' + resp.status + '）';
@@ -638,6 +673,17 @@ const onSend = async () => {
 			const last = state.messages[assistantIndex];
 			if (last && !last.content) {
 				last.content = FAIL_MSG_PREFIX + msg;
+			}
+			// 401 = 登录过期/已在别处登录：AI 对话走原生 fetch，axios 的 401 拦截器不生效，
+			// 此处清缓存 + 弹窗提示 + 跳转管理后台入口（/fastcms → SPA 检测无 token 自动进登录页）
+			if (resp.status === 401) {
+				Session.clear();
+				Local.clear();
+				finish();
+				ElMessageBox.alert('你已被登出，请重新登录', '提示', {})
+					.then(() => { window.location.href = '/fastcms'; })
+					.catch(() => {});
+				return;
 			}
 			ElMessage.error(msg);
 			finish();
@@ -856,6 +902,52 @@ const onUpgradeLegacy = () => {
 			? '继续样式组件化升级（从剩余页面断点续传，保留网站功能，焕新页面视觉）'
 			: '开始样式组件化升级（保留网站功能，焕新页面视觉）';
 		state.pendingStyleUpgrade = true;
+		onSend();
+	}).catch(() => {});
+};
+
+/**
+ * 「智能焕新」（升级完成后的精准重刷，默认推荐）
+ *
+ * 先由 AI 评估各页面的方向耦合度，判定最小重做集合（必含 _layout.html 公共布局，
+ * 通常还有首页等含 hero/深色区的页面）；未选中的页面保留当前版本，经 tokens.css
+ * 变量自动换肤。耗时可降到全量的 1/3 左右。评估失败自动回退全量焕新。
+ */
+const onDeepRefresh = () => {
+	if (!props.session?.sessionId || state.chatting) return;
+	ElMessageBox.confirm(
+		'智能焕新：AI 先评估哪些页面与新设计方向强耦合（公共布局/首页等），只重做这些页面；其余页面保留并通过主题变量自动换肤，速度快、消耗少。评估失败时自动回退全量焕新。JS 功能与元素 id 仍全部保留，原备份不变。是否继续？',
+		'智能焕新',
+		{ confirmButtonText: '开始焕新', cancelButtonText: '取 消', type: 'warning' }
+	).then(() => {
+		state.upgrading = true;
+		// 走标准 chat 流：携带 styleUpgrade + deepRefresh 标志（后端先做范围评估再重置计划）
+		state.inputText = '智能焕新样式组件化（AI 评估范围，重做方向耦合页面含 _layout.html，其余保留换肤，重写组件样式库，保留网站功能）';
+		state.pendingStyleUpgrade = true;
+		state.pendingDeepRefresh = true;
+		state.pendingFullRefresh = false;
+		onSend();
+	}).catch(() => {});
+};
+
+/**
+ * 「全量焕新」（整体换设计方向的兜底选项）
+ *
+ * 跳过范围评估，全部计划页面（含 _layout.html）恢复原始备份底稿重新改造一轮。
+ * 适合对整体风格彻底不满意、想整套换设计方向的场景。
+ */
+const onFullRefresh = () => {
+	if (!props.session?.sessionId || state.chatting) return;
+	ElMessageBox.confirm(
+		'全量焕新：跳过范围评估，全部页面（含 _layout.html 公共布局）恢复原始底稿、以新的设计方向整体重新改造，并重写组件样式库。耗时与 token 消耗为智能焕新的数倍，建议先试智能焕新。是否继续？',
+		'全量焕新',
+		{ confirmButtonText: '开始全量焕新', cancelButtonText: '取 消', type: 'warning' }
+	).then(() => {
+		state.upgrading = true;
+		state.inputText = '全量焕新样式组件化（重置计划，全部页面含 _layout.html 重新改造，重写组件样式库，保留网站功能）';
+		state.pendingStyleUpgrade = true;
+		state.pendingDeepRefresh = true;
+		state.pendingFullRefresh = true;
 		onSend();
 	}).catch(() => {});
 };

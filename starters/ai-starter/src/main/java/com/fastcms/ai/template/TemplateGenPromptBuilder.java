@@ -18,7 +18,10 @@ package com.fastcms.ai.template;
 
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI 模板生成系统提示词构建器
@@ -387,45 +390,223 @@ public class TemplateGenPromptBuilder {
      * 构建「样式组件化升级」改造轮提示（旧模板升级，保留功能、焕新视觉）
      *
      * <p>硬性契约：JS 功能锚点（元素 id + JS 选择器依赖的 class）与内联脚本一个不能丢；
-     * FreeMarker 指令原样保留；结构可语义化重组并追加 Tailwind utility class。</p>
+     * FreeMarker 指令原样保留；结构可语义化重组并追加 utility class。</p>
+     *
+     * <p>v2：附<strong>真实可用</strong>的 CSS 变量清单与 utility 类族说明（防止 AI 引用不存在的
+     * 变量/类导致样式静默失效——升级后页面"丑/乱"的头号原因）、禁用语法黑名单
+     * （方括号任意值等 upgrade.css 不支持的形态）、设计规范（防止"能用但丑"），
+     * 以及 _layout.html 的专属改造契约（在批时）。</p>
      *
      * @param filesWithContent 本批待改造文件（相对路径 + 完整内容）
      * @param anchors          全站 JS 依赖锚点清单（"id:xxx" / "class:xxx"）
      * @param doneCount        已完成改造的页面数（进度提示用）
      * @param totalFiles       页面总数
+     * @param layoutInBatch    本批是否含 _layout.html（站点门面，专属契约见提示词）
+     * @param refreshRound     深度焕新轮次（0 = 首次升级；>0 时注入轮换设计方向，
+     *                         每轮焕新必须产出明显不同的版式，防止换汤不换药）
      */
     public String buildStyleUpgradePrompt(String filesWithContent, List<String> anchors,
-                                          int doneCount, int totalFiles) {
+                                          int doneCount, int totalFiles, boolean layoutInBatch,
+                                          int refreshRound) {
         String anchorList = anchors == null || anchors.isEmpty() ? "（无）"
                 : String.join("、", anchors);
-        return "请对本批旧模板页面执行「样式组件化升级」：视觉焕新为组件库风格，网站功能必须原样保留。\n\n"
-                + "当前进度：已完成 " + doneCount + " / " + totalFiles + " 个页面。\n\n"
-                + "## 改造目标\n\n"
-                + "1. 用 Tailwind utility class 重新设计页面视觉（布局、间距、字体、配色、圆角、阴影），"
-                + "组件库 CSS（tokens.css + pack-tailwind-v4.css + site.css）已在 _layout.html 引入，无需再写 <link>\n"
-                + "2. HTML 结构可以语义化重组（如用 <section>/<article>/<nav> 包裹、提取重复结构），"
-                + "但必须遵守下方铁律\n"
-                + "3. 配色使用 tokens.css 的 CSS 变量（如 style=\"color: var(--color-primary)\"）或对应 utility class\n\n"
-                + "## 铁律（违反任何一条即失败）\n\n"
-                + "1. **严禁删除或修改任何 id 属性**：旧文件中出现的所有 id=\"xxx\" 必须在新文件中原样存在\n"
-                + "2. **严禁丢失 JS 依赖锚点 class**：以下 class 被 JS 脚本引用（选择器），对应元素上必须原样保留——\n"
-                + "   " + anchorList + "\n"
-                + "   （旧文件中存在的锚点，新文件中必须仍在对应元素上；清单中旧文件本来就没有的无需处理）\n"
-                + "3. **严禁删除或修改任何 <script> 块**：页面内联脚本（Swiper/SuperSlide/fancybox 初始化等）"
-                + "必须原样保留在页面中，一条不能少\n"
-                + "4. **严禁修改 FreeMarker 指令**：<#...>、${...}、<@...> 及变量名原样保留"
-                + "（这是数据渲染与网站功能的核心）\n"
-                + "5. **严禁动 _layout.html 的引入**：公共布局已由系统处理，本批只改下列页面文件\n"
-                + "6. 旧的纯样式 class（不在锚点清单中的）可以移除，视觉由 utility class 接管\n\n"
-                + "## 本批待改造文件（相对路径 + 完整内容）\n\n" + filesWithContent + "\n\n"
-                + "## 输出要求\n\n"
-                + "1. files 数组输出本批全部文件的 modify（完整改造后内容），一个文件都不能漏\n"
-                + "2. 严格按照约定的 JSON 对象格式输出（reply 字段简述本批改造要点，files 字段为文件数组）\n"
-                + "3. 优先使用常见 utility class：布局 flex/grid/items-center/justify-between、间距 p-*/m-*/gap-*、"
-                + "字体 text-*/font-*、配色 bg-*/text-*、圆角 rounded-*、阴影 shadow-*、宽度 max-w-*/w-full、"
-                + "栅格 grid-cols-*、悬停 hover:*\n"
-                + "4. 请全程使用中文思考和回复\n"
-                + "5. 控制思考时间在最短必要范围：按铁律逐条核对后直接输出\n";
+        StringBuilder sb = new StringBuilder(4096);
+        sb.append("请对本批旧模板页面执行「样式组件化升级」：视觉焕新为组件库风格，网站功能必须原样保留。\n\n")
+                .append("当前进度：已完成 ").append(doneCount).append(" / ").append(totalFiles).append(" 个文件。\n\n");
+        if (refreshRound > 0) {
+            String[] directions = {
+                    "现代商务风：更强的视觉层次与对比——深色或渐变 hero 区、大号粗标题、粗分区留白、"
+                            + "明显的主色按钮与徽章，整体大气稳重",
+                    "轻盈优雅风：更多留白与呼吸感——浅色背景、柔和阴影、细边框、大圆角卡片、"
+                            + "克制的主色点缀与细腻的 hover 微交互，整体精致轻快",
+                    "杂志编辑风：内容优先的排版——大图视觉、超大标题、编辑式不对称网格、"
+                            + "去卡片化的开放分区、强烈的排版节奏与编号/线条装饰"
+            };
+            sb.append("## 本次设计方向（第 ").append(refreshRound).append(" 次深度焕新）\n\n")
+                    .append("用户对上一版效果不满意，本版必须采用**").append(directions[(refreshRound - 1) % directions.length])
+                    .append("**。\n")
+                    .append("布局结构必须明显区别于常规默认版式：hero 形态、栅格列数、卡片密度、分区节奏都要换，")
+                    .append("严禁输出与上一版相似度高的换汤不换药版式。\n\n");
+        }
+        sb.append("## 可用样式资产（升级前已注入，禁止再写 <link>）\n\n")
+                .append("- tokens.css：主题变量 + 语义别名（变量清单见下）\n")
+                .append("- pack-*.css：组件库（卡片/按钮/导航等组件类）\n")
+                .append("- upgrade.css：Tailwind 兼容 utility 全集 + preflight 重置 + .prose 正文排版\n\n")
+                .append("## CSS 变量清单（只允许用这些，其余一律未定义）\n\n")
+                .append("- 主色阶：--color-primary-50 ~ --color-primary-900（10 档），别名 --color-primary / ")
+                .append("--color-primary-dark / --color-primary-light\n")
+                .append("- 语义色：--color-text-primary / --color-text-secondary / --color-text-muted / ")
+                .append("--color-bg / --color-bg-secondary / --color-border / --color-danger / ")
+                .append("--color-danger-light / --color-success / --color-warning\n")
+                .append("- 圆角：--radius-sm / md / lg / xl / 2xl / 3xl；字体：--font-sans / --font-mono\n\n")
+                .append("## utility 类族（upgrade.css 预生成，按 Tailwind 刻度）\n\n")
+                .append("- 间距：m|mt|mr|mb|ml|mx|my / p|pt|pr|pb|pl|px|py / gap - 0~96（含 0.5 步进），负 margin -mt-* 可用\n")
+                .append("- 布局：flex / grid / grid-cols-1~12 / col-span-* / items-* / justify-* / self-* / ")
+                .append("flex-1 / grow / shrink-0 / hidden / block / inline-block\n")
+                .append("- 尺寸：w-* h-* 0~64、w-full/w-screen/w-auto/w-fit、max-w-xs~max-w-7xl/max-w-prose、min-w-0、h-full/h-screen\n")
+                .append("    （内容主体容器标准写法：`max-w-7xl mx-auto px-4`）\n")
+                .append("- 配色：text-*/bg-*/border-* × slate-50~900、gray-50~900、primary-50~900、")
+                .append("white、black；text-danger、text-success；渐变 bg-gradient-to-r + from-*/via-*/to-*\n")
+                .append("    （primary 系联动主题主色，优先使用）\n")
+                .append("    （文字层次标准：标题 text-slate-900、正文 text-slate-600、辅助 text-slate-400）\n")
+                .append("- 字体：text-xs~text-8xl、font-normal~font-black、leading-*、tracking-*、")
+                .append("truncate、line-clamp-1~6、whitespace-*\n")
+                .append("- 边框圆角阴影：border/border-0/2/4、border-t/r/b/l、rounded-sm~3xl/full、")
+                .append("shadow-sm~2xl、divide-y、space-x/y-*\n")
+                .append("- 效果：transition/colors/opacity/shadow、duration-*、opacity-0~100、")
+                .append("hover: 常用子集（bg/text/shadow/opacity/scale/underline/border）\n")
+                .append("- 响应式前缀：仅 sm:（≥640px）/ md:（≥768px）/ lg:（≥1024px）\n")
+                .append("- 正文排版：富文本容器加 `.prose`（自动恢复标题/列表/引用/表格/代码样式）\n\n")
+                .append("## 禁用语法（upgrade.css 是预生成类，不是运行时编译，以下形态一律无效）\n\n")
+                .append("- 方括号任意值：`w-[300px]`、`bg-[#f5f5f5]`、`text-[13px]`、`grid-cols-[1fr_2fr]` → 用最近刻度类替代\n")
+                .append("- 其他断点/变体：`xl:`、`2xl:`、`focus:`、`active:`、`group-hover:`、`dark:` → 只用 sm:/md:/lg:/hover:\n")
+                .append("- 未生成的类族：`animate-*`、`container`、`scroll-*`、`filter`、`blur-*`（backdrop-blur 除外）、")
+                .append("`ring-*`、`outline-*`、`indent-*`、`writing-*`、`columns-*`\n")
+                .append("- 未定义 CSS 变量（只用上方清单内的变量）\n\n")
+                .append("## 设计规范（目标：现代、精致、有呼吸感，避免「能用但丑」）\n\n")
+                .append("1. 版心：页面主体 `max-w-7xl mx-auto px-4`，区块间距 py-12~py-20，杜绝内容贴边\n")
+                .append("2. 卡片化：内容块用 `bg-white rounded-xl border border-slate-200 shadow-sm` 组合，")
+                .append("hover 加 `hover:shadow-lg transition`\n")
+                .append("3. 层次分明：区块标题 `text-2xl md:text-3xl font-bold text-slate-900`，")
+                .append("可配 `text-primary-600` 强调词与 `text-slate-500` 副标题\n")
+                .append("4. 主色克制：按钮/链接/高亮用 primary 系（`bg-primary-600 text-white rounded-lg px-5 py-2.5`），")
+                .append("大面积底色用 slate-50/白\n")
+                .append("5. 首屏 hero：大标题 + 副标题 + 主按钮，可用 `bg-gradient-to-b from-primary-50 to-white`\n")
+                .append("6. 列表/产品：`grid grid-cols-1 md:grid-cols-3 gap-6`，图片 `rounded-lg object-cover`\n")
+                .append("7. 交互暗示：可点击元素统一 `transition` + hover 变化（色/影/位移）\n\n")
+                .append("## 铁律（违反任何一条即失败）\n\n")
+                .append("1. **严禁删除或修改任何 id 属性**：旧文件中出现的所有 id=\"xxx\" 必须在新文件中原样存在\n")
+                .append("2. **严禁丢失 JS 依赖锚点 class**：以下 class 被 JS 脚本引用（选择器），对应元素上必须原样保留——\n")
+                .append("   ").append(anchorList).append('\n')
+                .append("   （旧文件中存在的锚点，新文件中必须仍在对应元素上；清单中旧文件本来就没有的无需处理）\n")
+                .append("3. **严禁删除或修改任何 <script> 块**：页面内联脚本（Swiper/SuperSlide/fancybox 初始化等）")
+                .append("必须原样保留在页面中，一条不能少\n")
+                .append("4. **严禁修改 FreeMarker 指令**：<#...>、${...}、<@...> 及变量名原样保留")
+                .append("（这是数据渲染与网站功能的核心）\n")
+                .append("   - **严禁用字符串拼接伪装指令**：${''}${'#'}{if x}...${'#'}{/if} 这类写法是字面量输出")
+                .append("而非条件判断（渲染后把 #{if...} 文本垃圾打进 class 属性，高亮/条件样式全部失效），")
+                .append("条件必须写真正的 <#if x>...</#if>；在 class 属性内写条件时可用 <#if> 标签穿插于文本之间\n");
+        if (layoutInBatch) {
+            sb.append("5. **本批含 _layout.html，按以下专属契约改造**（其余铁律同样适用）：\n")
+                    .append("   - <#macro>/<#function> 定义原样保留（宏名、参数、递归调用一字不动），只改宏体内的 HTML 结构与 class\n")
+                    .append("   - **宏安全铁律**：递归调用传数据字段（如 <@menuChildren children=item.children/>）时，")
+                    .append("宏参数必须带默认值（<#macro menuChildren children=[] currentUri=\"\">）")
+                    .append("或调用处判空（<#if item.children?? && item.children?size gt 0> 包裹调用）——")
+                    .append("叶子数据（如无子菜单的菜单项）该字段为 null，无兜底时整站渲染 500\n")
+                    .append("   - 组件库 CSS 引入（tokens.css / pack-*.css / upgrade.css）原样保留，顺序不动\n")
+                    .append("   - **删除旧站皮肤 CSS 的 <link>**（如 base.css / m.css 等本站旧样式）；")
+                    .append("功能性库 CSS 保留（swiper.min.css / animate / 字体图标 css）\n")
+                    .append("   - head 区 meta/viewport/seoTag 指令、favicon、统计脚本原样保留；")
+                    .append("header 导航/搜索/登录区、footer 的 DOM 语义化重组后追加 utility class\n")
+                    .append("   - <#macro script> 中的 JS 引入与内联脚本原样保留（可追加新 <script>，不可删改已有的）\n");
+        } else {
+            sb.append("5. **严禁动 _layout.html 的引入**：公共布局已由系统处理，本批只改下列页面文件\n");
+        }
+        sb.append("6. 旧的纯样式 class（不在锚点清单中的）应移除，视觉完全由 utility class 接管")
+                .append("（残留旧 class 会与新样式冲突）\n\n")
+                .append("## 本批待改造文件（相对路径 + 完整内容）\n\n")
+                .append(filesWithContent).append("\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. files 数组输出本批全部文件的 modify（完整改造后内容），一个文件都不能漏\n")
+                .append("2. **即使核对后认为某文件已完全符合规范、无需任何改动，也必须把该文件原样完整输出")
+                .append("（内容一字不改）**——不输出该文件会导致升级进度卡死\n")
+                .append("3. 严格按照约定的 JSON 对象格式输出（reply 字段简述本批改造要点，files 字段为文件数组）\n")
+                .append("4. 只使用上方 utility 类族与变量清单内的类/变量，不确定就换成熟悉的基础类\n")
+                .append("5. 请全程使用中文思考和回复\n")
+                .append("6. 控制思考时间在最短必要范围：按铁律逐条核对后直接输出\n");
+        return sb.toString();
+    }
+
+    /**
+     * 构建「智能焕新范围评估」提示（焕新前的规划调用）
+     *
+     * <p>目的：焕新不必重做全部页面——视觉身份 80% 由 _layout.html（头尾/导航/全局色）
+     * 与 index.html（hero/分区节奏）承载，内容页多为方向无关的通用卡片布局。
+     * 本调用让 AI 根据各页面当前的方向耦合度指纹，判定最小重做集合，
+     * 其余页面保留当前版本（自动继承 tokens.css 变量换肤效果）。</p>
+     *
+     * @param fileFingerprints 每个计划文件一行指纹（路径 + 方向耦合特征统计）
+     * @param refreshRound     焕新轮次（>0，决定设计方向，与改造轮共用轮换表）
+     */
+    public String buildRefreshScopePrompt(String fileFingerprints, int refreshRound) {
+        String[] directions = {
+                "现代商务风：深色或渐变 hero 区、大号粗标题、强对比主色按钮与徽章",
+                "轻盈优雅风：浅色背景、更多留白、柔和阴影、细腻 hover 微交互",
+                "杂志编辑风：大图视觉、超大标题、编辑式不对称网格、去卡片化开放分区"
+        };
+        String direction = directions[(refreshRound - 1) % directions.length];
+        return "你是模板焕新范围评估器。站点已完成一轮组件化升级，用户对效果不满意，"
+                + "即将执行第 " + refreshRound + " 次深度焕新，本轮设计方向：**" + direction + "**。\n\n"
+                + "## 各页面当前状态指纹\n\n" + fileFingerprints + "\n\n"
+                + "## 评估任务\n\n"
+                + "判断哪些页面**必须重新改造**才能落实新设计方向，哪些可以保留当前版本：\n"
+                + "- `_layout.html` 必须重做（站点门面：header/footer/导航/全局色，任何焕新都包含）\n"
+                + "- 含方向耦合元素的页面需重做：深色/渐变 hero、强主色区块、大图视觉等"
+                + "（指纹中 dark/gradient/primary 计数高的页面；尤其 index.html 首页）\n"
+                + "- 方向无关的通用内容页保留：白底卡片列表、正文排版（bg-white + rounded + prose 类），"
+                + "这些布局与新方向不冲突，且会通过 tokens.css 变量自动换色换字体\n"
+                + "- 同构页面（如 article_list 系列多个下载/视频列表）只需重做有方向耦合的，其余保留\n\n"
+                + "## 输出格式（严格遵守）\n\n"
+                + "先用一两句话说明判断依据，然后输出 JSON：\n"
+                + "```json\n{\"redesign\": [\"_layout.html\", \"index.html\", ...]}\n```\n"
+                + "redesign 数组 = 必须重做的文件相对路径清单（只列上面指纹中存在的路径，宁少勿多）；"
+                + "未列出的文件将原样保留。请全程使用中文。";
+    }
+
+    /**
+     * 构建视觉审计修复提示（升级收尾轮）：把审计器的结构化问题清单翻译给 AI 修复
+     *
+     * <p>审计来源见 {@link com.fastcms.ai.component.LegacyStyleUpgrader#auditUpgrade}：
+     * missing_class / undefined_var / legacy_css_residue / page_without_utilities。
+     * 修复铁律与改造轮一致（锚点/id/脚本/FreeMarker 不动）。</p>
+     *
+     * @param issues           审计问题清单
+     * @param filesWithContent 涉事文件当前内容（相对路径 + 完整内容）
+     */
+    public String buildAuditFixPrompt(
+            List<com.fastcms.ai.component.LegacyStyleUpgrader.AuditIssue> issues,
+            String filesWithContent) {
+        // 按文件聚合，提示词更紧凑
+        Map<String, List<String>> byFile = new LinkedHashMap<>();
+        for (com.fastcms.ai.component.LegacyStyleUpgrader.AuditIssue issue : issues) {
+            byFile.computeIfAbsent(issue.file(), k -> new ArrayList<>())
+                    .add("[" + issue.type() + "] " + issue.detail());
+        }
+        StringBuilder sb = new StringBuilder(2048);
+        sb.append("系统对样式组件化升级后的模板做了视觉审计，发现以下样式失效问题")
+                .append("（这些是页面看起来丑、布局乱的直接原因），请逐条修复：\n\n");
+        int i = 1;
+        for (Map.Entry<String, List<String>> e : byFile.entrySet()) {
+            sb.append("### ").append(e.getKey()).append('\n');
+            for (String detail : e.getValue()) {
+                sb.append(i++).append(". ").append(detail).append('\n');
+            }
+            sb.append('\n');
+        }
+        sb.append("## 修复方式（按问题类型）\n\n")
+                .append("- [missing_class] 该 class 在所有 CSS 中都不存在：删除它，改用清单内等价 utility class；")
+                .append("无法等价表达时用内联 style（仅可用已定义的 CSS 变量）\n")
+                .append("- [undefined_var] 该 CSS 变量未定义：改用已定义变量")
+                .append("（--color-primary-50~900、--color-text-primary/secondary/muted、--color-bg、")
+                .append("--color-bg-secondary、--color-border、--color-danger、--color-success、")
+                .append("--color-warning、--radius-sm~3xl、--font-sans/mono）或字面量\n")
+                .append("- [legacy_css_residue] _layout.html 仍引入旧站皮肤 CSS：删除对应 <link> 标签")
+                .append("（swiper/animate/字体图标等功能性库 CSS 保留）\n")
+                .append("- [page_without_utilities] 页面没有 utility class，未被真正改造：按改造契约重新设计该页面\n")
+                .append("- [escaped_directive] 字符串拼接伪装指令（${''}${'#'}{if ...} 形态）：是字面量输出而非条件判断，")
+                .append("全部改写为真正的 <#if x>...</#if>（<#else> 分支同理）\n")
+                .append("- [macro_arg_null_risk] 宏参数无默认值且调用传入可能为 null 的数据（如 xxx.children）：")
+                .append("给宏定义参数补默认值（如 children=[]）或调用处用 <#if ?? && ?size gt 0> 判空\n\n")
+                .append("## 铁律（与改造轮一致，修复时同样不可违反）\n\n")
+                .append("1. 严禁删除/修改 id 属性、JS 锚点 class、<script> 块、FreeMarker 指令\n")
+                .append("2. 修复必须针对审计问题本身，不要大幅重构已改造好的部分\n\n")
+                .append("## 待修复文件（相对路径 + 完整内容）\n\n")
+                .append(filesWithContent).append("\n\n")
+                .append("## 输出要求\n\n")
+                .append("1. files 数组输出全部涉事文件修复后的完整内容（action=modify）\n")
+                .append("2. 严格按照约定的 JSON 对象格式输出（reply 简述修复内容，files 为文件数组）\n")
+                .append("3. 请全程使用中文思考和回复\n");
+        return sb.toString();
     }
 
     /**

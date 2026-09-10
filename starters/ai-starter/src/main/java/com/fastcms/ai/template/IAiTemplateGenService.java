@@ -105,10 +105,15 @@ public interface IAiTemplateGenService {
      *                       spec 片段，AI 只修改该区块，其他 section 原样保留）
      * @param focusElementHint 用户点选区块时命中的具体元素描述（可空；元素级语义提示）
      * @param styleUpgrade 样式组件化升级标志（true 且为旧模板时走升级管线，忽略常规对话）
+     * @param deepRefresh 深度焕新标志（配合 styleUpgrade：升级已完成时重置计划再改造一轮，
+     *                    需存在升级计划；未开始升级的模板等同首次升级；默认智能焕新——
+     *                    AI 规划调用判定最小重做范围）
+     * @param fullRefresh 全量焕新标志（配合 deepRefresh：跳过范围评估，全部计划文件重做）
      * @param emitter   SSE emitter
      */
     void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
-                    String focusElementHint, boolean styleUpgrade, SseEmitter emitter);
+                    String focusElementHint, boolean styleUpgrade, boolean deepRefresh,
+                    boolean fullRefresh, SseEmitter emitter);
 
     /**
      * 将会话工作目录的模板文件应用到 fastcms 正式模板目录

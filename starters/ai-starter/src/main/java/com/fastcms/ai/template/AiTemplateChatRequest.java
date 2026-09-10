@@ -60,6 +60,18 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private Boolean styleUpgrade;
 
+    /**
+     * 深度焕新标志（配合 styleUpgrade=true）：升级已完成时重置升级计划再改造一轮。
+     * 默认为智能焕新（AI 规划调用判定最小重做范围，只重做方向耦合的页面）。
+     */
+    private Boolean deepRefresh;
+
+    /**
+     * 全量焕新标志（配合 deepRefresh=true）：跳过范围评估，全部计划文件（含 _layout.html）
+     * 恢复备份底稿重做。整体换设计方向时的兜底选项。
+     */
+    private Boolean fullRefresh;
+
     public String getInput() {
         return input;
     }
@@ -98,6 +110,22 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setStyleUpgrade(Boolean styleUpgrade) {
         this.styleUpgrade = styleUpgrade;
+    }
+
+    public Boolean getDeepRefresh() {
+        return deepRefresh;
+    }
+
+    public void setDeepRefresh(Boolean deepRefresh) {
+        this.deepRefresh = deepRefresh;
+    }
+
+    public Boolean getFullRefresh() {
+        return fullRefresh;
+    }
+
+    public void setFullRefresh(Boolean fullRefresh) {
+        this.fullRefresh = fullRefresh;
     }
 
 }
