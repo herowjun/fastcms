@@ -14,6 +14,7 @@
 
     <properties>
         <pay-java.version>2.14.3-b2</pay-java.version>
+        <pf4j.version>3.13.0</pf4j.version>
     </properties>
 
     <dependencies>
@@ -22,6 +23,20 @@
             <groupId>com.egzosn</groupId>
             <artifactId>pay-java-common</artifactId>
             <version>${pay-java.version}</version>
+        </dependency>
+
+        <!-- PaymentPlatform 继承 ExtensionPoint（支付渠道以插件形式扩展），需 pf4j；
+             版本须与 plugin-starter 保持一致 -->
+        <dependency>
+            <groupId>org.pf4j</groupId>
+            <artifactId>pf4j</artifactId>
+            <version>${pf4j.version}</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>slf4j-log4j12</artifactId>
+                    <groupId>org.slf4j</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
     </dependencies>

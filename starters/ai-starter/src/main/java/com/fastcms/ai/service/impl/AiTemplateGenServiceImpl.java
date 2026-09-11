@@ -277,6 +277,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Autowired
     private AiToolCallbackProvider toolCallbackProvider;
 
+    @Autowired
+    private com.fastcms.ai.autoconfigure.FastcmsAiProperties aiProperties;
+
     /**
      * 附件服务（图片槽位点选换图：附件 ID → URL 解析）
      */
@@ -618,7 +621,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Override
     public void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
                            String focusElementHint, boolean styleUpgrade, boolean deepRefresh,
-                           boolean fullRefresh, SseEmitter emitter) {
+                           boolean fullRefresh, boolean fullInject, SseEmitter emitter) {
         // SSE 通道封装：send 失败/断开回调即标记取消，各生成轮次检测后中断（见 SseChannel）
         SseChannel channel = new SseChannel(emitter);
         AiTemplateSession session = getSession(sessionId);
@@ -634,7 +637,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         try {
             sseExecutor.execute(() -> {
                 try {
-                    doChatStream(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, channel);
+                    doChatStream(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, channel);
                 } catch (ChatCancelledException ce) {
                     // 客户端断开/用户停止：已生成的文件已落盘（断点续传语义保留），
                     // 落一条带标记的 assistant 消息，避免刷新后无法追溯这轮为何没有结果
@@ -685,7 +688,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      */
     private void doChatStream(AiTemplateSession session, String userInput, String currentFile,
                               String focusSectionId, String focusElementHint, boolean styleUpgrade,
-                              boolean deepRefresh, boolean fullRefresh, SseChannel channel) throws Exception {
+                              boolean deepRefresh, boolean fullRefresh, boolean fullInject,
+                              SseChannel channel) throws Exception {
         // 0. 配额检查（fastcms.ai.daily-token-quota，超限直接拒绝，不产生模型调用）
         try {
             quotaChecker.check(session.getUserId());
@@ -701,7 +705,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         org.springframework.ai.chat.metadata.Usage[] lastUsage = {null};
 
         try {
-            doChatStreamInternal(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, channel, lastUsage);
+            doChatStreamInternal(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, channel, lastUsage);
             succeeded[0] = true;
         } catch (Exception e) {
             errorMessage[0] = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -712,6 +716,20 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             int completionTokens = lastUsage[0] == null || lastUsage[0].getCompletionTokens() == null ? 0 : lastUsage[0].getCompletionTokens();
             int totalTokens = lastUsage[0] == null || lastUsage[0].getTotalTokens() == null
                     ? promptTokens + completionTokens : lastUsage[0].getTotalTokens();
+            if (succeeded[0]) {
+                // 本轮用量推前端（挂最后一条 assistant 消息 hover 展示）+ 回写消息表（刷新回看）；
+                // 失败轮不推不写——fail 消息由异常路径稍后保存，此刻回写会错挂到上一轮消息
+                try {
+                    Map<String, Integer> usageData = new LinkedHashMap<>();
+                    usageData.put("promptTokens", promptTokens);
+                    usageData.put("completionTokens", completionTokens);
+                    usageData.put("totalTokens", totalTokens);
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_USAGE, toJson(usageData));
+                    messageService.updateTokenUsage(session.getSessionId(), promptTokens, completionTokens, totalTokens);
+                } catch (Exception ignored) {
+                    // 用量展示/回写失败不影响主流程（审计日志已有兜底）
+                }
+            }
             // 模型名只查一次（此前每个分支各调两次 getActiveConfig，各触发一次 DB 查询）
             AiModelConfig auditConfig = modelConfigService.getActiveConfig();
             String auditModel = auditConfig == null ? null : auditConfig.getModel();
@@ -736,7 +754,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
     private void doChatStreamInternal(AiTemplateSession session, String userInput, String currentFile,
                                       String focusSectionId, String focusElementHint, boolean styleUpgrade,
-                                      boolean deepRefresh, boolean fullRefresh,
+                                      boolean deepRefresh, boolean fullRefresh, boolean fullInject,
                                       SseChannel channel, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
         // 1. 获取激活的模型配置
         AiModelConfig modelConfig = modelConfigService.getActiveConfig();
@@ -745,9 +763,27 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return;
         }
         ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
+        // 聚焦注入模式 + 调整型会话：追加每请求闭包工具（read_template_file /
+        // search_template_files），闭包捕获本会话工作目录与 SSE 通道，AI 可按需检索全站文件。
+        // 全量注入（fullInject 请求级开关 > full 配置级开关）不挂——所有文件已注入，无按需检索必要
+        boolean focusMode = !fullInject
+                && !"full".equalsIgnoreCase(aiProperties.getAdjustInjectMode())
+                && StringUtils.hasText(session.getTemplateId());
+        org.springframework.ai.tool.ToolCallback[] allTools;
+        if (focusMode) {
+            org.springframework.ai.tool.ToolCallback[] globalTools = toolCallbackProvider.getToolCallbacks();
+            org.springframework.ai.tool.ToolCallback[] perRequestTools =
+                    new com.fastcms.ai.tool.TemplateContextToolFactory()
+                            .createCallbacks(resolveEffectiveWorkDir(session), channel::send);
+            allTools = new org.springframework.ai.tool.ToolCallback[globalTools.length + perRequestTools.length];
+            System.arraycopy(globalTools, 0, allTools, 0, globalTools.length);
+            System.arraycopy(perRequestTools, 0, allTools, globalTools.length, perRequestTools.length);
+        } else {
+            allTools = toolCallbackProvider.getToolCallbacks();
+        }
         ChatClient chatClient = ChatClient.builder(chatModel)
                 // 挂载 @AiTool 注册的工具（当前无工具时为空数组，不影响调用）
-                .defaultTools(toolCallbackProvider.getToolCallbacks())
+                .defaultTools(allTools)
                 .build();
 
         // 2. 加载历史消息
@@ -853,7 +889,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             // 归一化当前文件路径（去掉模板目录前缀，与文件清单中的相对路径一致）：
             // 既用于注入优先级（当前页面全文保真），也用于提示词聚焦
             String normalizedCurrentFile = normalizeRelativePath(currentFile, session.getWorkDir());
-            String currentFilesWithContent = buildTemplateFileSection(adjustWorkDir, normalizedCurrentFile);
+            // 聚焦注入（L0 依赖闭包 + L1 全站清单，L2 工具已在 chatClient 挂载）或全量注入
+            String currentFilesWithContent = focusMode
+                    ? buildFocusedTemplateFileSection(adjustWorkDir, normalizedCurrentFile)
+                    : buildTemplateFileSection(adjustWorkDir, normalizedCurrentFile);
+            String siteManifest = focusMode ? buildTemplateManifest(adjustWorkDir) : null;
             // 选区上下文（路线 B）：预览页点选区块 → 反查组件源码文件 → 提示词约束 AI 只改该区块；
             // 定位不到（未组件化/引用被手改坏）时退回普通调整并 SSE 提示
             String focusSectionIdForPrompt = null;
@@ -868,7 +908,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 }
             }
             userPrompt = promptBuilder.buildAdjustPrompt(userInput, currentFilesWithContent, normalizedCurrentFile,
-                    focusSectionIdForPrompt, focusElementHint, focusComponentFile);
+                    focusSectionIdForPrompt, focusElementHint, focusComponentFile, siteManifest);
         } else {
             // 微调场景：附带当前已有文件清单
             String currentFiles = buildCurrentFileList(session.getSessionId());
@@ -885,9 +925,13 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         int totalFiles = 0;
         // 调整型会话收紧输出上限：调整是"改文件"任务，不需要深度推理。
         // 全量思考可把 completion 吃满 maxTokens（实测 16384 输出 / 耗时 6.4 分钟，正文一个字未出），
-        // 压到 ADJUST_MAX_TOKENS_CAP 让"思考吃满"尽早暴露并触发翻倍重试，不再白等十几分钟
-        Integer roundMaxTokens = isAdjust && modelConfig.getMaxTokens() != null
-                ? Math.min(modelConfig.getMaxTokens(), ADJUST_MAX_TOKENS_CAP)
+        // 压到 ADJUST_MAX_TOKENS_CAP 让"思考吃满"尽早暴露并触发翻倍重试，不再白等十几分钟。
+        // maxTokens 未配置时同样兜底收紧：无上限的流可连续输出十几分钟（native OOM 实例：
+        // 推理模型重复循环 + 无上限 reasoning 累积差分把 G1 堆推爆，最终耗尽 Windows 页面文件）
+        Integer roundMaxTokens = isAdjust
+                ? (modelConfig.getMaxTokens() != null
+                        ? Math.min(modelConfig.getMaxTokens(), ADJUST_MAX_TOKENS_CAP)
+                        : ADJUST_MAX_TOKENS_CAP)
                 : null;
         int effectiveMaxTokens = roundMaxTokens != null ? roundMaxTokens
                 : (modelConfig.getMaxTokens() != null ? modelConfig.getMaxTokens() : 0);
@@ -898,6 +942,8 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             boolean exists = StringUtils.hasText(path) && Files.exists(dir.resolve(path).normalize());
             return (exists ? "正在修改 " : "正在生成 ") + path + "…";
         };
+        // switchTo 声明是否已推送（跨修复轮去重：渲染修复轮重新解析同一响应时不重复切换）
+        boolean switchSentFromParse = false;
         for (int round = 0; ; round++) {
             // 客户端已断开：不再发起下一轮模型调用（白烧上游 token），中断并保留已落盘文件
             if (channel.isCancelled()) {
@@ -968,6 +1014,24 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         failMsg, reasoningText);
                 sendError(channel, "AI 响应解析失败（输出被截断），已提示重试机制，请重试或简化本次改动范围");
                 return;
+            }
+
+            // 页面切换声明（纯导航轮次）：用户要求"切换/查看某页面"时 AI 在 JSON 顶层输出 switchTo，
+            // 解析成功即推送 switch-file 让前端实时预览切到目标页（修改型轮次已由流式扫描器
+            // 在输出期间更早触发，此处与流式切换目标一致时前端切换是幂等操作）
+            if (!switchSentFromParse && parsed != null && StringUtils.hasText(parsed.getSwitchTo())) {
+                String switchPath = parsed.getSwitchTo().trim();
+                if (switchPath.startsWith("./")) {
+                    switchPath = switchPath.substring(2);
+                } else if (switchPath.startsWith("/")) {
+                    switchPath = switchPath.substring(1);
+                }
+                if (isRoutableHtmlPath(switchPath)) {
+                    switchSentFromParse = true;
+                    Map<String, String> switchData = new LinkedHashMap<>();
+                    switchData.put("path", switchPath);
+                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_SWITCH_FILE, toJson(switchData));
+                }
             }
 
             // 保存 assistant 消息（先于文件写入：调整型会话的文件备份以消息ID为回滚粒度），
@@ -2329,6 +2393,20 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private static final java.time.Duration ROUND_SIGNAL_TIMEOUT = java.time.Duration.ofMinutes(5);
 
     /**
+     * 思考过程缓冲硬上限（字符数）：推理模型重复循环时思考文本可达 MB 级，
+     * 超限后停止缓冲（前端流式推送不受影响，落库保留头部内容），
+     * 与差分增量化（消除 O(n²) 复制）共同构成思考链路的内存防线
+     */
+    private static final int REASONING_BUF_MAX_CHARS = 256 * 1024;
+
+    /**
+     * 单轮响应原文缓冲硬上限（字符数）：responseBuffer 必须持有全量用于解析，
+     * 但无界累积在模型异常输出（重复循环）时会打爆内存；正常单轮输出（含多个文件）
+     * 远低于该值，超限视为流异常，抛错中断
+     */
+    private static final int RESPONSE_BUF_MAX_CHARS = 8 * 1024 * 1024;
+
+    /**
      * 单轮流式调用的总时长上限（墙钟计时，任何信号无法重置）：
      * 兜住"流停滞但 keepalive 心跳不断重置信号间隔超时"的挂死场景；
      * 正常推理模型单文件 3-4 分钟，规划轮更短，15 分钟是充裕上限
@@ -2863,6 +2941,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         StringBuilder responseBuffer = new StringBuilder();
         // 文件传输阶段状态是否已推送（每次调用独立）
         boolean[] filesStatusSent = {false};
+        // 页面自动切换事件是否已推送（每轮只切一次：首个可路由 HTML 即目标页，
+        // 后续文件不再重复推送，避免预览在多文件轮次中来回跳）
+        boolean[] switchFileSent = {false};
         FileProgressScanner fileScanner = new FileProgressScanner();
         try {
             Prompt roundPrompt = optionsOverride != null
@@ -2897,21 +2978,30 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                                 ? null : output.getMetadata().get("reasoningContent");
                         if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
                             String rc = String.valueOf(reasoning);
-                            String prev = reasoningBuf.toString();
-                            if (rc.length() > prev.length() && rc.startsWith(prev)) {
-                                // 累积模式（Spring AI 透传的是累积值）：推送差分增量，缓冲整体替换
-                                String delta = rc.substring(prev.length());
+                            // 内存教训（native OOM 实例）：透传累积值时思考文本增长到 L，
+                            // 每 chunk 做 toString/startsWith/整体替换共 5 次全量复制，总量 O(L²)；
+                            // L 达 MB 级（推理模型重复循环）时产生海量 humongous 分配，
+                            // G1 扩堆失控最终耗尽 Windows 页面文件。故：
+                            // ① 前缀匹配改零分配 charAt 循环（不复制缓冲）；
+                            // ② 命中后只追加差分增量（不再 setLength(0)+append(rc) 整体替换）；
+                            // ③ 缓冲加硬上限，重复循环也打不爆内存
+                            int prevLen = reasoningBuf.length();
+                            boolean prefixMatch = rc.length() >= prevLen
+                                    && startsWithBuf(rc, reasoningBuf, prevLen);
+                            if (prefixMatch && rc.length() > prevLen) {
+                                // 累积模式（Spring AI 透传的是累积值）：推送差分增量，缓冲只追加增量
+                                String delta = rc.substring(prevLen);
                                 if (StringUtils.hasText(delta)) {
                                     sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, delta);
                                 }
-                                reasoningBuf.setLength(0);
-                                reasoningBuf.append(rc);
-                            } else if (!rc.equals(prev)) {
+                                appendReasoningCapped(reasoningBuf, delta);
+                            } else if (!prefixMatch) {
                                 // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加，
                                 // 覆盖缓冲会导致前端重复推送同一内容
                                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, rc);
-                                reasoningBuf.append(rc);
+                                appendReasoningCapped(reasoningBuf, rc);
                             }
+                            // prefixMatch && 长度相等：累积模式的重复帧（无新增），跳过
                         }
                         // 正文增量
                         String chunk = output.getText();
@@ -2922,6 +3012,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         // 确有剩余字段（files/pagespec）在传；纯问答（reply 即全部内容，
                         // 闭引号后至多一个收尾符号）则一次状态都不推，避免误导性提示闪现
                         boolean replyAlreadyFinished = replyExtractor.isFinished();
+                        // 保险丝：responseBuffer 无界累积在模型异常输出（重复循环）时会打爆内存
+                        // （native OOM 实例教训），超限抛错中断流，走统一的失败处理
+                        if (responseBuffer.length() + chunk.length() > RESPONSE_BUF_MAX_CHARS) {
+                            throw new RuntimeException("AI 输出超出安全上限（" + (RESPONSE_BUF_MAX_CHARS / 1024 / 1024) + "MB），已中断：模型可能陷入重复循环");
+                        }
                         responseBuffer.append(chunk);
                         String replyDelta = replyExtractor.feed(chunk);
                         if (StringUtils.hasText(replyDelta)) {
@@ -2943,6 +3038,14 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                             for (String path : fileScanner.feed(chunk)) {
                                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_STATUS,
                                         fileStatusResolver.apply(path));
+                                // 页面自动切换：调整/升级轮首个可路由 HTML 推送一次 switch-file，
+                                // 前端实时预览立即切到目标页（先展示旧版本，写盘后经刷新键重载新版）
+                                if (!switchFileSent[0] && isRoutableHtmlPath(path)) {
+                                    switchFileSent[0] = true;
+                                    Map<String, String> data = new LinkedHashMap<>();
+                                    data.put("path", normalizeSwitchPath(path));
+                                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_SWITCH_FILE, toJson(data));
+                                }
                             }
                         }
                         // PageSpec 心跳：组件化管线剩余传输的是页面规划，页面识别/字节阈值
@@ -2969,6 +3072,35 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             throw new RuntimeException("AI 调用失败: " + e.getMessage(), e);
         }
         return responseBuffer.toString();
+    }
+
+    /**
+     * 零分配前缀匹配：判断 s 的前 len 个字符是否与 buf 缓冲内容一致
+     *
+     * <p>替代 {@code rc.startsWith(reasoningBuf.toString())}——后者每个 chunk 都要
+     * 把整个缓冲复制成 String（思考文本 MB 级时是 humongous 分配的主要来源）。</p>
+     */
+    private static boolean startsWithBuf(String s, StringBuilder buf, int len) {
+        if (s.length() < len) {
+            return false;
+        }
+        for (int i = 0; i < len; i++) {
+            if (s.charAt(i) != buf.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 思考过程缓冲追加（带上限）：达到 {@link #REASONING_BUF_MAX_CHARS} 后停止追加，
+     * 防推理模型重复循环无限增长（前端流式推送不受影响，落库保留头部内容）
+     */
+    private static void appendReasoningCapped(StringBuilder buf, String delta) {
+        if (buf.length() >= REASONING_BUF_MAX_CHARS) {
+            return;
+        }
+        buf.append(delta, 0, Math.min(delta.length(), REASONING_BUF_MAX_CHARS - buf.length()));
     }
 
     /**
@@ -3936,6 +4068,219 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return 1;
         }
         return 2;
+    }
+
+    // ==================== 聚焦注入（L0 依赖闭包 + L1 文件清单） ====================
+
+    /**
+     * 聚焦注入的依赖闭包 token 预算（硬上限，防引用链异常膨胀撑爆上下文；
+     * 正常单页依赖闭包在 12~16k tokens 以内）
+     */
+    private static final long FOCUSED_CLOSURE_TOKEN_BUDGET = 24_000L;
+
+    /**
+     * JS/CSS 单文件全文注入的 token 阈值：超过则只注入头部（结构/签名区可见），
+     * 尾部注明可用 read_template_file 按需读取——避免编译产物类大文件吃光预算
+     */
+    private static final long FOCUSED_ASSET_FULL_TOKENS = 4_000L;
+
+    /**
+     * 构造聚焦注入的文件内容段（L0 依赖闭包）：当前页 + 其引用链（<#include>/<#import>/
+     * script/link/@import，递归两层）+ _preview_data.json。
+     *
+     * <p>与 {@link #buildTemplateFileSection} 全量注入的取舍：全量 60k tokens prefill 慢且
+     * 上下文噪音大；聚焦只带"改这一页真正需要的"，其余文件降级为 L1 清单 + L2 按需工具。
+     * AI 判断需要更多上下文时（跨页需求、参考已有实现）自主调用 read/search 工具。</p>
+     *
+     * @param templateDir 模板工作目录
+     * @param currentFile 当前编辑页面的相对路径（可为 null：无当前页时退化为布局+预览数据）
+     */
+    private String buildFocusedTemplateFileSection(Path templateDir, String currentFile) {
+        StringBuilder sb = new StringBuilder();
+        long budget = FOCUSED_CLOSURE_TOKEN_BUDGET;
+        // 1. 收集依赖闭包：当前页 → 引用（2 层）→ _preview_data.json
+        java.util.LinkedHashSet<String> closure = new java.util.LinkedHashSet<>();
+        if (StringUtils.hasText(currentFile) && Files.isRegularFile(templateDir.resolve(currentFile).normalize())) {
+            closure.add(currentFile);
+            collectReferenceClosure(templateDir, currentFile, closure, 2);
+        } else {
+            // 无当前页（或文件不存在）：保底注入公共布局，AI 至少能看到站点骨架
+            if (Files.isRegularFile(templateDir.resolve("_layout.html").normalize())) {
+                closure.add("_layout.html");
+                collectReferenceClosure(templateDir, "_layout.html", closure, 2);
+            }
+        }
+        if (Files.isRegularFile(templateDir.resolve("_preview_data.json").normalize())) {
+            closure.add("_preview_data.json");
+        }
+
+        // 2. 按闭包顺序注入：HTML/FTL/JSON 全文；JS/CSS 超阈值截断头部
+        int included = 0;
+        for (String rel : closure) {
+            Path file = templateDir.resolve(rel).normalize();
+            String content;
+            try {
+                content = Files.readString(file, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                continue;
+            }
+            boolean isAsset = rel.toLowerCase().endsWith(".js") || rel.toLowerCase().endsWith(".css");
+            long cost = estimateTokens(content);
+            if (isAsset && cost > FOCUSED_ASSET_FULL_TOKENS) {
+                // 大资源文件：注入头部 + 提示按需读取
+                int keepChars = (int) Math.min(content.length(),
+                        Math.max(2_000L, content.length() * FOCUSED_ASSET_FULL_TOKENS / cost));
+                content = content.substring(0, keepChars)
+                        + "\n…（文件较长已截断，需要完整内容时调用 read_template_file 工具查看 " + rel + "）";
+                cost = estimateTokens(content);
+            }
+            if (cost > budget) {
+                sb.append("### ").append(rel).append("\n（依赖闭包预算已满未注入，可调用 read_template_file 查看）\n\n");
+                continue;
+            }
+            budget -= cost;
+            sb.append("### ").append(rel).append("\n```\n").append(content).append("\n```\n\n");
+            included++;
+        }
+        log.info("聚焦注入: {} 个文件, 估算 {} tokens (预算 {}), 闭包: {}",
+                included, FOCUSED_CLOSURE_TOKEN_BUDGET - budget, FOCUSED_CLOSURE_TOKEN_BUDGET, closure);
+        if (included == 0 && sb.length() == 0) {
+            sb.append("（模板目录没有可注入的文本文件）");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 递归收集引用闭包：解析文件中的 include/import/script/link/@import 引用，
+     * 命中模板目录内文本文件则纳入（${ctx()} 前缀、CDN 外链、路径穿越自动跳过）
+     *
+     * @param depth 剩余递归深度（当前页 → 布局 → 布局引用的资源，2 层足够覆盖改页所需）
+     */
+    private void collectReferenceClosure(Path templateDir, String rel,
+                                         java.util.Set<String> acc, int depth) {
+        if (depth <= 0) {
+            return;
+        }
+        Path file = templateDir.resolve(rel).normalize();
+        if (!file.startsWith(templateDir) || !Files.isRegularFile(file)) {
+            return;
+        }
+        String content;
+        try {
+            if (Files.size(file) > 512 * 1024) {
+                return; // 超大文件不做引用解析（编译产物 minified 单行，解析无意义）
+            }
+            content = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return;
+        }
+        java.util.regex.Matcher m = com.fastcms.ai.tool.TemplateContextToolFactory.REFERENCE_PATTERN.matcher(content);
+        while (m.find()) {
+            String raw = com.fastcms.ai.tool.TemplateContextToolFactory.firstGroup(m);
+            String target = normalizeAssetReference(raw);
+            if (target == null) {
+                continue;
+            }
+            // 先按模板根相对解析，失败再按当前文件父目录相对解析（相对路径引用场景）
+            Path resolved = templateDir.resolve(target).normalize();
+            if (!resolved.startsWith(templateDir) || !Files.isRegularFile(resolved)) {
+                Path sibling = file.getParent().resolve(target).normalize();
+                if (!sibling.startsWith(templateDir) || !Files.isRegularFile(sibling)) {
+                    continue;
+                }
+                resolved = sibling;
+            }
+            String targetRel = templateDir.relativize(resolved).toString().replaceAll("\\\\", "/");
+            if (acc.add(targetRel)) {
+                collectReferenceClosure(templateDir, targetRel, acc, depth - 1);
+            }
+        }
+    }
+
+    /**
+     * 归一化资源引用路径：剥 ${ctx()}/${ctx} 前缀与首部斜杠；
+     * 外链（http/https/协议相对/data URI）返回 null
+     */
+    private static String normalizeAssetReference(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String p = raw.trim();
+        if (p.startsWith("http://") || p.startsWith("https://") || p.startsWith("//")
+                || p.startsWith("data:") || p.contains("://")) {
+            return null;
+        }
+        p = p.replace("${ctx()}", "").replace("${ctx}", "");
+        while (p.startsWith("/")) {
+            p = p.substring(1);
+        }
+        while (p.startsWith("./")) {
+            p = p.substring(2);
+        }
+        return p.isBlank() ? null : p;
+    }
+
+    /**
+     * 构造全站文件清单（L1）：所有文本文件的路径 + 粗估 tokens（一行一个），
+     * 让 AI 知道"站里还有什么可查"，配合 read_template_file 按需查看。
+     * 二进制资源（图片/字体）只汇总数量。
+     */
+    private String buildTemplateManifest(Path templateDir) {
+        StringBuilder sb = new StringBuilder();
+        int binaryCount = 0;
+        try (Stream<Path> stream = Files.walk(templateDir)) {
+            List<Path> files = stream.filter(Files::isRegularFile).collect(Collectors.toList());
+            List<String> lines = new ArrayList<>();
+            for (Path p : files) {
+                String name = p.getFileName().toString().toLowerCase();
+                int dot = name.lastIndexOf('.');
+                String ext = dot < 0 ? "" : name.substring(dot + 1);
+                String rel = templateDir.relativize(p).toString().replaceAll("\\\\", "/");
+                if (ADJUST_TEXT_EXTENSIONS.contains(ext)) {
+                    try {
+                        String content = Files.readString(p, StandardCharsets.UTF_8);
+                        lines.add(rel + " (~" + estimateTokens(content) + " tokens)");
+                    } catch (IOException e) {
+                        lines.add(rel);
+                    }
+                } else {
+                    binaryCount++;
+                }
+            }
+            lines.sort(String::compareTo);
+            for (String line : lines) {
+                sb.append("- ").append(line).append("\n");
+            }
+        } catch (IOException e) {
+            log.warn("扫描模板目录失败: {}", templateDir, e);
+        }
+        if (binaryCount > 0) {
+            sb.append("\n（另有 ").append(binaryCount).append(" 个图片/字体等二进制资源，不在文本检索范围）");
+        }
+        return sb.length() > 0 ? sb.toString() : "（模板目录为空）";
+    }
+
+    /**
+     * 是否为可路由的 HTML 页面（与前端 isRoutableHtml 对齐：非 _ 前缀的布局/宏文件），
+     * 用于流式期间判定页面自动切换事件的目标
+     */
+    private static boolean isRoutableHtmlPath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        String p = normalizeSwitchPath(path);
+        if (!p.toLowerCase().endsWith(".html")) {
+            return false;
+        }
+        return !p.substring(p.lastIndexOf('/') + 1).startsWith("_");
+    }
+
+    /**
+     * 规范化页面切换路径：去掉 AI 输出中偶发的 "./" 前缀，
+     * 与前端预览选项的匹配规则保持一致
+     */
+    private static String normalizeSwitchPath(String path) {
+        return path.startsWith("./") ? path.substring(2) : path;
     }
 
     /**

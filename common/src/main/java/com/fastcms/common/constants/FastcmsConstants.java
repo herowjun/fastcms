@@ -31,6 +31,11 @@ public interface FastcmsConstants {
 
     String API_MAPPING = API_PREFIX_MAPPING + "/client";
 
+    /**
+     * 安装向导接口前缀
+     */
+    String INSTALL_MAPPING = API_PREFIX_MAPPING + "/install";
+
     String PLUGIN_MAPPING = "/fastcms/plugin";
 
     String DEV_MODE = "dev";

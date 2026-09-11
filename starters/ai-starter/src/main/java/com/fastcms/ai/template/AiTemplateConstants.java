@@ -105,5 +105,15 @@ public final class AiTemplateConstants {
      * 区别于 message（正文内容）
      */
     public static final String SSE_EVENT_STATUS = "status";
+    /**
+     * 预览页面自动切换（调整/升级轮流式期间识别到 AI 正在处理的首个可路由 HTML 即推送，
+     * 前端实时预览立即切到该页面，无需等文件写盘）
+     */
+    public static final String SSE_EVENT_SWITCH_FILE = "switch-file";
+    /**
+     * 本轮 token 用量（done 之后推送，跨轮次聚合：含工具调用/修复轮），
+     * 前端挂在最后一条 assistant 消息上 hover 展示
+     */
+    public static final String SSE_EVENT_USAGE = "usage";
 
 }

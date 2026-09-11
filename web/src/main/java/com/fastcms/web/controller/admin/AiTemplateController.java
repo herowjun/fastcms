@@ -184,6 +184,7 @@ public class AiTemplateController {
                 request != null && Boolean.TRUE.equals(request.getStyleUpgrade()),
                 request != null && Boolean.TRUE.equals(request.getDeepRefresh()),
                 request != null && Boolean.TRUE.equals(request.getFullRefresh()),
+                request != null && Boolean.TRUE.equals(request.getFullInject()),
                 emitter);
         return emitter;
     }

@@ -22,6 +22,7 @@ import com.fastcms.oauth2.endpoint.FastcmsOAuth2AuthorizationRequestResolver;
 import com.fastcms.oauth2.userinfo.FastcmsOAuth2UserService;
 import com.fastcms.plugin.PluginPermitAllManager;
 import com.fastcms.utils.RequestUtils;
+import com.fastcms.web.install.ForcePasswordChangeFilter;
 import com.fastcms.web.filter.JwtAuthTokenFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
@@ -104,6 +105,9 @@ public class FastcmsAuthConfig {
         http.headers((headersConfigurer) -> headersConfigurer.cacheControl(withDefaults()));
         http.headers((headersConfigurer) -> headersConfigurer.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable));
         http.addFilterBefore(new JwtAuthTokenFilter(tokenManager), UsernamePasswordAuthenticationFilter.class);
+        // 强制改密防线（暂未启用）：must_change_pwd=1 的账号除改密外禁用所有管理接口。
+        // 启用前提：1) updateUserPassword 改密成功后须将 must_change_pwd 清零；2) 前端须提供强制改密引导页，否则账号会被永久锁死
+        // http.addFilterAfter(new ForcePasswordChangeFilter(), JwtAuthTokenFilter.class);
         return http.build();
     }
 

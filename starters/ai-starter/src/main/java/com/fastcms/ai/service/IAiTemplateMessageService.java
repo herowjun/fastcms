@@ -49,4 +49,11 @@ public interface IAiTemplateMessageService extends IService<AiTemplateMessage> {
      */
     void deleteBySessionId(String sessionId);
 
+    /**
+     * 回写本轮 token 用量到会话最近一条 assistant 消息（跨轮次聚合值：含工具调用/修复轮）。
+     * 轮次结束后调用——assistant 消息落库时 usage 尚未终值（修复轮在后面），无法在保存时写入。
+     * 失败轮不回写（fail 消息在异常路径保存，顺序上晚于本调用）。
+     */
+    void updateTokenUsage(String sessionId, Integer promptTokens, Integer completionTokens, Integer totalTokens);
+
 }

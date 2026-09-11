@@ -37,6 +37,9 @@ fastcms:
       /fastcms/api/admin/reset/password,\
       /fastcms/api/admin/config/public/list,\
       /fastcms/api/admin/captcha,\
+      /fastcms/api/install/status,\
+      /fastcms/api/install/test-connection,\
+      /fastcms/api/install/execute,\
       /fastcms/api/client/wechat/miniapp/user/code2session,\
       /fastcms/api/client/wechat/miniapp/user/login,\
       /fastcms/api/client/wechat/miniapp/user/login/phone,\

@@ -16,11 +16,14 @@
  */
 package com.fastcms.plugin;
 
+import com.fastcms.common.utils.FastcmsInstallState;
 import com.fastcms.plugin.extension.FastcmsSpringExtensionFactory;
 import com.fastcms.plugin.register.CompoundPluginRegister;
 import org.pf4j.DefaultPluginManager;
 import org.pf4j.ExtensionFactory;
 import org.pf4j.PluginWrapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
@@ -43,6 +46,8 @@ import java.util.stream.Collectors;
  * @version: 1.0
  */
 public class FastcmsPluginManager extends DefaultPluginManager implements PluginManagerService, ApplicationContextAware, InitializingBean, ApplicationListener<ApplicationStartedEvent>, Ordered {
+
+    private static final Logger log = LoggerFactory.getLogger(FastcmsPluginManager.class);
 
     private ApplicationContext applicationContext;
 
@@ -151,6 +156,11 @@ public class FastcmsPluginManager extends DefaultPluginManager implements Plugin
     @Override
     public void onApplicationEvent(ApplicationStartedEvent event) {
         try {
+            // 未安装模式（哑数据源启动）下跳过插件加载：插件注册链可能触碰数据库，待安装完成重启后再加载
+            if (FastcmsInstallState.isInstallMode()) {
+                log.warn("系统处于未安装模式，跳过插件加载，请先完成安装向导并重启应用");
+                return;
+            }
             // 收集各模块（如 ai-starter 的 AI 工具注册器）通过 Spring 容器贡献的 PluginRegister，
             // 追加到注册链末尾后再初始化插件：此时容器已刷新完毕，bean 依赖可正常解析
             if (applicationContext != null && pluginRegister instanceof CompoundPluginRegister compoundRegister) {

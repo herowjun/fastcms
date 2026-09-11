@@ -2,6 +2,7 @@ package com.fastcms.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fastcms.common.utils.FastcmsInstallState;
 import com.fastcms.entity.Config;
 import com.fastcms.mapper.ConfigMapper;
 import com.fastcms.service.IConfigService;
@@ -68,6 +69,11 @@ public class ConfigServiceImpl extends ServiceImpl<ConfigMapper, Config> impleme
 
 	@Override
 	public void afterPropertiesSet() throws Exception {
+		// 未安装模式下数据源为哑数据源（任何取连接操作都会抛异常），跳过配置预加载；
+		// 安装完成重启后正常加载
+		if (FastcmsInstallState.isInstallMode()) {
+			return;
+		}
 		list().forEach(item -> configMap.put(item.getKey(), item));
 	}
 

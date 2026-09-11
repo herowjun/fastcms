@@ -20,6 +20,7 @@ import cn.binarywang.wx.miniapp.util.WxMaConfigHolder;
 import com.fastcms.cms.site.DefaultSiteManager;
 import com.fastcms.cms.site.SiteContextFilter;
 import com.fastcms.common.constants.FastcmsConstants;
+import com.fastcms.common.utils.FastcmsInstallState;
 import com.fastcms.common.utils.StrUtils;
 import com.fastcms.core.directive.BaseDirective;
 import com.fastcms.core.freemarker.FastcmsFreeMarkerViewResolver;
@@ -206,6 +207,10 @@ public class FastcmsConfiguration implements WebMvcConfigurer, WebSocketConfigur
     }
 
     void initServerInfo(WebServerInitializedEvent event) throws Exception {
+        // 未安装模式下哑数据源不可用，跳过服务器信息初始化写库，安装完成重启后补齐
+        if (FastcmsInstallState.isInstallMode()) {
+            return;
+        }
         if(StringUtils.isBlank(configService.getValue(FastcmsConstants.SERVER_IP))) {
             configService.saveConfig(FastcmsConstants.SERVER_IP, AttachUtils.getInternetIp());
         }

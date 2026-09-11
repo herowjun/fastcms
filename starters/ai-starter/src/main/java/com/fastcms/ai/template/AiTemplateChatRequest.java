@@ -72,6 +72,13 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private Boolean fullRefresh;
 
+    /**
+     * 全量注入标志（调整型会话，默认 false 聚焦注入）：true 时跳过按需检索，
+     * 预算内全部模板文件直接注入提示词（旧行为）。token 消耗与耗时大幅增加，
+     * 仅在用户反馈 AI 自动检索效果不佳时由前端开关开启。
+     */
+    private Boolean fullInject;
+
     public String getInput() {
         return input;
     }
@@ -126,6 +133,14 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setFullRefresh(Boolean fullRefresh) {
         this.fullRefresh = fullRefresh;
+    }
+
+    public Boolean getFullInject() {
+        return fullInject;
+    }
+
+    public void setFullInject(Boolean fullInject) {
+        this.fullInject = fullInject;
     }
 
 }

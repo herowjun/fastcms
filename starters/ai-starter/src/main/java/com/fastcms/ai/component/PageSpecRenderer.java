@@ -16,8 +16,12 @@
  */
 package com.fastcms.ai.component;
 
+import com.fastcms.ai.capability.CapabilityDescriptor;
+import com.fastcms.ai.capability.CapabilitySnippet;
+import com.fastcms.ai.capability.PluginCapabilityRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,12 +30,16 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * PageSpec 渲染引擎：spec → 自包含的 fastcms 模板目录
@@ -115,9 +123,21 @@ public class PageSpecRenderer {
 
     private final TokenEngine tokenEngine;
 
+    /**
+     * 插件能力注册中心（custom-html section 物化用；测试环境无能力体系时可注入 null）
+     */
+    private final PluginCapabilityRegistry capabilityRegistry;
+
     public PageSpecRenderer(ComponentRegistry registry, TokenEngine tokenEngine) {
+        this(registry, tokenEngine, null);
+    }
+
+    @Autowired
+    public PageSpecRenderer(ComponentRegistry registry, TokenEngine tokenEngine,
+                            PluginCapabilityRegistry capabilityRegistry) {
         this.registry = registry;
         this.tokenEngine = tokenEngine;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     /**
@@ -340,6 +360,18 @@ public class PageSpecRenderer {
         if (isContentBody(section)) {
             return;
         }
+        // custom-html（能力集成）section：每 section 物化专属文件（snippet 展开或 data.html 原文，
+        // 含 FTL 插值求值与 hasPlugin 门控），不与其他 section 共享源码
+        if (section.isCustomHtml()) {
+            String capFileName = customHtmlFileName(section);
+            String capRel = COMPONENTS_DIR + "/" + capFileName;
+            if (writtenRels.add(capRel)) {
+                String capSource = injectSectionRootMarker(materializeCustomHtml(section));
+                Files.writeString(dir.resolve(capFileName), capSource, StandardCharsets.UTF_8);
+                written.add(capRel);
+            }
+            return;
+        }
         String fileName = componentFileName(section);
         String rel = COMPONENTS_DIR + "/" + fileName;
         if (!writtenRels.add(rel)) {
@@ -358,6 +390,219 @@ public class PageSpecRenderer {
         }
         Files.writeString(dir.resolve(fileName), source, StandardCharsets.UTF_8);
         written.add(rel);
+    }
+
+    // ==================== 能力集成（custom-html section 物化） ====================
+
+    /**
+     * custom-html section 物化产物文件名：cap__{sectionId}__{内容指纹}.ftl
+     *
+     * <p>每个 custom-html section 的内容互不相同（snippet 参数 / 手写 HTML），
+     * 不能像普通组件那样按（组件, 变体）共享源码；指纹取自物化输入
+     * （snippetId + snippetParams + data.html），内容相同的 section 自动去重复用同一文件，
+     * 内容不同的 section 即使 id 撞名也不会互相覆盖（渲染期引用与落盘共用本方法，天然一致）。</p>
+     */
+    String customHtmlFileName(SectionSpec section) {
+        String rawId = section.id();
+        String safeId = (rawId == null || rawId.isBlank()) ? "sec"
+                : rawId.replaceAll("[^a-zA-Z0-9_-]", "-");
+        String inputs = "snippet=" + section.snippetId()
+                + "|params=" + section.safeSnippetParams()
+                + "|html=" + section.safeData().get("html");
+        return "cap__" + safeId + "__" + shortHash(inputs) + ".ftl";
+    }
+
+    /**
+     * 物化 custom-html section 为可执行的 FTL 片段：
+     * snippet 展开（{{PARAM}} 占位符替换）或 data.html 原文（保留 FTL 插值，如 ${article.id}）
+     * → 端点路径校验 → hasPlugin 门控包裹
+     *
+     * @throws IllegalArgumentException snippet 不存在 / 参数缺失 / 端点路径未在任何已注册能力中声明
+     *                                 （错误信息可行动，经渲染修复轮回喂 AI 自我修正）
+     */
+    String materializeCustomHtml(SectionSpec section) {
+        String html;
+        String snippetId = section.snippetId();
+        if (snippetId != null && !snippetId.isBlank()) {
+            html = expandSnippet(section);
+        } else {
+            Object raw = section.safeData().get("html");
+            html = raw == null ? "" : String.valueOf(raw);
+        }
+        validateEndpointPaths(section, html);
+        return wrapPluginGate(section, html);
+    }
+
+    /**
+     * snippet 引用展开：官方参考实现源码 + snippetParams 填充（SECTION_ID 系统自动注入）
+     *
+     * <p>snippet 归属能力优先在 section 声明的 capability 列表中查找，
+     * 找不到再全局查找（与校验器 findSnippet 同口径）。</p>
+     */
+    private String expandSnippet(SectionSpec section) {
+        if (capabilityRegistry == null) {
+            throw new IllegalArgumentException(
+                    "custom-html section[" + section.id() + "] 引用 snippet " + section.snippetId()
+                            + "，但当前环境没有插件能力注册中心，无法展开");
+        }
+        String snippetId = section.snippetId();
+        String ownerCapabilityId = null;
+        CapabilitySnippet snippet = null;
+        for (String capabilityId : section.safeCapability()) {
+            var rc = capabilityRegistry.find(capabilityId).orElse(null);
+            if (rc == null) {
+                continue;
+            }
+            snippet = rc.descriptor().safeSnippets().stream()
+                    .filter(s -> snippetId.equals(s.id()))
+                    .findFirst().orElse(null);
+            if (snippet != null) {
+                ownerCapabilityId = capabilityId;
+                break;
+            }
+        }
+        if (snippet == null) {
+            for (var rc : capabilityRegistry.listCapabilities()) {
+                snippet = rc.descriptor().safeSnippets().stream()
+                        .filter(s -> snippetId.equals(s.id()))
+                        .findFirst().orElse(null);
+                if (snippet != null) {
+                    ownerCapabilityId = rc.capabilityId();
+                    break;
+                }
+            }
+        }
+        if (snippet == null) {
+            throw new IllegalArgumentException(
+                    "custom-html section[" + section.id() + "] snippetId 不存在: " + snippetId
+                            + "（可用 snippet 见 get_capability_detail 返回的官方 snippet 清单）");
+        }
+        String source = capabilityRegistry.getSnippetSource(ownerCapabilityId, snippetId);
+        if (source == null || source.isBlank()) {
+            throw new IllegalArgumentException(
+                    "能力 " + ownerCapabilityId + " 的 snippet " + snippetId + " 源码缺失（插件声明不完整）");
+        }
+        // 参数填充：snippetParams + SECTION_ID（系统自动注入，供 JS 锚点/DOM id 唯一化）
+        Map<String, String> params = new LinkedHashMap<>();
+        section.safeSnippetParams().forEach((k, v) -> params.put(k, v == null ? "" : String.valueOf(v)));
+        if (section.id() != null && !section.id().isBlank()) {
+            params.put("SECTION_ID", section.id());
+        }
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            source = source.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        }
+        Matcher leftover = SNIPPET_PLACEHOLDER_PATTERN.matcher(source);
+        if (leftover.find()) {
+            throw new IllegalArgumentException(
+                    "custom-html section[" + section.id() + "] snippet " + snippetId
+                            + " 存在未填充的占位符 " + leftover.group()
+                            + "（snippetParams 须覆盖 snippet 声明的全部参数）");
+        }
+        return source;
+    }
+
+    /**
+     * snippet 源码占位符（{{PARAM}}）
+     */
+    private static final Pattern SNIPPET_PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{[A-Za-z0-9_-]+\\}\\}");
+
+    /**
+     * 端点路径校验：手写逃生舱 data.html 中出现的 /fastcms/ 开头路径，
+     * 必须命中任一已注册能力端点的前缀——AI 编造接口路径在渲染期即被拦截，
+     * 错误信息回喂 AI 自我修正（这是防止"看起来能跑实则 404"死代码的关键闸门）
+     *
+     * <p>snippet 展开产物同样过校验（官方 snippet 不会误伤：其调用路径即能力声明端点）。
+     * FTL 插值（${...}）与查询串（?）之后的部分不参与匹配。</p>
+     */
+    private void validateEndpointPaths(SectionSpec section, String html) {
+        if (capabilityRegistry == null) {
+            return;
+        }
+        Set<String> prefixes = capabilityRegistry.registeredEndpointPrefixes();
+        if (prefixes.isEmpty()) {
+            return;
+        }
+        Matcher matcher = API_PATH_PATTERN.matcher(html);
+        List<String> invalid = new ArrayList<>();
+        while (matcher.find()) {
+            String raw = matcher.group(1);
+            // 截掉查询串与 FTL 插值之后的动态部分，只校验静态前缀
+            String candidate = raw.split("\\?", 2)[0];
+            int interp = candidate.indexOf("${");
+            if (interp >= 0) {
+                candidate = candidate.substring(0, interp);
+            }
+            if (candidate.isBlank()) {
+                continue;
+            }
+            boolean matched = prefixes.stream().anyMatch(candidate::startsWith);
+            if (!matched) {
+                invalid.add(raw);
+            }
+        }
+        if (!invalid.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "custom-html section[" + section.id() + "] 中的接口路径未在任何已注册能力端点中声明: "
+                            + String.join(", ", invalid)
+                            + "。请先调用 get_capability_detail 工具核对该能力的接口契约，"
+                            + "路径必须与契约完全一致，禁止编造");
+        }
+    }
+
+    /**
+     * 接口调用路径提取：引号（含 JS 模板字符串反引号）内的 /fastcms/ 开头路径
+     */
+    private static final Pattern API_PATH_PATTERN = Pattern.compile("[\"'`](/fastcms/[^\"'`\\s]*)[\"'`]");
+
+    /**
+     * hasPlugin 门控：section 依赖的能力来自插件时，产物包裹
+     * {@code <@hasPlugin pluginId="x"><#if data>...</#if></@hasPlugin>}——
+     * 插件卸载后该区块静默隐藏（不报错、不残留死按钮），重装即恢复。
+     * 核心能力（core:*）不门控。
+     */
+    private String wrapPluginGate(SectionSpec section, String content) {
+        if (capabilityRegistry == null) {
+            return content;
+        }
+        LinkedHashSet<String> pluginIds = new LinkedHashSet<>();
+        for (String capabilityId : section.safeCapability()) {
+            capabilityRegistry.find(capabilityId).ifPresent(rc -> {
+                String pluginId = rc.pluginId();
+                if (pluginId != null && !pluginId.isBlank() && !rc.descriptor().isCore()) {
+                    pluginIds.add(pluginId);
+                }
+            });
+        }
+        if (pluginIds.isEmpty()) {
+            return content;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("<#-- 能力门控：依赖插件 ").append(String.join(", ", pluginIds))
+                .append("，卸载时本区块自动隐藏 -->\n");
+        for (String pluginId : pluginIds) {
+            sb.append("<@hasPlugin pluginId=\"").append(pluginId).append("\">\n<#if data>\n");
+        }
+        sb.append(content);
+        List<String> reversed = new ArrayList<>(pluginIds);
+        java.util.Collections.reverse(reversed);
+        for (String ignored : reversed) {
+            sb.append("\n</#if>\n</@hasPlugin>\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 内容指纹（文件名去重用）：SHA-256 前 8 位十六进制
+     */
+    private static String shortHash(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 4);
+        } catch (Exception e) {
+            // SHA-256 为 JVM 必备算法，不会走到这里；兜底用 hashCode 保证文件名仍唯一
+            return Integer.toHexString(input.hashCode());
+        }
     }
 
     /**
@@ -465,8 +710,10 @@ public class PageSpecRenderer {
         StringBuilder sb = new StringBuilder();
         sb.append("<#assign comp = ").append(toFtlLiteral(adaptMediaRefs(section))).append(">\n");
         sb.append("<#assign _aiSection = ").append(toFtlLiteral(section.id())).append(">\n");
+        // custom-html section 引用物化专属文件（见 writeComponentFile），普通组件引用共享源码
+        String fileName = section.isCustomHtml() ? customHtmlFileName(section) : componentFileName(section);
         sb.append("<#include \"").append(COMPONENTS_DIR).append("/")
-                .append(componentFileName(section)).append("\">\n");
+                .append(fileName).append("\">\n");
         return sb.toString();
     }
 

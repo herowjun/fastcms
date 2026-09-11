@@ -101,6 +101,19 @@
 						v-if="state.chatting && msgIndex === state.messages.length - 1 && !msg.reasoning"
 						class="typing-cursor"
 					>▌</span></pre>
+					<!-- AI 消息底部元信息条：hover 浮出（token 消耗 + 复制按钮） -->
+					<div v-if="msg.role === 'assistant'" class="message-meta">
+						<span v-if="msg.totalTokens > 0 || msg.promptTokens > 0 || msg.completionTokens > 0"
+							class="meta-tokens"
+							:title="`输入 ${msg.promptTokens ?? 0} tokens + 输出 ${msg.completionTokens ?? 0} tokens。\n输入包含系统提示词、对话历史及注入的模板文件内容（并非只有你输入的那句话），故数值通常远大于输出；输出为 AI 本轮生成的回复。跨轮次聚合：含思考与工具调用轮`">
+							<el-icon><ele-Coin /></el-icon>
+							token {{ formatTokenCount(msg.totalTokens || ((msg.promptTokens || 0) + (msg.completionTokens || 0))) }}
+							（输入 {{ formatTokenCount(msg.promptTokens || 0) }} / 输出 {{ formatTokenCount(msg.completionTokens || 0) }}）
+						</span>
+						<span class="meta-copy" title="复制本条回复内容" @click="copyMessage(msg)">
+							<el-icon><ele-CopyDocument /></el-icon>复制
+						</span>
+					</div>
 				</div>
 			</div>
 			<el-empty v-if="!state.loading && state.messages.length === 0"
@@ -139,6 +152,11 @@
 						: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计'))"
 				:disabled="state.chatting || isApplied"
 			/>
+			<!-- 全量注入开启时常驻警示（输入框正下方，随开关显隐，不用弹出框） -->
+			<div v-if="mode === 'adjust' && state.fullInject" class="full-inject-tip">
+				<el-icon><ele-WarningFilled /></el-icon>
+				<span>全量注入已开启：每轮对话会把全部模板文件提交给 AI，token 消耗大幅增加、耗时明显变长，建议仅在 AI 自动检索效果不佳时使用，问题解决后及时关闭</span>
+			</div>
 			<div class="chat-actions">
 				<!-- 点选工具（换图/选区）：与发送按钮同排靠左；模式开关与预览 iframe 钩子注入由父组件处理 -->
 				<div v-if="pickToolsVisible" class="chat-tools">
@@ -152,6 +170,15 @@
 					@click="emit('toggle-section-select')">
 					<el-icon><ele-Position /></el-icon>{{ sectionSelectMode ? '退出选区模式' : '选区' }}
 				</el-button>
+				<!-- 全量注入开关（仅调整型会话）：默认关闭走聚焦注入（AI 按需检索，省 token）；
+				     开启后每轮把全部模板文件提交给 AI（旧全量行为），token 消耗与耗时大幅增加 -->
+				<div v-if="mode === 'adjust'" class="full-inject-toggle"
+					:title="state.fullInject
+						? '已开启全量注入：每轮对话把全部模板文件提交给 AI，token 消耗大、耗时长，建议问题解决后关闭'
+						: '默认 AI 按需检索：只注入当前页面的依赖文件，AI 需要时自行查看其他文件（省 token、更快）。若 AI 找不到相关文件可开启全量注入'">
+					<el-switch v-model="state.fullInject" size="small" :disabled="state.chatting" @change="onFullInjectChange" />
+					<span class="full-inject-label">全量注入</span>
+				</div>
 				</div>
 				<div class="chat-send">
 					<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
@@ -253,6 +280,8 @@ const emit = defineEmits<{
 	(e: 'files-changed'): void;
 	/** AI 每写完一个文件的实时通知（SSE file 事件，父组件用于刷新实时预览） */
 	(e: 'file-written', path: string): void;
+	/** AI 页面自动切换（SSE switch-file 事件，调整对话流式期间识别到目标 HTML 即推送，父组件切换实时预览页面） */
+	(e: 'switch-file', path: string): void;
 	/** 生成型会话应用模板成功（templateId：应用后的正式模板 ID，父组件据此无缝切换编辑目标） */
 	(e: 'applied', templateId: string): void;
 	/** 进入会话编辑模式（父组件把文件树/编辑器/预览切到会话工作目录） */
@@ -288,6 +317,23 @@ const isFailed = computed(() => {
 /** 单条消息是否为失败消息（红色样式渲染） */
 const isFailMessage = (msg: any) => {
 	return msg?.role === 'assistant' && String(msg.content || '').startsWith(FAIL_MSG_PREFIX);
+};
+
+/** token 数量格式化：原样输出完整数字，不用 w 等缩写 */
+const formatTokenCount = (n: any): string => {
+	return String(Number(n) || 0);
+};
+
+/** 复制 AI 回复内容（所见即所得：复制清洗后的正文，非原始 JSON） */
+const copyMessage = async (msg: any) => {
+	const text = String(msg?.content || '');
+	if (!text) return;
+	try {
+		await navigator.clipboard.writeText(text);
+		ElMessage.success('已复制回复内容');
+	} catch {
+		ElMessage.error('复制失败，请手动选择文本复制');
+	}
 };
 
 /**
@@ -357,12 +403,20 @@ const state = reactive({
 	pendingDeepRefresh: false,
 	// 本轮 chat 请求是否为全量焕新（配合 deepRefresh：跳过 AI 范围评估，全部计划文件重做）
 	pendingFullRefresh: false,
+	// 全量注入开关（调整型会话）：默认 false 走聚焦注入（AI 按需检索），true 时全部模板文件注入提示词。
+	// localStorage 持久化（跨会话记忆），发送消息时随请求体传给后端
+	fullInject: Local.get('ai-template-full-inject') === true,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
 
 /** 点选工具（换图/选区）可见：仅预览列存在的模式（adjust / 会话编辑视图）下才有可点选的预览页 */
 const pickToolsVisible = computed(() => props.mode === 'adjust' || !!props.sessionActive);
+
+/** 全量注入开关切换：持久化；开启时的警示常驻输入框下方提示行（不走弹出框） */
+const onFullInjectChange = (val: any) => {
+	Local.set('ai-template-full-inject', val === true);
+};
 
 /** 点选工具禁用：对话进行中（避免与 AI 写盘冲突）/ 已应用会话（仅回看）/ 无会话 */
 const pickDisabled = computed(() => state.chatting || isApplied.value || !props.session?.sessionId);
@@ -567,7 +621,51 @@ const onSend = async () => {
 	});
 	const assistantIndex = state.messages.length - 1;
 
+	// ===== 流式渲染节流 =====
+	// SSE chunk 高频到达（推理模型长思考期间每秒可达上百个），若每个 chunk 都把
+	// 全量 reasoning/content 写入响应式状态，会触发 renderReasoning 全量重算 +
+	// v-html 整棵 DOM 子树销毁重建，分配速率远超 GC 回收（实测长思考轮次
+	// Chrome 内存飙升 4GB+ 直至回复结束）。双管齐下：
+	// - 攒批降频：STREAM_FLUSH_MS 内的增量合并为一次渲染
+	// - 渲染窗口：流式期间 reasoning 仅渲染尾部窗口（思考面板滚动本就跟随尾部），
+	//   单次渲染成本恒定；结束（done/error/停止/异常）时 flushStream 全量展示
+	const STREAM_FLUSH_MS = 150;
+	const REASONING_RENDER_WINDOW = 6000;
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastFlushAt = 0;
+
+	const applyStream = (full: boolean) => {
+		const msg = state.messages[assistantIndex];
+		if (!msg) return;
+		msg.content = assistantContent;
+		msg.reasoning = !full && reasoningContent.length > REASONING_RENDER_WINDOW
+			? '…（思考过长，流式期间仅显示尾部，完成后可查看全文）\n' + reasoningContent.slice(-REASONING_RENDER_WINDOW)
+			: reasoningContent;
+		scrollToBottom();
+	};
+
+	const scheduleFlush = () => {
+		if (flushTimer !== null) return;
+		const wait = Math.max(0, STREAM_FLUSH_MS - (Date.now() - lastFlushAt));
+		flushTimer = setTimeout(() => {
+			flushTimer = null;
+			lastFlushAt = Date.now();
+			applyStream(false);
+		}, wait);
+	};
+
+	const flushStream = () => {
+		if (flushTimer !== null) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		lastFlushAt = 0;
+		applyStream(true);
+	};
+
 	const finish = () => {
+		// 结束路径统一收口：清掉挂起的节流定时器并把完整内容一次落库展示
+		flushStream();
 		state.abortController = null;
 		state.chatting = false;
 		state.statusText = '';
@@ -652,7 +750,8 @@ const onSend = async () => {
 				focusElementHint: props.focusElementHint || '',
 			styleUpgrade,
 			deepRefresh,
-			fullRefresh
+			fullRefresh,
+			fullInject: state.fullInject === true
 		}),
 		signal: controller.signal
 	});
@@ -706,13 +805,12 @@ const onSend = async () => {
 			switch (currentEvent) {
 				case 'message':
 					assistantContent += data;
-					state.messages[assistantIndex].content = assistantContent;
-					scrollToBottom();
+					// 节流渲染：不直接写响应式状态（每 chunk 全量重渲会打爆内存），攒批 150ms
+					scheduleFlush();
 					break;
 				case 'reasoning':
 					reasoningContent += data;
-					state.messages[assistantIndex].reasoning = reasoningContent;
-					scrollToBottom();
+					scheduleFlush();
 					break;
 				case 'file':
 					// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
@@ -725,6 +823,18 @@ const onSend = async () => {
 						}
 					} catch (err) {
 						/* 忽略格式异常的 file 事件 */
+					}
+					break;
+				case 'switch-file':
+					// 调整/升级对话流式期间，后端识别到 AI 正在处理的首个可路由 HTML 即推送：
+					// 通知父组件把实时预览切到该页面（先看旧版本，写盘后经 file 事件刷新重载新内容）
+					try {
+						const info = JSON.parse(data);
+						if (info.path) {
+							emit('switch-file', info.path);
+						}
+					} catch (err) {
+						/* 忽略格式异常的 switch-file 事件 */
 					}
 					break;
 			case 'progress':
@@ -740,12 +850,23 @@ const onSend = async () => {
 				}
 				break;
 			case 'status':
-				// 阶段性状态提示（如 reply 已流完、files 内容仍在传输），
-				// 显示在输入区上方状态行，消除"回复已结束却长时间转圈"的假死观感
-				if (data) {
-					state.statusText = data;
-				}
-				break;
+					// 阶段性状态提示（如 reply 已流完、files 内容仍在传输），
+					// 显示在输入区上方状态行，消除"回复已结束却长时间转圈"的假死观感
+					if (data) {
+						state.statusText = data;
+					}
+					break;
+				case 'usage':
+					// 本轮 token 用量（done 之后到达）：挂到本条 assistant 消息，hover 底部展示
+					try {
+						const u = JSON.parse(data);
+						state.messages[assistantIndex].promptTokens = u.promptTokens ?? 0;
+						state.messages[assistantIndex].completionTokens = u.completionTokens ?? 0;
+						state.messages[assistantIndex].totalTokens = u.totalTokens ?? 0;
+					} catch (err) {
+						/* 忽略格式异常的 usage 事件 */
+					}
+					break;
 				case 'done':
 					handleDone({ data });
 					break;
@@ -1207,6 +1328,45 @@ const breakSentences = (s: string): string =>
 		}
 	}
 
+	// AI 消息底部元信息条（token 消耗 + 复制按钮）：hover 该条消息时浮出
+	.message-meta {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-top: 6px;
+		font-size: 12px;
+		color: var(--el-text-color-secondary);
+		opacity: 0;
+		transition: opacity 0.15s ease;
+		user-select: none;
+
+		.meta-tokens {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+		}
+
+		.meta-copy {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+			margin-left: auto;
+			cursor: pointer;
+			color: var(--el-text-color-secondary);
+			transition: color 0.15s ease;
+
+			&:hover {
+				color: var(--el-color-primary);
+			}
+		}
+	}
+
+	// hover 规则必须用 & 引用父级 .chat-message：直接写 .chat-message:hover 会被 SCSS
+	// 拼接成 ".chat-message .chat-message:hover .message-meta"（永不匹配，元信息条永远不显示）
+	&:hover .message-meta {
+		opacity: 1;
+	}
+
 	// 生成过程中的阶段性状态条（输入框上方：正在接收文件内容等）
 	.status-bar {
 		display: flex;
@@ -1351,6 +1511,19 @@ const breakSentences = (s: string): string =>
 		border-radius: 4px;
 	}
 
+	// 全量注入开启时常驻警示（输入框正下方，警示色与点选提示的引导色区分）
+	.full-inject-tip {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 6px;
+		padding: 4px 8px;
+		font-size: 12px;
+		color: var(--el-color-warning);
+		background: var(--el-color-warning-light-9);
+		border-radius: 4px;
+	}
+
 	.chat-actions {
 		margin-top: 8px;
 		display: flex;
@@ -1360,6 +1533,24 @@ const breakSentences = (s: string): string =>
 			display: flex;
 			align-items: center;
 			gap: 8px;
+		}
+
+		// 全量注入开关（选区按钮右侧）：开关 + 标签，warning 色提示"昂贵模式"
+		.full-inject-toggle {
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			cursor: default;
+
+			.full-inject-label {
+				font-size: 12px;
+				color: #909399;
+				user-select: none;
+			}
+
+			&:has(.el-switch.is-checked) .full-inject-label {
+				color: #e6a23c;
+			}
 		}
 
 		// 工具按钮不存在时也保持发送按钮靠右

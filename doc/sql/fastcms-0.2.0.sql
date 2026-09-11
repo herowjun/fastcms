@@ -3,6 +3,30 @@
 -- MySQL 5.7 has no ADD COLUMN IF NOT EXISTS; verify the column does not exist before running
 -- ----------------------------
 
+-- ----------------------------
+-- 一键安装向导：安装锁表 + 默认账号首次登录强制改密
+-- ----------------------------
+
+-- 安装锁：存在记录即视为已完成安装（阻止重复安装/重放安装接口）
+CREATE TABLE fastcms_install (
+  id bigint NOT NULL AUTO_INCREMENT,
+  install_time datetime DEFAULT NULL COMMENT '安装完成时间（安装向导执行时更新）',
+  version varchar(32) DEFAULT NULL COMMENT '安装时的系统版本',
+  created datetime DEFAULT NULL,
+  updated datetime DEFAULT NULL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统安装锁：存在记录即视为已完成安装，阻止重复安装与重放安装接口';
+
+-- 已有环境视同已安装，写入锁记录（幂等）
+INSERT INTO fastcms_install (id, install_time, version, created, updated)
+SELECT 1, NOW(), '0.2.0', NOW(), NOW() FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM fastcms_install WHERE id = 1);
+
+-- 默认账号首次登录须强制修改密码（默认密码公开于README，不强制不安全）
+ALTER TABLE `user` ADD COLUMN must_change_pwd tinyint(1) DEFAULT '0' COMMENT '是否必须修改密码：1=首次登录须强制设置新密码，0=正常' AFTER login_time;
+
+UPDATE `user` SET must_change_pwd = 1 WHERE id = 1;
+
 -- api_key nullable + comment (column itself is already nullable, keep comment in sync)
 ALTER TABLE ai_model_config MODIFY COLUMN api_key varchar(255) DEFAULT NULL COMMENT 'API Key (nullable for local providers such as Ollama)';
 
@@ -133,3 +157,10 @@ ALTER TABLE menu ADD COLUMN exclude_template_ids varchar(500) DEFAULT NULL COMME
 
 -- global menus may be excluded from specific sites (comma-separated site keys: domain or path)
 ALTER TABLE menu ADD COLUMN exclude_site_keys varchar(1000) DEFAULT NULL COMMENT '排除显示的站点key列表（域名或路径），逗号分隔（仅全局菜单生效）' AFTER exclude_template_ids;
+
+-- ----------------------------
+-- AI 对话消息 token 用量（每轮 assistant 消息回写，前端 hover 展示；跨轮次聚合，含思考/工具调用轮）
+-- ----------------------------
+ALTER TABLE ai_template_message ADD COLUMN prompt_tokens int DEFAULT NULL COMMENT '本轮输入token（仅assistant，跨轮次聚合）' AFTER reasoning;
+ALTER TABLE ai_template_message ADD COLUMN completion_tokens int DEFAULT NULL COMMENT '本轮输出token（仅assistant）' AFTER prompt_tokens;
+ALTER TABLE ai_template_message ADD COLUMN total_tokens int DEFAULT NULL COMMENT '本轮总token（仅assistant）' AFTER completion_tokens;

@@ -348,7 +348,9 @@ public class TemplateGenPromptBuilder {
      * @param focusComponentFile     选区对应的组件源码文件名（_components/ 下；focusSectionId 非空时非空）
      */
     public String buildAdjustPrompt(String requirement, String currentFilesWithContent, String currentFile,
-                                    String focusSectionId, String focusElementHint, String focusComponentFile) {
+                                    String focusSectionId, String focusElementHint, String focusComponentFile,
+                                    String siteManifest) {
+        boolean focused = siteManifest != null && !siteManifest.isBlank();
         String focusSectionBlock = (focusSectionId == null || focusSectionId.isBlank()) ? ""
                 : "## 用户选中的区块（本轮修改目标）\n\n"
                 + "用户在预览页点选了区块 `" + focusSectionId + "`"
@@ -364,6 +366,24 @@ public class TemplateGenPromptBuilder {
                 : "## 用户当前正在查看的页面\n\n"
                 + "用户当前正在编辑/预览 `" + currentFile + "`，未明确指定其他页面时请优先调整该页面。\n\n"
                 + "注意：页面渲染依赖公共布局文件（如 _layout.html），若调整需求涉及公共部分（导航、页脚等），应修改布局文件而非每个页面。\n\n";
+        // 聚焦注入模式：L1 全站文件清单 + L2 工具使用指引（全量注入模式无此两段——
+        // 全部文件已注入，无按需检索的必要）
+        String manifestSection = !focused ? "" :
+                "## 全站文件清单（按需查看，未全部注入）\n\n"
+                + "上方注入的仅是当前页面的直接依赖。全站文本文件清单如下"
+                + "（括号内为粗估 tokens，未注入完整内容的文件可按需查看）：\n\n"
+                + siteManifest + "\n\n";
+        String toolGuideSection = !focused ? "" :
+                "## 文件查看与搜索工具（按需调用）\n\n"
+                + "- read_template_file(path)：读取清单中任意文本文件的完整内容。"
+                + "修改未注入或被截断的文件前，必须先调用它查看现有内容，禁止凭空臆造\n"
+                + "- search_template_files(keyword)：全站搜索关键词（返回 文件:行号: 内容）。"
+                + "实现新功能前先搜索站内是否已有同类实现（如其他页面的支付/下载/轮播），"
+                + "有则参考其写法保持一致\n"
+                + "- 集成支付、下载等插件能力时，接口契约必须用 get_capability_detail 工具获取，"
+                + "禁止凭记忆编造接口路径与字段\n"
+                + "- 修改范围判断：公共部分（导航/页脚/全局样式）通常在 _layout.html 中，改一处即全站生效，"
+                + "不要逐页重复修改；跨页面需求先查看目标页面再改\n\n";
         return "请基于当前正式模板的文件内容进行调整，调整结果将直接写入正式模板。\n\n"
                 + "## 调整需求\n\n" + requirement + "\n\n"
                 + focusSectionBlock
@@ -376,14 +396,21 @@ public class TemplateGenPromptBuilder {
                 + "- 目录中没有该文件：按系统规范新建，menus 等字段填入调整后的完整内容（action=create）\n"
                 + "- 严禁在模板 HTML 中加入菜单名过滤、内容判断等写死逻辑"
                 + "（如 <#if item.menuName?contains('XX')>），模板必须保持数据驱动\n\n"
-                + "## 当前模板文件（相对路径 + 完整内容）\n\n" + currentFilesWithContent + "\n\n"
+                + "## " + (focused ? "当前页面及其依赖文件" : "当前模板文件") + "（相对路径 + 完整内容）\n\n"
+                + currentFilesWithContent + "\n\n"
+                + manifestSection
+                + toolGuideSection
                 + "## 输出要求\n\n"
                 + "1. files 数组中仅输出需要修改或新增的文件，未提及的文件保持不变\n"
                 + "2. action 字段：新增文件用 create，修改文件用 modify，删除文件用 delete\n"
-                + "3. 修改文件时必须基于上述文件内容输出修改后的完整内容，不要凭空臆造原有内容\n"
+                + "3. 修改文件时必须基于上述文件内容输出修改后的完整内容，不要凭空臆造原有内容"
+                + (focused ? "（未注入的文件先用 read_template_file 查看）" : "") + "\n"
                 + "4. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次调整内容，files 字段为变更文件数组）\n"
-                + "5. 请全程使用中文思考和回复\n"
-                + "6. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
+                + "5. 若用户要求切换/查看某个页面（如「切换到首页」「看下文章详情页」）而无需修改文件，"
+                + "在 JSON 顶层额外输出 \"switchTo\": \"目标页面文件路径\"（取自上方文件清单中的可路由 HTML，"
+                + "如 index.html、article.html、page_about.html），系统会把预览切到该页面；修改文件的轮次无需该字段\n"
+                + "6. 请全程使用中文思考和回复\n"
+                + "7. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
     }
 
     /**

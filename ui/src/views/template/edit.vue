@@ -209,7 +209,8 @@
                                  :session-active="state.sessionView"
                                  :image-pick-mode="state.imagePickMode" :section-select-mode="state.sectionSelectMode"
                                  @select-session="onSelectAiSession" @new-session="onNewAiSession"
-                                 @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @applied="onAiTemplateApplied"
+                                 @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @switch-file="onAiSwitchFile"
+                                 @applied="onAiTemplateApplied"
                                  @edit-files="onEditSessionFiles"
                                  @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
                     </div>
@@ -1166,6 +1167,22 @@ const onAiFileWritten = (_path: string) => {
         return;
     }
     state.aiPreviewKey = Date.now();
+};
+
+/**
+ * AI 页面自动切换（SSE switch-file 事件）：调整对话中用户说"改首页某某问题"，
+ * 后端在流式期间识别到 AI 正在处理的首个可路由 HTML 即推送该事件，
+ * 实时预览立即切到目标页面（旧版本先行展示，文件写盘后经预览键自动重载新内容）
+ *
+ * 后端推送的是模板内相对路径（如 index.html），主编辑界面的预览选项含模板目录前缀
+ * （如 my-company/index.html），按后缀匹配到实际选项再切换，与下拉框保持一致
+ */
+const onAiSwitchFile = (path: string) => {
+    if (!isRoutableHtml(path)) return;
+    const target = previewPageOptions.value.find((p: string) => p === path || p.endsWith('/' + path));
+    if (target && target !== state.aiPreviewEntry) {
+        state.aiPreviewEntry = target;
+    }
 };
 
 /**

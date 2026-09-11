@@ -16,6 +16,10 @@
  */
 package com.fastcms.ai.component;
 
+import com.fastcms.ai.capability.CapabilityDescriptor;
+import com.fastcms.ai.capability.CapabilitySnippet;
+import com.fastcms.ai.capability.PluginCapabilityRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -50,8 +54,19 @@ public class PageSpecValidator {
 
     private final ComponentRegistry registry;
 
+    /**
+     * 插件能力注册中心（custom-html 能力集成校验用；测试环境无能力时可注入 null）
+     */
+    private final PluginCapabilityRegistry capabilityRegistry;
+
     public PageSpecValidator(ComponentRegistry registry) {
+        this(registry, null);
+    }
+
+    @Autowired
+    public PageSpecValidator(ComponentRegistry registry, PluginCapabilityRegistry capabilityRegistry) {
         this.registry = registry;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     /**
@@ -280,6 +295,83 @@ private void validateTheme(PageSpec spec, List<String> errors) {
         }
 
         validateSlots(location, fullId, descriptor, section, errors);
+
+        // custom-html 能力集成校验（snippetId / data.html 互斥、能力与 snippet 存在性、参数完整性）
+        if (section.isCustomHtml()) {
+            validateCapabilitySection(location, section, errors);
+        }
+    }
+
+    /**
+     * custom-html section 的能力集成校验（1.3）
+     *
+     * <p>错误信息必须可行动（回喂 AI 自我修正）：指出位置 + 正确用法。</p>
+     */
+    private void validateCapabilitySection(String location, SectionSpec section, List<String> errors) {
+        if (section.id() == null || section.id().isBlank()) {
+            errors.add(location + " custom-html section 必须有非空 id（snippet 的 SECTION_ID 参数、"
+                    + "渲染期物化文件名与预览点选定位都依赖它）");
+            return;
+        }
+        String snippetId = section.snippetId();
+        String html = section.safeData().get("html") instanceof String s ? s : null;
+        boolean hasSnippet = snippetId != null && !snippetId.isBlank();
+        boolean hasHtml = html != null && !html.isBlank();
+
+        if (hasSnippet == hasHtml) {
+            errors.add(location + " custom-html 必须二选一：引用官方 snippet（snippetId + snippetParams，"
+                    + "推荐）或手写逃生舱（data.html），两者互斥且不能同时为空");
+            return;
+        }
+
+        // capability 字段校验：引用的能力必须已注册
+        for (String capabilityId : section.safeCapability()) {
+            if (capabilityRegistry != null && capabilityRegistry.find(capabilityId).isEmpty()) {
+                errors.add(location + " 引用的能力未注册: " + capabilityId
+                        + "（对应插件未安装，或能力 id 拼写错误；可用能力见 system prompt 的能力清单）");
+            }
+        }
+
+        if (!hasSnippet) {
+            return;
+        }
+        // snippet 存在性 + 归属能力 + 参数完整性
+        CapabilitySnippet snippet = findSnippet(snippetId);
+        if (snippet == null) {
+            errors.add(location + " snippetId 不存在: " + snippetId
+                    + "（可用 snippet 见 get_capability_detail 返回的官方 snippet 清单）");
+            return;
+        }
+        List<String> missing = new ArrayList<>();
+        for (String param : snippet.safeParams()) {
+            if ("SECTION_ID".equals(param)) {
+                continue; // 系统自动注入
+            }
+            Object value = section.safeSnippetParams().get(param);
+            if (value == null || (value instanceof String sv && sv.isBlank())) {
+                missing.add(param);
+            }
+        }
+        if (!missing.isEmpty()) {
+            errors.add(location + " snippet " + snippetId + " 缺少参数: " + String.join(", ", missing));
+        }
+    }
+
+    /**
+     * 按 snippetId 全局查找（能力声明内唯一，全局遍历命中第一个）
+     */
+    private CapabilitySnippet findSnippet(String snippetId) {
+        if (capabilityRegistry == null) {
+            return null;
+        }
+        for (PluginCapabilityRegistry.RegisteredCapability rc : capabilityRegistry.listCapabilities()) {
+            for (CapabilitySnippet snippet : rc.descriptor().safeSnippets()) {
+                if (snippet.id().equals(snippetId)) {
+                    return snippet;
+                }
+            }
+        }
+        return null;
     }
 
     private void validateSlots(String location, String fullId, ComponentDescriptor descriptor,

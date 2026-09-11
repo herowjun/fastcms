@@ -78,6 +78,17 @@ public class FastcmsAiProperties {
     private boolean auditEnabled = true;
 
     /**
+     * 模板调整轮的文件注入模式：
+     * <ul>
+     *     <li>focus（默认）：聚焦注入——当前页依赖闭包（L0）+ 全站文件清单（L1）常驻，
+     *     其余文件由模型通过 read_template_file / search_template_files 工具按需查看（L2）</li>
+     *     <li>full：全量注入（旧行为）——预算内注入全部模板文件，无按需工具</li>
+     * </ul>
+     * 聚焦模式 prefill 从 ~60k tokens 降到 ~15k；模型不支持工具调用时可切回 full。
+     */
+    private String adjustInjectMode = "focus";
+
+    /**
      * API Key 加密主密钥（用于 ai_model_config 表 api_key 字段的 AES-GCM 加密）。
      * <p>为空时自动生成随机密钥并保存到 ~/fastcms/ai-api-key.secret；
      * 多实例部署需各实例配置相同值（SHA-256 派生密钥），否则已加密的 API Key 无法跨实例解密。</p>
@@ -138,6 +149,14 @@ public class FastcmsAiProperties {
 
     public void setApiKeySecret(String apiKeySecret) {
         this.apiKeySecret = apiKeySecret;
+    }
+
+    public String getAdjustInjectMode() {
+        return adjustInjectMode;
+    }
+
+    public void setAdjustInjectMode(String adjustInjectMode) {
+        this.adjustInjectMode = adjustInjectMode;
     }
 
 }

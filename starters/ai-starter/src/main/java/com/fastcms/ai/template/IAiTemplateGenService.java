@@ -109,11 +109,13 @@ public interface IAiTemplateGenService {
      *                    需存在升级计划；未开始升级的模板等同首次升级；默认智能焕新——
      *                    AI 规划调用判定最小重做范围）
      * @param fullRefresh 全量焕新标志（配合 deepRefresh：跳过范围评估，全部计划文件重做）
+     * @param fullInject 全量注入标志（调整型会话：true 时预算内全部模板文件注入提示词，
+     *                   不挂按需检索工具；默认 false 走聚焦注入）
      * @param emitter   SSE emitter
      */
     void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
                     String focusElementHint, boolean styleUpgrade, boolean deepRefresh,
-                    boolean fullRefresh, SseEmitter emitter);
+                    boolean fullRefresh, boolean fullInject, SseEmitter emitter);
 
     /**
      * 将会话工作目录的模板文件应用到 fastcms 正式模板目录
