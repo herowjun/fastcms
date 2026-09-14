@@ -79,6 +79,20 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private Boolean fullInject;
 
+    /**
+     * 用户焕新意见（可空；配合 deepRefresh）：对当前样式的具体不满
+     * （如「配色太暗，卡片太密」），AI 焕新时作为定向修正目标注入提示词；
+     * 命中关键词（暗/密/素/乱等）时设计方向优先按反馈定向而非轮换。
+     */
+    private String feedback;
+
+    /**
+     * 设计稿模式确认动作（可空；仅 design 会话生效，管线会话忽略）：
+     * APPROVE（审计通过稿放行转化）/ REJECT（附 input 作为修改意见重出设计稿）。
+     * 见 doc/wiki/ai-template-two-mode-design.md §6.2。
+     */
+    private String confirmAction;
+
     public String getInput() {
         return input;
     }
@@ -141,6 +155,22 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setFullInject(Boolean fullInject) {
         this.fullInject = fullInject;
+    }
+
+    public String getFeedback() {
+        return feedback;
+    }
+
+    public void setFeedback(String feedback) {
+        this.feedback = feedback;
+    }
+
+    public String getConfirmAction() {
+        return confirmAction;
+    }
+
+    public void setConfirmAction(String confirmAction) {
+        this.confirmAction = confirmAction;
     }
 
 }

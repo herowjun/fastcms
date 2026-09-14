@@ -58,6 +58,11 @@ public class AiUsageLog implements Serializable {
     private String sessionId;
 
     /**
+     * 归属智能体ID（builtin.* 或 custom-*；未走智能体的调用为空）
+     */
+    private String agentId;
+
+    /**
      * 使用的模型名
      */
     private String model;
@@ -97,6 +102,9 @@ public class AiUsageLog implements Serializable {
 
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public String getAgentId() { return agentId; }
+    public void setAgentId(String agentId) { this.agentId = agentId; }
 
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }

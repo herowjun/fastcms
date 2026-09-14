@@ -43,6 +43,8 @@ public interface IAiUsageLogService extends IService<AiUsageLog> {
         String TEMPLATE_GEN = "TEMPLATE_GEN";
         /** 模板调整（编辑页 AI 调整正式模板） */
         String TEMPLATE_ADJUST = "TEMPLATE_ADJUST";
+        /** 模板生成·设计稿先行模式（design：设计段 + 审计修正 + 转化段统一记此场景） */
+        String TEMPLATE_DESIGN = "TEMPLATE_DESIGN";
         /** 文章全文生成 */
         String ARTICLE_GEN = "ARTICLE_GEN";
         /** 文章划词改写/扩写/润色 */
@@ -62,6 +64,20 @@ public interface IAiUsageLogService extends IService<AiUsageLog> {
      * @return 已消耗 token 数，无记录返回 0
      */
     long getTodayUsedTokens(Long userId);
+
+    /**
+     * 查询某智能体当日（自然日，全体用户合计）已消耗的总 token 数（智能体级配额检查用）
+     *
+     * @return 已消耗 token 数，无记录返回 0
+     */
+    long getTodayUsedTokensByAgent(String agentId);
+
+    /**
+     * 按智能体聚合当日（自然日，全体用户合计）已消耗 token（智能体列表用量展示用）
+     *
+     * @return agentId → 当日消耗 token；无任何记录返回空 Map
+     */
+    Map<String, Long> getTodayAgentUsage();
 
     /**
      * 管理端统计：按场景聚合指定时间段的调用次数与 token 消耗

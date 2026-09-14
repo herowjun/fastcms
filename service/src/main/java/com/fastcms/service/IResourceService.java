@@ -112,6 +112,11 @@ public interface IResourceService extends IService<Resource> {
 		String RESOURCE_NAME_AI_TEMPLATE_ROLLBACK = "fastcms.resource.name.ai.template.rollback";
 		String RESOURCE_NAME_AI_TEMPLATE_FILE_EDIT = "fastcms.resource.name.ai.template.fileEdit";
 
+		// AI 智能体（多智能体架构管理）
+		String RESOURCE_NAME_AI_AGENT_LIST = "fastcms.resource.name.ai.agent.list";
+		String RESOURCE_NAME_AI_AGENT_SAVE = "fastcms.resource.name.ai.agent.save";
+		String RESOURCE_NAME_AI_AGENT_DELETE = "fastcms.resource.name.ai.agent.delete";
+
 		String RESOURCE_NAME_RESOURCE_LIST = "fastcms.resource.name.resource.list";
 		String RESOURCE_NAME_RESOURCE_SYNC = "fastcms.resource.name.resource.sync";
 

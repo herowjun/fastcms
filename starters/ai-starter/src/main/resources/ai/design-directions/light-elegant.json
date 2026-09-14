@@ -1,0 +1,26 @@
+{
+  "key": "light-elegant",
+  "name": "轻盈优雅风",
+  "summary": "更多留白与呼吸感——浅色背景、柔和阴影、细边框、大圆角卡片、克制的主色点缀与细腻的 hover 微交互，整体精致轻快",
+  "tokensOverride": {
+    "primaryColor": "#0d9488",
+    "stylePreset": "warm"
+  },
+  "referenceBlocks": [
+    "<section class=\"bg-gradient-to-b from-primary-50 to-white py-24 md:py-32\">\n  <div class=\"max-w-6xl mx-auto px-4 text-center\">\n    <p class=\"text-primary-600 text-sm font-semibold tracking-widest mb-5\">轻 · 优雅 · 呼吸感</p>\n    <h1 class=\"text-slate-900 text-4xl md:text-5xl font-bold leading-tight mb-6\">轻盈通透的主标题<br/>柔和而有质感</h1>\n    <p class=\"text-slate-500 text-lg mb-10 max-w-2xl mx-auto\">副标题一到两行，语气温和克制，说明核心价值主张。</p>\n    <div class=\"flex items-center justify-center gap-4\">\n      <a href=\"#\" class=\"bg-primary-600 text-white font-medium px-8 py-3 rounded-full shadow-sm hover:shadow-md hover:bg-primary-700 transition\">主要行动按钮</a>\n      <a href=\"#\" class=\"text-slate-600 border border-slate-200 px-8 py-3 rounded-full hover:border-primary-300 hover:text-primary-600 transition\">次要按钮</a>\n    </div>\n  </div>\n</section>",
+    "<section class=\"py-20 md:py-24\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <div class=\"text-center mb-14\">\n      <h2 class=\"text-2xl md:text-3xl font-bold text-slate-900\">分区标题</h2>\n      <p class=\"text-slate-400 mt-3 text-sm\">分区副标题，保持轻盈的说明语气</p>\n    </div>\n    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-8\">\n      <div class=\"bg-white rounded-2xl border border-slate-100 shadow-sm p-8 hover:shadow-md transition\">\n        <div class=\"w-11 h-11 bg-primary-50 rounded-full flex items-center justify-center mb-5\"><span class=\"text-primary-600 font-semibold\">01</span></div>\n        <h3 class=\"text-base font-semibold text-slate-900 mb-2\">卡片标题</h3>\n        <p class=\"text-slate-500 text-sm leading-relaxed\">卡片说明两到三行，间距宽松、行高舒适。</p>\n      </div>\n    </div>\n  </div>\n</section>"
+  ],
+  "do": [
+    "浅色 hero 区（白底或 from-primary-50 to-white 柔和渐变）",
+    "大圆角卡片（rounded-2xl）+ 柔和阴影（shadow-sm hover:shadow-md）",
+    "细边框（border-slate-100/200）而非重描边",
+    "胶囊按钮（rounded-full）与克制的主色点缀",
+    "宽松留白（py-20~py-32、gap-8）与轻量图标容器（rounded-full 小圆底）"
+  ],
+  "dont": [
+    "深色大面积区块与重渐变",
+    "生硬直角（rounded-none/rounded-sm 当主形态）",
+    "小字号密集排版",
+    "强对比撞色与大号加粗徽章堆叠"
+  ]
+}

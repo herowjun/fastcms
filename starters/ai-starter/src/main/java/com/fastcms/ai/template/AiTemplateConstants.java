@@ -16,6 +16,8 @@
  */
 package com.fastcms.ai.template;
 
+import com.fastcms.entity.AiTemplateSession;
+
 /**
  * AI 模板生成相关常量
  *
@@ -28,6 +30,43 @@ public final class AiTemplateConstants {
 
     private AiTemplateConstants() {
     }
+
+    /**
+     * 会话创建模式（见 doc/wiki/ai-template-two-mode-design.md §2.2、html-import-to-template-design.md §1）
+     *
+     * <ul>
+     *     <li>pipeline（默认）：组件管线模式——PageSpec → 组件渲染，既有行为</li>
+     *     <li>design：设计稿先行模式——AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板</li>
+     *     <li>import：HTML 导入模式——上传既有 HTML/zip 站包，ingest 归一化（零 AI）后复用转化段</li>
+     * </ul>
+     */
+    public static final String CREATE_MODE_PIPELINE = "pipeline";
+    public static final String CREATE_MODE_DESIGN = "design";
+    public static final String CREATE_MODE_IMPORT = "import";
+
+    /**
+     * 判断会话是否为设计稿先行（design）模式。
+     *
+     * <p><b>全代码唯一出口</b>：create_mode 的判空逻辑（null/"pipeline"=管线模式）只允许出现在这里，
+     * 禁止各处散落 equals 判断（存量会话 create_mode=NULL 必须视为管线模式）。</p>
+     *
+     * @param session 会话实体（可空，null 视为管线模式）
+     */
+    public static boolean isDesignMode(AiTemplateSession session) {
+        return session != null && CREATE_MODE_DESIGN.equalsIgnoreCase(session.getCreateMode());
+    }
+
+    /**
+     * 判断会话是否为 HTML 导入（import）模式。
+     *
+     * <p>与 {@link #isDesignMode} 同口径：全代码唯一出口，禁止散落 equals 判断。</p>
+     *
+     * @param session 会话实体（可空，null 视为非导入模式）
+     */
+    public static boolean isImportMode(AiTemplateSession session) {
+        return session != null && CREATE_MODE_IMPORT.equalsIgnoreCase(session.getCreateMode());
+    }
+
 
     /**
      * 会话状态
@@ -115,5 +154,16 @@ public final class AiTemplateConstants {
      * 前端挂在最后一条 assistant 消息上 hover 展示
      */
     public static final String SSE_EVENT_USAGE = "usage";
+    /**
+     * 设计稿模式：等待人工确认（data 结构 {state:"AWAITING_CONFIRM", issues:[...], previewUrl:...}）。
+     * 仅 design 会话会推送；旧前端按"未知事件忽略"原则处理（SSE 事件按名字分发）
+     */
+    public static final String SSE_EVENT_CONFIRM_REQUEST = "confirm_request";
+
+    /**
+     * 会话运行态通知（data 结构 {running:false}）：stream 续连端点发现无运行任务时推送，
+     * 前端据此走终态恢复（loadMessages / refreshFiles）——区别于直接断流（可能是网络问题）
+     */
+    public static final String SSE_EVENT_RUN_STATUS = "run-status";
 
 }

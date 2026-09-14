@@ -16,6 +16,7 @@
  */
 package com.fastcms.ai.template;
 
+import com.fastcms.ai.component.DesignDirectionLibrary;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -43,6 +44,253 @@ import java.util.Map;
  */
 @Component
 public class TemplateGenPromptBuilder {
+
+    // ==================== 深度焕新设计方向（单一来源） ====================
+    // designDirectionName（短名，收尾摘要用）、buildStyleUpgradePrompt（方向段）、
+    // buildRefreshScopePrompt（范围评估）三处的方向定义全部收敛到本区块，
+    // 防止三份硬编码漂移不一致。
+
+    /**
+     * 焕新轮换方向（<strong>仅资产库加载失败时的兜底文案</strong>，内容与
+     * {@code resources/ai/design-directions/*.json} 保持同步；正常路径从资产取 name+summary）
+     */
+    private static final String[] DESIGN_DIRECTIONS = {
+            "现代商务风：更强的视觉层次与对比——深色或渐变 hero 区、大号粗标题、粗分区留白、"
+                    + "明显的主色按钮与徽章，整体大气稳重",
+            "轻盈优雅风：更多留白与呼吸感——浅色背景、柔和阴影、细边框、大圆角卡片、"
+                    + "克制的主色点缀与细腻的 hover 微交互，整体精致轻快",
+            "杂志编辑风：内容优先的排版——大图视觉、超大标题、编辑式不对称网格、"
+                    + "去卡片化的开放分区、强烈的排版节奏与编号/线条装饰"
+    };
+
+    /**
+     * 轮换方向短名（兜底用，同上；正常路径从资产取 name）
+     */
+    private static final String[] DESIGN_DIRECTION_NAMES = {"现代商务风", "轻盈优雅风", "杂志编辑风"};
+
+    /**
+     * 反馈关键词命中表：用户具体不满 → 定向修正方向（P0-2）。
+     *
+     * <p><strong>关键词整编（问题3修复）</strong>：全部为多字词且逐词过反语义校验——
+     * 单字词（暗/花/密…）会被「再暗一点」「别这么花」等反向/否定表达误命中，
+     * 给出与诉求完全相反的方向；命中点紧邻前文有否定前缀（不/别/莫/勿/没那么/不要/不太）
+     * 时该命中作废（见 {@link #indexOfNotNegated}）。「太丑/不好看/土」等整体评价
+     * 刻意不收录——整体不满不可靠映射到具体修正方向，落回原文直传（优先级最高段）+ 轮换。</p>
+     *
+     * <p>未命中走轮换表兜底（不比现状差）。每行：{方向描述, 短名, 资产key, 关键词...}
+     * （资产key 为问题5修复：反馈命中也注入方向资产 few-shot/do/dont + tokens 覆写）。</p>
+     */
+    private static final String[][] FEEDBACK_DIRECTION_TABLE = {
+            {"提亮留白方向：整体提亮配色——浅色背景为主、减少深色大面积区块与重渐变、"
+                    + "提高明度对比与留白面积，让页面明亮通透", "提亮留白", "feedback-brighten",
+                    "太暗", "太黑", "发暗", "发黑", "昏暗", "太深了", "压抑", "沉闷"},
+            {"疏朗留白方向：降低信息密度——减少同屏卡片数量、增大区块间距与内边距、"
+                    + "每个区块只保留核心元素，让页面有呼吸感", "疏朗留白", "feedback-spacious",
+                    "太密", "太挤", "太满", "拥挤", "紧凑", "密密麻麻", "塞满"},
+            {"强对比层次方向：强化视觉层次——加大标题与正文的字号/字重对比、"
+                    + "主色强调关键信息、区块之间拉开节奏差异，让页面有重点有起伏", "强对比层次", "feedback-contrast",
+                    "太素", "太平", "单调", "平淡", "没特色", "没亮点", "没层次"},
+            {"统一语言方向：统一全站版式语言——一致的卡片/栅格/圆角/间距规范、"
+                    + "消除同站混搭的版式差异，让页面整体协调", "统一语言", "feedback-unify",
+                    "混乱", "花哨", "不统一", "风格不一", "太乱", "杂乱"}
+    };
+
+    /**
+     * 否定前缀清单（命中点紧邻前文出现即视为反向表达，该命中作废）
+     */
+    private static final String[] NEGATION_PREFIXES = {"没那么", "不要", "不太", "不", "别", "莫", "勿"};
+
+    /**
+     * 焕新轮次对应的 设计方向短名（收尾摘要用）。
+     * 用户反馈命中关键词时返回命中方向短名，否则从「未被否决的方向池」顺序取
+     * （问题4：焕新触发=否决上一轮方向，rejected 集合持久化于计划文件）；
+     * 池耗尽时退回兜底文案轮换（调用方应同时给出池耗尽提示）。
+     */
+    public static String designDirectionName(int refreshRound, String userFeedback,
+                                             java.util.Set<String> rejectedKeys) {
+        if (refreshRound <= 0) {
+            return "默认现代风";
+        }
+        String hit = matchFeedbackDirection(userFeedback);
+        if (hit != null) {
+            return hit;
+        }
+        DesignDirectionLibrary.DesignDirectionAsset asset =
+                DesignDirectionLibrary.firstUnrejected(rejectedKeys);
+        return asset != null ? asset.name()
+                : DESIGN_DIRECTION_NAMES[(refreshRound - 1) % DESIGN_DIRECTION_NAMES.length];
+    }
+
+    /**
+     * 焕新设计方向描述（提示词用）：用户反馈关键词命中优先（定向修正），
+     * 未命中从「未被否决的方向池」顺序取（问题4）；池耗尽退回兜底文案轮换。
+     * refreshRound <= 0 返回 null（首次升级无方向段）。
+     */
+    static String resolveDesignDirection(int refreshRound, String userFeedback,
+                                         java.util.Set<String> rejectedKeys) {
+        if (refreshRound <= 0) {
+            return null;
+        }
+        int hit = matchFeedbackDirectionIndex(userFeedback);
+        if (hit >= 0) {
+            return FEEDBACK_DIRECTION_TABLE[hit][0];
+        }
+        DesignDirectionLibrary.DesignDirectionAsset asset =
+                DesignDirectionLibrary.firstUnrejected(rejectedKeys);
+        return asset != null ? asset.name() + "：" + asset.summary()
+                : DESIGN_DIRECTIONS[(refreshRound - 1) % DESIGN_DIRECTIONS.length];
+    }
+
+    /**
+     * 本轮焕新对应的方向资产键（P0-3 + 问题5）：供升级管线在 restartPlan 时按
+     * {@code DesignDirectionLibrary.get(key).tokensOverride} 覆写 tokens.css（确定性换肤）。
+     *
+     * <p>反馈命中 → 返回反馈方向的资产键（问题5：定向修正同样有 tokens 覆写 +
+     * few-shot/do/dont 加持，不再是最贫瘠输入）；未命中 → 从未被否决的轮换池顺序取
+     * （问题4）；池耗尽返回 null（默认 tokens + 兜底文案轮换）。</p>
+     */
+    public static String resolveDirectionAssetKey(int refreshRound, String userFeedback,
+                                                  java.util.Set<String> rejectedKeys) {
+        if (refreshRound <= 0) {
+            return null;
+        }
+        int hit = matchFeedbackDirectionIndex(userFeedback);
+        if (hit >= 0) {
+            return FEEDBACK_DIRECTION_TABLE[hit][2];
+        }
+        return DesignDirectionLibrary.firstUnrejectedKey(rejectedKeys);
+    }
+
+    /**
+     * 本轮方向的语言描述（P2-1 混血审计修复用）：方向名 + do/dont 规则摘要。
+     * layout_language_mix 修复以该语言为统一基准；refreshRound &lt;= 0（首次升级）
+     * 返回 null（修复提示词回退为「以站内多数页面语言为准」）。
+     */
+    public static String directionLanguage(int refreshRound, String userFeedback,
+                                           java.util.Set<String> rejectedKeys) {
+        if (refreshRound <= 0) {
+            return null;
+        }
+        String key = resolveDirectionAssetKey(refreshRound, userFeedback, rejectedKeys);
+        DesignDirectionLibrary.DesignDirectionAsset asset =
+                key == null ? null : DesignDirectionLibrary.get(key);
+        if (asset != null) {
+            StringBuilder sb = new StringBuilder(asset.name()).append("：").append(asset.summary());
+            if (!asset.doRules().isEmpty()) {
+                sb.append("；必须做到：").append(String.join("；", asset.doRules()));
+            }
+            if (!asset.dontRules().isEmpty()) {
+                sb.append("；禁止：").append(String.join("；", asset.dontRules()));
+            }
+            return sb.toString();
+        }
+        return resolveDesignDirection(refreshRound, userFeedback, rejectedKeys);
+    }
+
+    /**
+     * 轮换方向池（3 内置 + 4 反馈修正方向，问题②扩池后共 7 个）是否已全部被用户
+     * 否决（问题4池耗尽判定：全部焕新过一遍仍未满意）。rejected 为空不视为耗尽。
+     */
+    public static boolean rotationExhausted(java.util.Set<String> rejectedKeys) {
+        return DesignDirectionLibrary.allDirectionsRejected(rejectedKeys);
+    }
+
+    /**
+     * 反馈是否命中关键词（供范围评估提示词判断定向修正场景）
+     */
+    static boolean isFeedbackDirected(String userFeedback) {
+        return matchFeedbackDirectionIndex(userFeedback) >= 0;
+    }
+
+    /**
+     * 反馈命中的方向短名（问题3c 命中透出）：服务层在焕新前置消息中播报
+     * 「已识别反馈方向：X」，让用户看到系统如何理解了自己的话，发现反语义
+     * 误解可立即中断重填。未命中返回 null。
+     */
+    public static String matchedFeedbackDirectionName(String userFeedback) {
+        return matchFeedbackDirection(userFeedback);
+    }
+
+    private static int matchFeedbackDirectionIndex(String userFeedback) {
+        if (userFeedback == null || userFeedback.isBlank()) {
+            return -1;
+        }
+        for (int i = 0; i < FEEDBACK_DIRECTION_TABLE.length; i++) {
+            for (int k = 3; k < FEEDBACK_DIRECTION_TABLE[i].length; k++) {
+                if (indexOfNotNegated(userFeedback, FEEDBACK_DIRECTION_TABLE[i][k]) >= 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 子串命中 + 否定前缀剥离（问题3）：命中点向前紧邻否定词（如「不要太密」「别这么…」
+     * 的反向表达）时该命中作废，继续找下一个出现位置；全部被否定返回 -1
+     */
+    private static int indexOfNotNegated(String text, String keyword) {
+        int idx = text.indexOf(keyword);
+        while (idx >= 0) {
+            if (!precededByNegation(text, idx)) {
+                return idx;
+            }
+            idx = text.indexOf(keyword, idx + 1);
+        }
+        return -1;
+    }
+
+    private static boolean precededByNegation(String text, int hitIdx) {
+        for (String neg : NEGATION_PREFIXES) {
+            int start = hitIdx - neg.length();
+            if (start >= 0 && text.startsWith(neg, start)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String matchFeedbackDirection(String userFeedback) {
+        int idx = matchFeedbackDirectionIndex(userFeedback);
+        return idx < 0 ? null : FEEDBACK_DIRECTION_TABLE[idx][1];
+    }
+
+    /**
+     * 方向资产 few-shot 段（P0-3 + 问题5）：注入参考区块与 do/dont 清单——
+     * 结构可按页面调整，但视觉语言（配色/圆角/密度/节奏）必须与参考一致。
+     *
+     * <p>反馈定向修正同样注入（问题5：用户意图最强的场景不再拿最贫瘠的输入，
+     * 按命中方向取反馈资产）；资产缺失（库加载失败/资产未配置）不注入，保持现状文案。</p>
+     */
+    private static void appendDirectionAssetSection(StringBuilder sb, int refreshRound,
+                                                    String userFeedback,
+                                                    java.util.Set<String> rejectedKeys) {
+        int hit = matchFeedbackDirectionIndex(userFeedback);
+        DesignDirectionLibrary.DesignDirectionAsset asset = hit >= 0
+                ? DesignDirectionLibrary.get(FEEDBACK_DIRECTION_TABLE[hit][2])
+                : DesignDirectionLibrary.firstUnrejected(rejectedKeys);
+        if (asset == null) {
+            return;
+        }
+        List<String> blocks = asset.referenceBlocks();
+        if (!blocks.isEmpty()) {
+            sb.append("### 方向参考区块（few-shot：结构可变，视觉语言必须一致）\n\n");
+            for (int i = 0; i < blocks.size(); i++) {
+                sb.append("参考 ").append(i + 1).append("：\n```html\n")
+                        .append(blocks.get(i)).append("\n```\n\n");
+            }
+        }
+        if (!asset.doRules().isEmpty()) {
+            sb.append("### 本方向必须做到（do）\n\n");
+            asset.doRules().forEach(rule -> sb.append("- ").append(rule).append('\n'));
+            sb.append('\n');
+        }
+        if (!asset.dontRules().isEmpty()) {
+            sb.append("### 本方向禁止（dont）\n\n");
+            asset.dontRules().forEach(rule -> sb.append("- ").append(rule).append('\n'));
+            sb.append('\n');
+        }
+    }
 
     /**
      * 构建系统提示词
@@ -429,31 +677,55 @@ public class TemplateGenPromptBuilder {
      * @param doneCount        已完成改造的页面数（进度提示用）
      * @param totalFiles       页面总数
      * @param layoutInBatch    本批是否含 _layout.html（站点门面，专属契约见提示词）
-     * @param refreshRound     深度焕新轮次（0 = 首次升级；>0 时注入轮换设计方向，
-     *                         每轮焕新必须产出明显不同的版式，防止换汤不换药）
+     * @param refreshRound     深度焕新轮次（0 = 首次升级；>0 时注入设计方向与上一轮回顾）
+     * @param lastRoundDigest  上一轮（当前磁盘版本）的结构指纹摘要（可空；服务层在恢复备份
+     *                         底稿前对重做范围实时构建，含上一轮方向名头）。空时跳过回顾段
+     * @param userFeedback     本轮焕新用户填写的具体不满（可空；空时提示按方向整体优化）
+     * @param rejectedKeys     已被用户否决的方向资产键集合（问题4；可空——null/空集合
+     *                         = 无否决记录，按完整轮换池取）
+     * @param fixPatchesDigest 历史功能修复补丁摘要（P1；可空——本批涉及文件的上一轮功能修复
+     *                         清单：宏默认值/锚点补全/脚本修正，恢复备份底稿后须重新落实）。
+     *                         空时跳过该段（无补丁 = 行为与现状一致）
      */
     public String buildStyleUpgradePrompt(String filesWithContent, List<String> anchors,
                                           int doneCount, int totalFiles, boolean layoutInBatch,
-                                          int refreshRound) {
+                                          int refreshRound, String lastRoundDigest,
+                                          String userFeedback, java.util.Set<String> rejectedKeys,
+                                          String fixPatchesDigest) {
         String anchorList = anchors == null || anchors.isEmpty() ? "（无）"
                 : String.join("、", anchors);
         StringBuilder sb = new StringBuilder(4096);
         sb.append("请对本批旧模板页面执行「样式组件化升级」：视觉焕新为组件库风格，网站功能必须原样保留。\n\n")
                 .append("当前进度：已完成 ").append(doneCount).append(" / ").append(totalFiles).append(" 个文件。\n\n");
         if (refreshRound > 0) {
-            String[] directions = {
-                    "现代商务风：更强的视觉层次与对比——深色或渐变 hero 区、大号粗标题、粗分区留白、"
-                            + "明显的主色按钮与徽章，整体大气稳重",
-                    "轻盈优雅风：更多留白与呼吸感——浅色背景、柔和阴影、细边框、大圆角卡片、"
-                            + "克制的主色点缀与细腻的 hover 微交互，整体精致轻快",
-                    "杂志编辑风：内容优先的排版——大图视觉、超大标题、编辑式不对称网格、"
-                            + "去卡片化的开放分区、强烈的排版节奏与编号/线条装饰"
-            };
             sb.append("## 本次设计方向（第 ").append(refreshRound).append(" 次深度焕新）\n\n")
-                    .append("用户对上一版效果不满意，本版必须采用**").append(directions[(refreshRound - 1) % directions.length])
-                    .append("**。\n")
-                    .append("布局结构必须明显区别于常规默认版式：hero 形态、栅格列数、卡片密度、分区节奏都要换，")
-                    .append("严禁输出与上一版相似度高的换汤不换药版式。\n\n");
+                    .append("用户对上一版效果不满意，本版必须采用**")
+                    .append(resolveDesignDirection(refreshRound, userFeedback, rejectedKeys))
+                    .append("**。\n\n");
+            appendDirectionAssetSection(sb, refreshRound, userFeedback, rejectedKeys);
+            if (lastRoundDigest != null && !lastRoundDigest.isBlank()) {
+                sb.append("## 上一轮焕新回顾（当前版本的实际结构，本轮改造的真实参照物）\n\n")
+                        .append(lastRoundDigest).append("\n\n");
+            }
+            sb.append("## 用户具体不满（本轮修正目标，优先级最高）\n\n")
+                    .append(userFeedback != null && !userFeedback.isBlank() ? userFeedback
+                            : "用户未给出具体意见，按本轮设计方向整体优化")
+                    .append("\n\n");
+            sb.append("## 本轮修正策略\n\n")
+                    .append("1. 针对「用户具体不满」逐条修正，这是本轮首要目标\n")
+                    .append("2. 用户未点名的部分，在上一轮结构基础上做**定向改进**，")
+                    .append("不要全盘推翻重排（避免每次焕新版式都剧烈变化）\n")
+                    .append("3. 与上一版的差异必须体现在用户不满意的具体维度上，")
+                    .append("而非盲目换 hero 形态/换栅格列数\n")
+                    .append("4. 用户意见为整体评价（如不好看/土/没设计感）时：先对照上一轮结构摘要")
+                    .append("自我诊断具体短板（层次/密度/一致性/明度），把诊断结论写进 reply，")
+                    .append("再针对诊断结果做定向改进\n\n");
+        }
+        if (fixPatchesDigest != null && !fixPatchesDigest.isBlank()) {
+            sb.append("## 历史功能修复（上一轮已验证，本轮必须保留，禁止删除/回退）\n\n")
+                    .append("以下功能修复在上一轮升级中通过了校验（本轮底稿恢复自原始备份，")
+                    .append("不含这些修复），改造对应文件时必须重新落实：\n\n")
+                    .append(fixPatchesDigest).append("\n\n");
         }
         sb.append("## 可用样式资产（升级前已注入，禁止再写 <link>）\n\n")
                 .append("- tokens.css：主题变量 + 语义别名（变量清单见下）\n")
@@ -500,7 +772,11 @@ public class TemplateGenPromptBuilder {
                 .append("大面积底色用 slate-50/白\n")
                 .append("5. 首屏 hero：大标题 + 副标题 + 主按钮，可用 `bg-gradient-to-b from-primary-50 to-white`\n")
                 .append("6. 列表/产品：`grid grid-cols-1 md:grid-cols-3 gap-6`，图片 `rounded-lg object-cover`\n")
-                .append("7. 交互暗示：可点击元素统一 `transition` + hover 变化（色/影/位移）\n\n")
+                .append("7. 交互暗示：可点击元素统一 `transition` + hover 变化（色/影/位移）\n")
+                .append("8. **顶层区块语义化（必须遵守）**：页面的顶层内容区块必须用 `<section>` 标签包裹")
+                .append("（一个语义区块一个 `<section>`，区块内部结构自由），且顶层 `<section>` 数量")
+                .append("与本文件旧稿保持一致——样式升级只改视觉不改内容结构；确需合并/拆分区块时")
+                .append("必须在 reply 中说明新旧区块的对应关系\n\n")
                 .append("## 铁律（违反任何一条即失败）\n\n")
                 .append("1. **严禁删除或修改任何 id 属性**：旧文件中出现的所有 id=\"xxx\" 必须在新文件中原样存在\n")
                 .append("2. **严禁丢失 JS 依赖锚点 class**：以下 class 被 JS 脚本引用（选择器），对应元素上必须原样保留——\n")
@@ -553,46 +829,67 @@ public class TemplateGenPromptBuilder {
      * 其余页面保留当前版本（自动继承 tokens.css 变量换肤效果）。</p>
      *
      * @param fileFingerprints 每个计划文件一行指纹（路径 + 方向耦合特征统计）
-     * @param refreshRound     焕新轮次（>0，决定设计方向，与改造轮共用轮换表）
+     * @param refreshRound     焕新轮次（>0，决定设计方向，与改造轮共用单一来源方向表）
+     * @param userFeedback     用户焕新意见（可空；命中关键词时范围评估侧重反馈涉及的页面）
+     * @param rejectedKeys     已被用户否决的方向键集合（问题4：评估方向与实际焕新方向同口径，
+     *                         避免按方向 A 评估耦合度、实际却换了方向 B）
      */
-    public String buildRefreshScopePrompt(String fileFingerprints, int refreshRound) {
-        String[] directions = {
-                "现代商务风：深色或渐变 hero 区、大号粗标题、强对比主色按钮与徽章",
-                "轻盈优雅风：浅色背景、更多留白、柔和阴影、细腻 hover 微交互",
-                "杂志编辑风：大图视觉、超大标题、编辑式不对称网格、去卡片化开放分区"
-        };
-        String direction = directions[(refreshRound - 1) % directions.length];
-        return "你是模板焕新范围评估器。站点已完成一轮组件化升级，用户对效果不满意，"
-                + "即将执行第 " + refreshRound + " 次深度焕新，本轮设计方向：**" + direction + "**。\n\n"
-                + "## 各页面当前状态指纹\n\n" + fileFingerprints + "\n\n"
-                + "## 评估任务\n\n"
-                + "判断哪些页面**必须重新改造**才能落实新设计方向，哪些可以保留当前版本：\n"
-                + "- `_layout.html` 必须重做（站点门面：header/footer/导航/全局色，任何焕新都包含）\n"
-                + "- 含方向耦合元素的页面需重做：深色/渐变 hero、强主色区块、大图视觉等"
-                + "（指纹中 dark/gradient/primary 计数高的页面；尤其 index.html 首页）\n"
-                + "- 方向无关的通用内容页保留：白底卡片列表、正文排版（bg-white + rounded + prose 类），"
-                + "这些布局与新方向不冲突，且会通过 tokens.css 变量自动换色换字体\n"
-                + "- 同构页面（如 article_list 系列多个下载/视频列表）只需重做有方向耦合的，其余保留\n\n"
-                + "## 输出格式（严格遵守）\n\n"
-                + "先用一两句话说明判断依据，然后输出 JSON：\n"
-                + "```json\n{\"redesign\": [\"_layout.html\", \"index.html\", ...]}\n```\n"
-                + "redesign 数组 = 必须重做的文件相对路径清单（只列上面指纹中存在的路径，宁少勿多）；"
-                + "未列出的文件将原样保留。请全程使用中文。";
+    public String buildRefreshScopePrompt(String fileFingerprints, int refreshRound,
+                                          String userFeedback,
+                                          java.util.Set<String> rejectedKeys) {
+        String direction = resolveDesignDirection(refreshRound, userFeedback, rejectedKeys);
+        StringBuilder sb = new StringBuilder(1024);
+        sb.append("你是模板焕新范围评估器。站点已完成一轮组件化升级，用户对效果不满意，")
+                .append("即将执行第 ").append(refreshRound).append(" 次深度焕新，本轮设计方向：**")
+                .append(direction).append("**。\n");
+        if (userFeedback != null && !userFeedback.isBlank()) {
+            sb.append("用户具体不满（修正目标）：").append(userFeedback).append('\n');
+            if (isFeedbackDirected(userFeedback)) {
+                sb.append("本轮为用户反馈驱动的定向修正：反馈涉及的方向耦合特征（如深色区/卡片密度）")
+                        .append("所在页面应优先纳入重做范围。\n");
+            }
+        }
+        sb.append("\n## 各页面当前状态指纹（文件级 + 顶层区块级）\n\n").append(fileFingerprints).append("\n\n")
+                .append("## 评估任务\n\n")
+                .append("判断哪些页面/区块**必须重新改造**才能落实新设计方向，哪些可以保留当前版本：\n")
+                .append("- `_layout.html` 必须整文件重做（站点门面：header/footer/导航/全局色，任何焕新都包含）\n")
+                .append("- 含方向耦合元素的页面需重做：深色/渐变 hero、强主色区块、大图视觉等")
+                .append("（指纹中 深色/渐变/主色/超大标题 计数高的区块；尤其 index.html 首页）\n")
+                .append("- **区块级重做**（优先考虑）：页面中仅少数区块方向耦合强、其余区块（白底卡片列表、")
+                .append("正文排版等通用内容）与新方向不冲突时，只选出耦合区块——保留区块经 tokens.css ")
+                .append("变量自动换肤，token 成本与风险都更小（区块序号即页面顶层 `<section>` 的序号，")
+                .append("改造契约要求页面以 `<section>` 组织顶层区块）\n")
+                .append("- 方向无关的通用内容页整体保留\n")
+                .append("- 同构页面（如 article_list 系列多个下载/视频列表）只需重做有方向耦合的，其余保留\n\n")
+                .append("## 输出格式（严格遵守）\n\n")
+                .append("先用一两句话说明判断依据，然后输出 JSON：\n")
+                .append("```json\n{\"redesign\": [\n")
+                .append("  {\"file\": \"_layout.html\"},\n")
+                .append("  {\"file\": \"index.html\", \"sections\": [1, 2]},\n")
+                .append("  {\"file\": \"article_list.html\", \"sections\": [1]}\n")
+                .append("]}\n```\n")
+                .append("redesign 数组 = 必须重做的文件（只列指纹中存在的路径，宁少勿多）：整文件重做")
+                .append("省略 sections；区块级重做用 sections 数组列出 1-based 顶层区块序号")
+                .append("（对应指纹中的 区块N，只列方向耦合强的区块）；未列出的文件与区块将原样保留。")
+                .append("拿不准区块边界时整文件重做。请全程使用中文。");
+        return sb.toString();
     }
 
     /**
      * 构建视觉审计修复提示（升级收尾轮）：把审计器的结构化问题清单翻译给 AI 修复
      *
      * <p>审计来源见 {@link com.fastcms.ai.component.LegacyStyleUpgrader#auditUpgrade}：
-     * missing_class / undefined_var / legacy_css_residue / page_without_utilities。
-     * 修复铁律与改造轮一致（锚点/id/脚本/FreeMarker 不动）。</p>
+     * missing_class / undefined_var / legacy_css_residue / page_without_utilities /
+     * layout_language_mix（P2-1 混血）。修复铁律与改造轮一致（锚点/id/脚本/FreeMarker 不动）。</p>
      *
-     * @param issues           审计问题清单
-     * @param filesWithContent 涉事文件当前内容（相对路径 + 完整内容）
+     * @param issues            审计问题清单
+     * @param filesWithContent  涉事文件当前内容（相对路径 + 完整内容）
+     * @param directionLanguage 本轮设计方向的语言描述（可空——layout_language_mix 修复的
+     *                          统一基准；空时以站内多数页面语言为准）
      */
     public String buildAuditFixPrompt(
             List<com.fastcms.ai.component.LegacyStyleUpgrader.AuditIssue> issues,
-            String filesWithContent) {
+            String filesWithContent, String directionLanguage) {
         // 按文件聚合，提示词更紧凑
         Map<String, List<String>> byFile = new LinkedHashMap<>();
         for (com.fastcms.ai.component.LegacyStyleUpgrader.AuditIssue issue : issues) {
@@ -623,8 +920,24 @@ public class TemplateGenPromptBuilder {
                 .append("- [escaped_directive] 字符串拼接伪装指令（${''}${'#'}{if ...} 形态）：是字面量输出而非条件判断，")
                 .append("全部改写为真正的 <#if x>...</#if>（<#else> 分支同理）\n")
                 .append("- [macro_arg_null_risk] 宏参数无默认值且调用传入可能为 null 的数据（如 xxx.children）：")
-                .append("给宏定义参数补默认值（如 children=[]）或调用处用 <#if ?? && ?size gt 0> 判空\n\n")
-                .append("## 铁律（与改造轮一致，修复时同样不可违反）\n\n")
+                .append("给宏定义参数补默认值（如 children=[]）或调用处用 <#if ?? && ?size gt 0> 判空\n");
+        if (issues.stream().anyMatch(iss -> "section_count_drift".equals(iss.type()))) {
+            sb.append("- [section_count_drift] 顶层 <section> 区块数与基线不一致：以基线的内容区块为准")
+                    .append("重新组织区块结构（合并/拆分对齐基线数量，内容与 FreeMarker 指令不丢失），")
+                    .append("区块视觉按本轮设计方向重新设计\n");
+        }
+        if (issues.stream().anyMatch(iss -> "layout_language_mix".equals(iss.type()))) {
+            sb.append("- [layout_language_mix] 全站版式语言混血（深浅 hero 并存、卡片化页与去卡片化页并存）：");
+            if (directionLanguage != null && !directionLanguage.isBlank()) {
+                sb.append("以本轮设计方向的版式语言为准（").append(directionLanguage)
+                        .append("），统一冲突页面的 hero 明暗与区块风格");
+            } else {
+                sb.append("以站内多数页面的版式语言为准，统一少数派页面的冲突区块");
+            }
+            sb.append("——只调整冲突区块的 utility class（背景/圆角/阴影/分隔线/标题字号层级），")
+                    .append("不整页重做，严禁删除 id/锚点/脚本/FreeMarker 指令\n");
+        }
+        sb.append("\n## 铁律（与改造轮一致，修复时同样不可违反）\n\n")
                 .append("1. 严禁删除/修改 id 属性、JS 锚点 class、<script> 块、FreeMarker 指令\n")
                 .append("2. 修复必须针对审计问题本身，不要大幅重构已改造好的部分\n\n")
                 .append("## 待修复文件（相对路径 + 完整内容）\n\n")
@@ -648,8 +961,9 @@ public class TemplateGenPromptBuilder {
         for (int i = 0; i < missingAnchors.size(); i++) {
             sb.append(i + 1).append(". ").append(missingAnchors.get(i)).append('\n');
         }
-        sb.append("\n规则：id:xxx 表示需要 id=\"xxx\" 的元素存在；class:xxx 表示需要有元素携带 class \"xxx\"。\n")
-                .append("请在对应功能元素（轮播容器、导航、表单等）上补回这些 id/class，其余改造结果保持不变。\n\n")
+        sb.append("\n规则：id:xxx 表示需要 id=\"xxx\" 的元素存在；class:xxx 表示需要有元素携带 class \"xxx\"；")
+                .append("macro:签名 表示对应的 <#macro> 定义必须存在且带签名中的参数默认值（如 children=[]）。\n")
+                .append("请在对应功能元素（轮播容器、导航、表单等）上补回这些 id/class，宏定义补回默认值，其余改造结果保持不变。\n\n")
                 .append("## 改造后的文件（需要修正的最新版本）\n\n")
                 .append(filesWithContent).append("\n\n")
                 .append("## 输出要求\n\n")

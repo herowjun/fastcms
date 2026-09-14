@@ -838,6 +838,9 @@ CREATE TABLE `ai_template_session` (
   `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
   `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）',
   `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）',
+  `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行',
+  `design_direction` varchar(64) DEFAULT NULL COMMENT '设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）',
+  `confirm_auto` tinyint(1) DEFAULT 1 COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）',
   `created` datetime DEFAULT NULL,
   `updated` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -850,6 +853,10 @@ CREATE TABLE `ai_template_session` (
 -- ALTER TABLE `ai_template_session` ADD COLUMN `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）' AFTER `template_id`;
 -- 已有环境升级（0.3.x）：为 ai_template_session 增加移动端适配选项字段
 -- ALTER TABLE `ai_template_session` ADD COLUMN `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）' AFTER `plan_files`;
+-- 已有环境升级（0.3.x → 1.0.0）：AI 模板生成双模式字段（详见 doc/sql/fastcms-1.0.0.sql 增量脚本）
+-- ALTER TABLE `ai_template_session` ADD COLUMN `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行' AFTER `mobile_adaptive`;
+-- ALTER TABLE `ai_template_session` ADD COLUMN `design_direction` varchar(64) DEFAULT NULL COMMENT '设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）' AFTER `create_mode`;
+-- ALTER TABLE `ai_template_session` ADD COLUMN `confirm_auto` tinyint(1) DEFAULT 1 COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）' AFTER `design_direction`;
 
 -- AI 模板生成对话消息表
 DROP TABLE IF EXISTS `ai_template_message`;

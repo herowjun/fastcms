@@ -72,6 +72,10 @@ public record ComponentDescriptor(
         return slots == null ? List.of() : slots;
     }
 
+    public List<ComponentVariant> safeVariants() {
+        return variants == null ? List.of() : variants;
+    }
+
     public List<String> safeAppliesTo() {
         return appliesTo == null ? List.of() : appliesTo;
     }

@@ -1,0 +1,25 @@
+{
+  "key": "feedback-brighten",
+  "name": "提亮留白",
+  "summary": "整体提亮配色——浅色背景为主、减少深色大面积区块与重渐变、提高明度对比与留白面积，让页面明亮通透",
+  "tokensOverride": {
+    "stylePreset": "minimal"
+  },
+  "referenceBlocks": [
+    "<section class=\"bg-white py-20 md:py-28\">\n  <div class=\"max-w-6xl mx-auto px-4 text-center\">\n    <p class=\"text-primary-600 text-sm font-semibold tracking-widest mb-4\">明亮通透 · 简洁现代</p>\n    <h1 class=\"text-slate-900 text-4xl md:text-5xl font-bold leading-tight mb-6\">浅色主视觉大标题<br/>深色文字保证可读性</h1>\n    <p class=\"text-slate-600 text-lg mb-10 max-w-2xl mx-auto\">浅底深字的 hero 区，配主色点缀与充足留白，整体明快不压抑。</p>\n    <div class=\"flex items-center justify-center gap-4\">\n      <a href=\"#\" class=\"bg-primary-600 text-white font-semibold px-8 py-3 rounded-lg shadow-sm hover:bg-primary-700 transition\">主要行动按钮</a>\n      <a href=\"#\" class=\"border border-slate-300 text-slate-700 px-8 py-3 rounded-lg hover:border-primary-400 hover:text-primary-600 transition\">次要按钮</a>\n    </div>\n  </div>\n</section>",
+    "<section class=\"bg-slate-50 py-16 md:py-20\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <h2 class=\"text-2xl md:text-3xl font-bold text-slate-900 text-center mb-4\">分区标题居中</h2>\n    <p class=\"text-slate-500 text-center mb-12\">浅灰底分区与白底 hero 形成柔和的明度节奏</p>\n    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-8\">\n      <div class=\"bg-white rounded-xl border border-slate-100 shadow-sm p-8\">\n        <div class=\"w-10 h-10 bg-primary-50 rounded-lg flex items-center justify-center mb-5\"><span class=\"text-primary-600 font-bold\">01</span></div>\n        <h3 class=\"text-lg font-semibold text-slate-900 mb-3\">白色卡片</h3>\n        <p class=\"text-slate-600 text-sm leading-relaxed\">浅灰底上放白卡片，靠阴影与边框轻分隔，不用深色块。</p>\n      </div>\n    </div>\n  </div>\n</section>"
+  ],
+  "do": [
+    "浅色背景为主（bg-white / bg-slate-50），深色仅用于文字与页脚",
+    "hero 区用浅底深字（白底 + text-slate-900）",
+    "白色卡片 + 细边框（border-slate-100）+ 轻阴影（shadow-sm）",
+    "正文用 text-slate-600 以上明度（避免低对比深灰）",
+    "分区之间用明度差（白/浅灰交替）制造节奏"
+  ],
+  "dont": [
+    "深色大面积区块（bg-slate-800/900 的 hero 或半屏深色区）",
+    "重渐变背景（from-primary-800 to-primary-950 类深渐变）",
+    "深底浅字的大段正文（只允许页脚）",
+    "低对比灰字（text-slate-400 以下的正文）"
+  ]
+}

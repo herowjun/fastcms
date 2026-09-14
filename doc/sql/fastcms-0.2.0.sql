@@ -164,3 +164,39 @@ ALTER TABLE menu ADD COLUMN exclude_site_keys varchar(1000) DEFAULT NULL COMMENT
 ALTER TABLE ai_template_message ADD COLUMN prompt_tokens int DEFAULT NULL COMMENT '本轮输入token（仅assistant，跨轮次聚合）' AFTER reasoning;
 ALTER TABLE ai_template_message ADD COLUMN completion_tokens int DEFAULT NULL COMMENT '本轮输出token（仅assistant）' AFTER prompt_tokens;
 ALTER TABLE ai_template_message ADD COLUMN total_tokens int DEFAULT NULL COMMENT '本轮总token（仅assistant）' AFTER completion_tokens;
+
+-- ----------------------------
+-- 0.3.1: AI 智能体（多智能体架构管理）
+-- ----------------------------
+
+-- AI 智能体配置表（自定义智能体落库，内置智能体由代码注册不落库）
+CREATE TABLE ai_agent (
+  id bigint NOT NULL AUTO_INCREMENT,
+  agent_id varchar(64) NOT NULL COMMENT '智能体业务ID（自定义智能体为 custom-xxx）',
+  name varchar(64) NOT NULL COMMENT '智能体名称',
+  description varchar(255) DEFAULT NULL COMMENT '智能体描述',
+  execution_mode varchar(16) NOT NULL DEFAULT 'chat' COMMENT '执行模式: chat-对话循环 / pipeline-管线驱动（自定义智能体仅允许 chat）',
+  system_prompt text COMMENT '系统提示词（支持 {{site.name}} 等站点变量占位，运行时替换）',
+  model_config_id bigint DEFAULT NULL COMMENT '绑定的模型配置ID（NULL=继承当前激活的对话模型）',
+  temperature double DEFAULT NULL COMMENT '温度（NULL=继承模型配置默认值）',
+  max_tokens int DEFAULT NULL COMMENT 'MaxTokens（NULL=继承模型配置默认值）',
+  skills text COMMENT '绑定的 skill ID JSON 数组（能力白名单）',
+  tools text COMMENT '绑定的工具名 JSON 数组（工具白名单）',
+  daily_token_quota bigint DEFAULT 0 COMMENT '日 token 配额（0=不限）',
+  sort_num int DEFAULT 0 COMMENT '排序（越小越靠前）',
+  status tinyint DEFAULT 1 COMMENT '状态: 1启用 0停用',
+  base_agent_id varchar(64) DEFAULT NULL COMMENT '复制来源智能体ID（内置升级时不动副本，仅提示）',
+  created datetime DEFAULT NULL,
+  updated datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_agent_id (agent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 智能体配置表';
+
+-- 智能体不设独立菜单：功能已合并到「设置/模型」页的 tab 页签中（后端 API 权限 ai:agent:* 保留在 resource 表）
+-- 已有环境若曾安装过智能体菜单（permission.id=45），执行以下语句移除（含角色关联）
+DELETE FROM role_permission WHERE permission_id = 45;
+DELETE FROM permission WHERE id = 45;
+
+-- AI 调用审计日志增加智能体归属列（走智能体的调用记录 agent_id，支撑智能体级配额与用量统计）
+ALTER TABLE ai_usage_log ADD COLUMN agent_id varchar(64) DEFAULT NULL COMMENT '归属智能体ID（builtin.*/custom-*，未走智能体为空）' AFTER session_id;
+ALTER TABLE ai_usage_log ADD INDEX idx_agent_created (agent_id, created);

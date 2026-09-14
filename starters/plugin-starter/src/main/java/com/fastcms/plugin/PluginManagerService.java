@@ -135,6 +135,10 @@ public interface PluginManagerService {
 		 * 插件状态
 		 */
 		private String pluginState;
+		/**
+		 * 插件资产分类标签（skill/capability/tool/component/payment）
+		 */
+		private List<String> tags;
 
 		public PluginVo(PluginWrapper pluginWrapper) {
 			this.pluginId = pluginWrapper.getPluginId();
@@ -200,6 +204,14 @@ public interface PluginManagerService {
 
 		public void setPluginState(String pluginState) {
 			this.pluginState = pluginState;
+		}
+
+		public List<String> getTags() {
+			return tags;
+		}
+
+		public void setTags(List<String> tags) {
+			this.tags = tags;
 		}
 	}
 

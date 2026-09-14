@@ -57,12 +57,22 @@ export function PluginApi() {
 
 		/**
 		 * 获取插件配置url
-		 * @param params 
-		 * @returns 
+		 * @param params
+		 * @returns
 		 */
 		getPluginConfigUrl(pluginId: string) {
 			return request({
 				url: '/admin/plugin/config/url/' + pluginId,
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 获取插件资产清单（skill / 能力 / AI 工具 / 组件包）
+		 */
+		getPluginAssets(pluginId: string) {
+			return request({
+				url: '/admin/plugin/assets/' + pluginId,
 				method: 'get'
 			});
 		}

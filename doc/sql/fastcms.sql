@@ -838,6 +838,9 @@ CREATE TABLE `ai_template_session` (
   `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
   `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）',
   `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）',
+  `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行',
+  `design_direction` varchar(64) DEFAULT NULL COMMENT '设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）',
+  `confirm_auto` tinyint(1) DEFAULT 1 COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）',
   `created` datetime DEFAULT NULL,
   `updated` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -850,6 +853,10 @@ CREATE TABLE `ai_template_session` (
 -- ALTER TABLE `ai_template_session` ADD COLUMN `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）' AFTER `template_id`;
 -- 已有环境升级（0.3.x）：为 ai_template_session 增加移动端适配选项字段
 -- ALTER TABLE `ai_template_session` ADD COLUMN `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）' AFTER `plan_files`;
+-- 已有环境升级（1.0.0）：为 ai_template_session 增加双模式生成字段（详见 fastcms-1.0.0.sql）
+-- ALTER TABLE `ai_template_session` ADD COLUMN `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行' AFTER `mobile_adaptive`;
+-- ALTER TABLE `ai_template_session` ADD COLUMN `design_direction` varchar(64) DEFAULT NULL COMMENT '设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）' AFTER `create_mode`;
+-- ALTER TABLE `ai_template_session` ADD COLUMN `confirm_auto` tinyint(1) DEFAULT 1 COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）' AFTER `design_direction`;
 
 -- AI 模板生成对话消息表
 DROP TABLE IF EXISTS `ai_template_message`;
@@ -901,6 +908,46 @@ CREATE TABLE `ai_template_file_backup` (
   KEY `idx_session_id` (`session_id`),
   KEY `idx_message_id` (`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模板文件修改前备份表';
+
+-- AI 调用审计日志（配额统计同样基于本表按日聚合，不单独建配额表；0.3.1 起含 agent_id 列）
+DROP TABLE IF EXISTS `ai_usage_log`;
+CREATE TABLE `ai_usage_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL COMMENT '触发用户',
+  `scene` varchar(32) NOT NULL COMMENT '场景: TEMPLATE_GEN/TEMPLATE_ADJUST/ARTICLE_GEN/ARTICLE_REWRITE/ARTICLE_FIELD',
+  `session_id` varchar(64) DEFAULT NULL COMMENT '关联会话ID（无状态场景为空）',
+  `agent_id` varchar(64) DEFAULT NULL COMMENT '归属智能体ID（builtin.*/custom-*，未走智能体为空）',
+  `model` varchar(128) DEFAULT NULL COMMENT '使用的模型名',
+  `prompt_tokens` int DEFAULT 0 COMMENT '提示词token数',
+  `completion_tokens` int DEFAULT 0 COMMENT '补全token数',
+  `total_tokens` int DEFAULT 0 COMMENT '总token数',
+  `duration_ms` bigint DEFAULT 0 COMMENT '耗时毫秒',
+  `success` tinyint DEFAULT 1 COMMENT '是否成功',
+  `error_msg` varchar(1024) DEFAULT NULL COMMENT '失败原因',
+  `created` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_created` (`user_id`, `created`),
+  KEY `idx_scene` (`scene`),
+  KEY `idx_agent_created` (`agent_id`, `created`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 调用审计日志';
+
+-- AI 文章划词操作记录
+DROP TABLE IF EXISTS `ai_article_op_log`;
+CREATE TABLE `ai_article_op_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL COMMENT '触发用户',
+  `article_id` bigint DEFAULT NULL COMMENT '关联文章ID（新建文章保存前为空，保存后由前端触发绑定）',
+  `operation` varchar(32) NOT NULL COMMENT '操作类型: rewrite/expand/polish/translate/generate/field_title/field_summary/field_seoKeywords/field_seoDescription',
+  `original_text` mediumtext COMMENT '原选中文本',
+  `rewritten_text` mediumtext COMMENT 'AI 改写结果',
+  `reasoning` mediumtext COMMENT '思考过程',
+  `model` varchar(128) DEFAULT NULL COMMENT '使用的模型名',
+  `duration_ms` bigint DEFAULT 0 COMMENT '耗时毫秒',
+  `created` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_article` (`article_id`),
+  KEY `idx_user_created` (`user_id`, `created`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 文章划词操作记录';
 
 -- ----------------------------
 -- 0.2.0 表结构变更记录结束
@@ -960,4 +1007,38 @@ CREATE TABLE `ai_image_task` (
 
 -- ----------------------------
 -- 0.3.0 表结构变更记录结束
+-- ----------------------------
+
+-- ----------------------------
+-- 0.3.1 表结构变更记录开始
+-- ----------------------------
+
+-- AI 智能体配置表（多智能体架构：自定义智能体落库，内置智能体由代码注册不落库）
+DROP TABLE IF EXISTS `ai_agent`;
+CREATE TABLE `ai_agent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `agent_id` varchar(64) NOT NULL COMMENT '智能体业务ID（自定义智能体为 custom-xxx）',
+  `name` varchar(64) NOT NULL COMMENT '智能体名称',
+  `description` varchar(255) DEFAULT NULL COMMENT '智能体描述',
+  `execution_mode` varchar(16) NOT NULL DEFAULT 'chat' COMMENT '执行模式: chat-对话循环 / pipeline-管线驱动（自定义智能体仅允许 chat）',
+  `system_prompt` text COMMENT '系统提示词（支持 {{site.name}} 等站点变量占位，运行时替换）',
+  `model_config_id` bigint DEFAULT NULL COMMENT '绑定的模型配置ID（NULL=继承当前激活的对话模型）',
+  `temperature` double DEFAULT NULL COMMENT '温度（NULL=继承模型配置默认值）',
+  `max_tokens` int DEFAULT NULL COMMENT 'MaxTokens（NULL=继承模型配置默认值）',
+  `skills` text COMMENT '绑定的 skill ID JSON 数组（能力白名单）',
+  `tools` text COMMENT '绑定的工具名 JSON 数组（工具白名单）',
+  `daily_token_quota` bigint DEFAULT 0 COMMENT '日 token 配额（0=不限）',
+  `sort_num` int DEFAULT 0 COMMENT '排序（越小越靠前）',
+  `status` tinyint DEFAULT 1 COMMENT '状态: 1启用 0停用',
+  `base_agent_id` varchar(64) DEFAULT NULL COMMENT '复制来源智能体ID（内置升级时不动副本，仅提示）',
+  `created` datetime DEFAULT NULL,
+  `updated` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_id` (`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 智能体配置表';
+
+-- 智能体不设独立菜单：功能已合并到「设置/模型」页的 tab 页签中（后端 API 权限 ai:agent:* 保留在 resource 表）
+
+-- ----------------------------
+-- 0.3.1 表结构变更记录结束
 -- ----------------------------

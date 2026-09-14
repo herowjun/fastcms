@@ -143,6 +143,10 @@
 					</div>
 				</el-card>
 			</el-tab-pane>
+
+			<el-tab-pane label="智能体" name="agents" lazy>
+				<AgentPanel />
+			</el-tab-pane>
 		</el-tabs>
 
 		<el-dialog :title="state.dialog.title" v-model="state.dialog.visible" width="640px" :close-on-click-modal="false">
@@ -237,6 +241,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { AiModelApi, AiUsageApi } from '/@/api/ai/index';
+import AgentPanel from '/@/views/ai/agent/index.vue';
 
 const aiApi = AiModelApi();
 const usageApi = AiUsageApi();

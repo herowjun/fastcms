@@ -16,10 +16,8 @@
  */
 package com.fastcms.ai.service.impl;
 
-import com.fastcms.ai.audit.AiQuotaChecker;
 import com.fastcms.ai.audit.AiQuotaExceededException;
 import com.fastcms.ai.audit.AiUsageRecorder;
-import com.fastcms.ai.service.IAiModelConfigService;
 import com.fastcms.ai.service.IAiTemplateBackupService;
 import com.fastcms.ai.service.IAiTemplateFileService;
 import com.fastcms.ai.service.IAiTemplateMessageService;
@@ -31,11 +29,15 @@ import com.fastcms.ai.template.AiTemplateSessionRequest;
 import com.fastcms.ai.template.ComponentGenPromptBuilder;
 import com.fastcms.ai.template.IAiTemplateGenService;
 import com.fastcms.ai.template.TemplateGenPromptBuilder;
+import com.fastcms.ai.template.design.DesignSseSink;
+import com.fastcms.ai.template.design.MockupOrchestrator;
 import com.fastcms.ai.component.PageSpecParser;
 import com.fastcms.ai.component.PageSpecRenderer;
 import com.fastcms.ai.support.FileProgressScanner;
+import com.fastcms.ai.support.ReasoningStreamAccumulator;
 import com.fastcms.ai.support.ReplyStreamExtractor;
-import com.fastcms.ai.tool.AiToolCallbackProvider;
+import com.fastcms.ai.support.RunChannel;
+import com.fastcms.ai.support.SessionRunRegistry;
 import com.fastcms.cms.entity.ArticleCategory;
 import com.fastcms.cms.entity.Menu;
 import com.fastcms.cms.entity.SinglePage;
@@ -78,6 +80,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -102,8 +105,10 @@ import java.util.stream.Stream;
  *     <li>应用模板：将工作目录文件复制到正式模板目录并刷新注册</li>
  * </ol>
  *
- * <p><b>模型选择策略</b>：每次对话前从 {@link IAiModelConfigService#getActiveConfig()} 读取激活配置，
- * 动态构造 {@link ChatModel}，这样后台切换模型后立即生效，无需重启。</p>
+ * <p><b>模型选择策略</b>：每次对话前经 builtin.template-generator 智能体装配
+ * （{@link com.fastcms.ai.agent.AgentChatExecutor}：智能体绑定模型优先、未绑定回退激活配置，
+ * 含用户级/智能体级配额与工具白名单），后台切换模型后立即生效，无需重启。
+ * 轮次参数（maxTokens 翻倍重试、Qwen3 思考预算、调整收紧上限等）属管线逻辑，仍由本服务自控。</p>
  *
  * @author wjun_java@163.com
  * @since 0.2.0
@@ -189,53 +194,50 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             });
 
     /**
-     * 客户端取消/断开时中断生成的信号（非失败，单独类型避免被当作生成错误处理）
+     * 用户显式停止的信号（非失败，单独类型避免被当作生成错误处理）
+     *
+     * <p>语义演进：旧实现"客户端断开即取消"（关页面=停任务，为不白烧 token）；
+     * 现在断开仅摘除订阅者、任务后台续跑，取消只能由 stop 端点显式触发。</p>
      */
     private static final class ChatCancelledException extends RuntimeException {
         ChatCancelledException() {
-            super("AI 生成已取消（客户端断开）");
+            super("AI 生成已停止（用户停止）");
         }
     }
 
     /**
-     * SSE 通道封装：客户端断开检测与事件推送
+     * SSE 通道封装：{@link RunChannel} 的任务侧适配器（事件名/调用点与旧实现完全一致，管线零改动）
      *
-     * <p>断开感知的两条路径：①send 失败抛 IOException/IllegalStateException（容器在写出时发现连接已断）；
-     * ②emitter.onError/onTimeout 回调。任一路径触发即标记取消，
-     * 各生成轮次在 doOnNext/循环顶部检测取消标记，抛出 {@link ChatCancelledException} 中断生成，
-     * 不再白烧上游 token（已生成的文件已落盘，断点续传语义保留）。</p>
+     * <p>与旧实现的语义差异（任务与连接解耦）：</p>
+     * <ul>
+     *     <li>send：事件追加 journal + 扇出全部订阅者；单订阅者失败仅摘除该订阅者，
+     *     <b>不再取消任务</b>（关页面/断网后任务后台续跑，产物照常落盘）</li>
+     *     <li>isCancelled：仅 stop 端点触发的显式取消（管线各检查点照常优雅中断）</li>
+     *     <li>complete：任务结束——complete 全部订阅者并标记终态（journal 保留，
+     *     迟到的续连仍可回放完整事件）</li>
+     * </ul>
      */
     private static final class SseChannel {
-        private final SseEmitter emitter;
-        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final RunChannel run;
 
-        SseChannel(SseEmitter emitter) {
-            this.emitter = emitter;
+        SseChannel(RunChannel run) {
+            this.run = run;
         }
 
         boolean isCancelled() {
-            return cancelled.get();
-        }
-
-        void markCancelled() {
-            cancelled.set(true);
+            return run.isCancelled();
         }
 
         void send(String eventName, String data) {
-            try {
-                emitter.send(SseEmitter.event().name(eventName).data(data));
-            } catch (IOException | IllegalStateException e) {
-                // 客户端已断开：标记取消（后续轮次中断），推送失败静默（无接收方）
-                cancelled.set(true);
-                log.debug("SSE 推送失败（客户端断开）: event={}", eventName);
-            }
+            run.send(eventName, data);
         }
 
         void complete() {
-            try {
-                emitter.complete();
-            } catch (Exception ignored) {
-            }
+            run.finish();
+        }
+
+        RunChannel run() {
+            return run;
         }
     }
 
@@ -247,6 +249,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Autowired
     private IAiTemplateSessionService sessionService;
 
+    /** 会话运行注册表：关页后台续跑 + 重开续看（run-status/stream/stop 端点的服务端支撑） */
+    @Autowired
+    private SessionRunRegistry runRegistry;
+
     @Autowired
     private IAiTemplateMessageService messageService;
 
@@ -257,7 +263,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private IAiTemplateBackupService backupService;
 
     @Autowired
-    private IAiModelConfigService modelConfigService;
+    private com.fastcms.ai.agent.AgentChatExecutor agentChatExecutor;
 
     @Autowired
     private TemplateGenPromptBuilder promptBuilder;
@@ -269,16 +275,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private TemplateService templateService;
 
     @Autowired
-    private AiQuotaChecker quotaChecker;
-
-    @Autowired
     private AiUsageRecorder usageRecorder;
 
     @Autowired
-    private AiToolCallbackProvider toolCallbackProvider;
-
-    @Autowired
     private com.fastcms.ai.autoconfigure.FastcmsAiProperties aiProperties;
+
+    /**
+     * 设计稿先行模式状态机编排器（design/import 模式会话分流入口，见 §6.1；
+     * 管线会话不经过该编排器）
+     */
+    @Autowired
+    private com.fastcms.ai.template.design.MockupOrchestrator mockupOrchestrator;
+
+    /**
+     * HTML 导入 ingest 服务（import 模式会话：解压 + 归一化 + plan.json 落盘）
+     */
+    @Autowired
+    private com.fastcms.ai.template.htmlimport.ImportService importService;
 
     /**
      * 附件服务（图片槽位点选换图：附件 ID → URL 解析）
@@ -334,6 +347,20 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         session.setStatus(AiTemplateConstants.STATUS_ACTIVE);
         session.setUserId(userId);
 
+        // 双模式字段（ai-template-two-mode-design.md §2.2/§2.3）：createMode 白名单已在 validateRequest 校验。
+        // 管线模式（null/pipeline）行为与旧版完全一致，不落其余两字段；
+        // design 与 templateId 互斥在 chat 分流处拦截提示（§6.1），创建期照常落库。
+        if (StringUtils.hasText(request.getCreateMode())) {
+            session.setCreateMode(request.getCreateMode().trim().toLowerCase());
+            if (AiTemplateConstants.CREATE_MODE_DESIGN.equals(session.getCreateMode())) {
+                if (StringUtils.hasText(request.getDesignDirection())) {
+                    session.setDesignDirection(request.getDesignDirection().trim());
+                }
+                // 机器审计通过后是否自动转化：null 视为 true（false=等用户确认后再转化）
+                session.setConfirmAuto(request.getConfirmAuto() == null || request.getConfirmAuto());
+            }
+        }
+
         if (StringUtils.hasText(request.getTemplateId())) {
             // 调整型会话：绑定正式模板，AI 输出直写正式模板目录（写前自动备份）
             Template template = templateService.getTemplate(request.getTemplateId());
@@ -356,8 +383,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
 
         sessionService.save(session);
-        log.info("AI 模板生成会话创建: sessionId={}, templateName={}, templateId={}, userId={}",
-                session.getSessionId(), session.getTemplateName(), session.getTemplateId(), userId);
+        log.info("AI 模板生成会话创建: sessionId={}, templateName={}, templateId={}, userId={}, createMode={}, designDirection={}",
+                session.getSessionId(), session.getTemplateName(), session.getTemplateId(), userId,
+                session.getCreateMode(), session.getDesignDirection());
         return session;
     }
 
@@ -442,6 +470,56 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             return styleUpgrader.getStatus(resolveEffectiveWorkDir(session));
         } catch (Exception e) {
             return new com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeStatusInfo(false, 0, 0, 0, false);
+        }
+    }
+
+    @Override
+    public java.util.Map<String, Object> getDesignConfirmCard(String sessionId) {
+        AiTemplateSession session = getSession(sessionId);
+        // design 与 import 会话共用确认卡片（import 转化 MAJOR_FAILURE 时进 AWAITING_CONFIRM 人工兜底）
+        if (session == null || (!AiTemplateConstants.isDesignMode(session)
+                && !AiTemplateConstants.isImportMode(session))) {
+            return null;
+        }
+        try {
+            return com.fastcms.ai.template.design.MockupOrchestrator.awaitingConfirmCard(
+                    session, resolveEffectiveWorkDir(session));
+        } catch (Exception e) {
+            // 查询失败视作无待确认卡片（不阻断会话加载；真实状态以 plan.json 落盘为准）
+            log.warn("设计稿确认状态查询失败: sessionId={}", sessionId, e);
+            return null;
+        }
+    }
+
+    @Override
+    public java.util.Map<String, Object> importHtml(String sessionId,
+                                                     org.springframework.web.multipart.MultipartFile file,
+                                                     Long userId) {
+        AiTemplateSession session = getSession(sessionId);
+        if (session == null || !java.util.Objects.equals(session.getUserId(), userId)) {
+            // 不区分"不存在/非属主"（与 Controller 会话校验同口径，避免向非属主泄露会话存在性）
+            throw new IllegalArgumentException("会话不存在");
+        }
+        if (!AiTemplateConstants.isImportMode(session)) {
+            throw new IllegalArgumentException("该会话不是 HTML 导入模式，请从「导入 HTML」创建会话");
+        }
+        if (StringUtils.hasText(session.getTemplateId())) {
+            throw new IllegalArgumentException("导入仅支持新建模板会话");
+        }
+        Path workDir = resolveEffectiveWorkDir(session);
+        try {
+            com.fastcms.ai.template.htmlimport.ImportService.ImportResult result =
+                    importService.importHtml(session, workDir, file);
+            java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+            data.put("pageCount", result.pageCount());
+            data.put("assetCount", result.assetCount());
+            data.put("notes", result.notes());
+            log.info("HTML 导入完成: sessionId={}, userId={}, pages={}, assets={}",
+                    sessionId, userId, result.pageCount(), result.assetCount());
+            return data;
+        } catch (java.io.IOException e) {
+            log.error("HTML 导入失败: sessionId={}", sessionId, e);
+            throw new IllegalArgumentException("导入失败（读写文件异常）: " + e.getMessage());
         }
     }
 
@@ -621,41 +699,53 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     @Override
     public void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
                            String focusElementHint, boolean styleUpgrade, boolean deepRefresh,
-                           boolean fullRefresh, boolean fullInject, SseEmitter emitter) {
-        // SSE 通道封装：send 失败/断开回调即标记取消，各生成轮次检测后中断（见 SseChannel）
-        SseChannel channel = new SseChannel(emitter);
+                           boolean fullRefresh, boolean fullInject, String feedback,
+                           String confirmAction, SseEmitter emitter) {
+        // SSE 通道封装：RunChannel 适配（journal + 多订阅者扇出 + 显式取消），管线零改动（见 SseChannel）
+        RunChannel run = new RunChannel(AiTemplateConstants.SSE_EVENT_REASONING);
+        SseChannel channel = new SseChannel(run);
         AiTemplateSession session = getSession(sessionId);
         if (session == null) {
             sendError(channel, "会话不存在: " + sessionId);
             channel.complete();
             return;
         }
-        // 客户端断开/超时的容器回调：send 失败之外的第二条断开感知路径
-        emitter.onError(t -> channel.markCancelled());
-        emitter.onTimeout(channel::markCancelled);
+        // 会话级单任务防御：已有运行中任务（含终态未过期）时拒绝新任务——续看走 stream 端点
+        if (!runRegistry.tryRegister(sessionId, run)) {
+            sendError(channel, "该会话已有生成任务进行中，请等待完成或点击停止后再发送");
+            channel.complete();
+            return;
+        }
+        // 提交者连接作为第一个订阅者；断开/超时仅摘除订阅者（任务后台续跑），取消只由 stop 端点触发
+        run.subscribe(emitter, 0);
+        emitter.onError(t -> run.unsubscribe(emitter));
+        emitter.onTimeout(() -> run.unsubscribe(emitter));
 
         try {
             sseExecutor.execute(() -> {
                 try {
-                    doChatStream(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, channel);
+                    doChatStream(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, feedback, confirmAction, channel);
                 } catch (ChatCancelledException ce) {
-                    // 客户端断开/用户停止：已生成的文件已落盘（断点续传语义保留），
-                    // 落一条带标记的 assistant 消息，避免刷新后无法追溯这轮为何没有结果
-                    log.info("AI 模板生成已取消（客户端断开）: sessionId={}", sessionId);
+                    // 用户显式停止：已生成的文件已落盘（断点续传语义保留）。落一条带标记的
+                    // assistant 消息（含进度明细 + 本轮已累积的思考过程——中断后仍可回看）
+                    log.info("AI 模板生成已停止（用户停止）: sessionId={}", sessionId);
                     try {
                         messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
-                                AiTemplateConstants.MSG_FAIL_PREFIX + "生成已中断（连接断开或已停止），已生成的文件已保存，重新发送消息可继续。");
+                                AiTemplateConstants.MSG_FAIL_PREFIX + buildCancelledNote(session),
+                                run.reasoningSoFar());
                     } catch (Exception persistEx) {
-                        log.warn("取消消息落库异常: sessionId={}", sessionId, persistEx);
+                        log.warn("停止消息落库异常: sessionId={}", sessionId, persistEx);
                     }
                 } catch (Exception e) {
                     log.error("AI 模板生成 SSE 对话异常: sessionId={}", sessionId, e);
                     // 失败原因落库为带标记的 assistant 消息：会话刷新/重进后仍能看到失败原因
-                    // （不落库会产生"空壳会话"：只有用户需求，无回复无文件无 plan，且无从追溯）
+                    // （不落库会产生"空壳会话"：只有用户需求，无回复无文件无 plan，且无从追溯）；
+                    // 本轮已累积的思考过程一并落库（失败后仍可回看）
                     String errMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                     try {
                         messageService.saveMessage(sessionId, AiTemplateConstants.ROLE_ASSISTANT,
-                                AiTemplateConstants.MSG_FAIL_PREFIX + errMsg);
+                                AiTemplateConstants.MSG_FAIL_PREFIX + errMsg,
+                                run.reasoningSoFar());
                     } catch (Exception persistEx) {
                         log.warn("失败消息落库异常: sessionId={}", sessionId, persistEx);
                     }
@@ -665,11 +755,92 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 }
             });
         } catch (RejectedExecutionException e) {
-            // 有界线程池已满（并发长任务过多）：明确提示而不是无响应
+            // 有界线程池已满（并发长任务过多）：明确提示而不是无响应。
+            // 任务未启动：立即注销注册（未 finish 的 run 不会过期清理，不注销会阻塞该会话后续任务）
             log.warn("AI 模板生成任务被拒绝（线程池已满）: sessionId={}", sessionId);
+            runRegistry.remove(sessionId, run);
             sendError(channel, "当前 AI 任务并发已达上限，请稍后再试");
             channel.complete();
         }
+    }
+
+    /**
+     * 停止中断消息：进度明细 + 断点续传指引（会话刷新/重开后仍可追溯）
+     *
+     * <p>design 会话统计 plan.json 已完成页数；管线/微调会话统计已生成文件数。
+     * 统计本身失败不阻断中断消息（回退到通用文案）。</p>
+     */
+    private String buildCancelledNote(AiTemplateSession session) {
+        String generic = "生成已停止，已完成的进度已保存，重新发送消息可从断点继续。";
+        try {
+            if (AiTemplateConstants.isDesignMode(session)) {
+                String progress = MockupOrchestrator.describePageProgress(resolveEffectiveWorkDir(session));
+                if (progress != null) {
+                    return "生成已停止（已完成 " + progress + " 页设计），已完成的进度已保存，重新发送消息可从断点继续。";
+                }
+                return generic;
+            }
+            int files = fileService.listBySessionId(session.getSessionId()).size();
+            return "生成已停止，已生成 " + files + " 个文件，重新发送消息可从断点继续。";
+        } catch (Exception e) {
+            log.debug("停止消息进度统计失败，使用通用文案: sessionId={}", session.getSessionId(), e);
+            return generic;
+        }
+    }
+
+    // ==================== 任务运行态（关页后台续跑 + 重开续看） ====================
+
+    /**
+     * 会话运行态探测（前端打开会话时调用，决定是否续连 stream 端点）
+     */
+    @Override
+    public RunStatus getRunStatus(String sessionId) {
+        return runRegistry.get(sessionId)
+                .map(run -> new RunStatus(!run.isFinished(), run.lastSeq(), run.startedAt()))
+                .orElse(new RunStatus(false, 0L, 0L));
+    }
+
+    /**
+     * 续看运行中的任务：回放 journal 中 {@code seq > since} 的历史事件（含已发生的思考过程），
+     * 再挂为实时订阅者续接（SSE id 字段携带事件 seq，前端记录 lastSeq 供再次续连）
+     *
+     * <p>无运行任务时发 run-status 事件（running=false）后结束——前端据此走终态恢复
+     * （loadMessages / refreshFiles）。任务已结束（终态短保留期内）则仅回放不订阅，
+     * 回放完成后 complete（终态事件里含 done/error，前端照常收尾）。</p>
+     */
+    @Override
+    public void observeStream(String sessionId, long since, SseEmitter emitter) {
+        Optional<RunChannel> runOpt = runRegistry.get(sessionId);
+        if (runOpt.isEmpty()) {
+            try {
+                emitter.send(SseEmitter.event().name(AiTemplateConstants.SSE_EVENT_RUN_STATUS)
+                        .data("{\"running\":false}"));
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        RunChannel run = runOpt.get();
+        if (run.isFinished()) {
+            run.replayAndComplete(emitter, since);
+            return;
+        }
+        run.subscribe(emitter, since);
+        emitter.onError(t -> run.unsubscribe(emitter));
+        emitter.onTimeout(() -> run.unsubscribe(emitter));
+    }
+
+    /**
+     * 显式停止运行中的任务（管线各检查点检测后优雅中断，断点续传语义保留）
+     *
+     * @return false = 当前无运行中的任务
+     */
+    @Override
+    public boolean stopRun(String sessionId) {
+        return runRegistry.get(sessionId).map(run -> {
+            run.cancel();
+            return true;
+        }).orElse(false);
     }
 
     /**
@@ -677,6 +848,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      *
      * <p>流程：
      * <ol>
+     *     <li>（design 模式会话）分流到设计稿编排器：设计→审计→确认→转化状态机，管线逻辑零改动</li>
      *     <li>获取激活的 AI 模型配置，构造 ChatModel</li>
      *     <li>加载会话历史消息</li>
      *     <li>判断是首次对话（无历史）还是微调对话</li>
@@ -689,11 +861,52 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private void doChatStream(AiTemplateSession session, String userInput, String currentFile,
                               String focusSectionId, String focusElementHint, boolean styleUpgrade,
                               boolean deepRefresh, boolean fullRefresh, boolean fullInject,
-                              SseChannel channel) throws Exception {
-        // 0. 配额检查（fastcms.ai.daily-token-quota，超限直接拒绝，不产生模型调用）
+                              String feedback, String confirmAction, SseChannel channel) throws Exception {
+        // 0. 双模式分流：design 模式独立编排（设计→审计→确认→转化，§6.1 唯一修改的既有方法开头）；
+        //    import 模式复用同一编排器（plan.json 由 ingest 生成、CONVERTING 起步，html-import 设计 §5.4）。
+        //    管线会话（两者皆否）不进入分支，以下既有管线代码零改动。
+        if (AiTemplateConstants.isDesignMode(session) || AiTemplateConstants.isImportMode(session)) {
+            if (StringUtils.hasText(session.getTemplateId())) {
+                sendError(channel, "该模式仅支持新建模板会话");
+                return;
+            }
+            if (AiTemplateConstants.isDesignMode(session)
+                    && !aiProperties.getTemplate().getDesign().isEnabled()) {
+                sendError(channel, "设计稿模式暂未开启，请联系管理员");
+                return;
+            }
+            Path designWorkDir = resolveEffectiveWorkDir(session);
+            if (!MockupOrchestrator.STATE_DONE.equals(MockupOrchestrator.currentState(designWorkDir))) {
+                // SSE 适配（DesignSseSink 与设计模块解耦边界）：事件名/数据格式与管线同构
+                DesignSseSink designSink = new DesignSseSink() {
+                    @Override
+                    public void send(String eventName, String data) {
+                        channel.send(eventName, data);
+                    }
+
+                    @Override
+                    public boolean isCancelled() {
+                        return channel.isCancelled();
+                    }
+                };
+                try {
+                    mockupOrchestrator.run(session, designWorkDir, userInput, confirmAction, designSink);
+                } catch (com.fastcms.ai.template.design.DesignCancelledException de) {
+                    // 翻译为宿主取消语义：断开消息落库口径与管线一致（MSG 前缀由 chatStream 统一处理）
+                    throw new ChatCancelledException();
+                }
+                return;
+            }
+            // DONE 态：转化产物与管线产物同构（§7.1），落回下方既有组件化微调路径，不感知设计稿血统
+        }
+
+        // 0b. 智能体执行要素装配（builtin.template-generator：模型解析 + 用户级/智能体级配额 + 工具白名单）。
+        //    超限/配置缺失直接拒绝，不产生模型调用（与原配额检查行为一致，不落审计）
+        com.fastcms.ai.agent.AgentChatExecutor.Prepared prepared;
         try {
-            quotaChecker.check(session.getUserId());
-        } catch (AiQuotaExceededException e) {
+            prepared = agentChatExecutor.prepare(
+                    com.fastcms.ai.agent.BuiltinAgents.TEMPLATE_GENERATOR_ID, session.getUserId());
+        } catch (AiQuotaExceededException | IllegalArgumentException e) {
             sendError(channel, e.getMessage());
             return;
         }
@@ -705,7 +918,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         org.springframework.ai.chat.metadata.Usage[] lastUsage = {null};
 
         try {
-            doChatStreamInternal(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, channel, lastUsage);
+            doChatStreamInternal(session, userInput, currentFile, focusSectionId, focusElementHint, styleUpgrade, deepRefresh, fullRefresh, fullInject, feedback, channel, lastUsage, prepared);
             succeeded[0] = true;
         } catch (Exception e) {
             errorMessage[0] = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -730,14 +943,15 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     // 用量展示/回写失败不影响主流程（审计日志已有兜底）
                 }
             }
-            // 模型名只查一次（此前每个分支各调两次 getActiveConfig，各触发一次 DB 查询）
-            AiModelConfig auditConfig = modelConfigService.getActiveConfig();
-            String auditModel = auditConfig == null ? null : auditConfig.getModel();
+            // 审计携带智能体归属与实际使用模型（prepare 已解析，无需再查激活配置）
+            String auditModel = prepared.getModelName();
             if (succeeded[0]) {
-                usageRecorder.record(session.getUserId(), sceneOf(session), session.getSessionId(),
+                usageRecorder.record(com.fastcms.ai.agent.BuiltinAgents.TEMPLATE_GENERATOR_ID,
+                        session.getUserId(), sceneOf(session), session.getSessionId(),
                         auditModel, promptTokens, completionTokens, totalTokens, System.currentTimeMillis() - startTime);
             } else {
-                usageRecorder.recordError(session.getUserId(), sceneOf(session), session.getSessionId(),
+                usageRecorder.recordError(com.fastcms.ai.agent.BuiltinAgents.TEMPLATE_GENERATOR_ID,
+                        session.getUserId(), sceneOf(session), session.getSessionId(),
                         auditModel, System.currentTimeMillis() - startTime, errorMessage[0]);
             }
         }
@@ -755,36 +969,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     private void doChatStreamInternal(AiTemplateSession session, String userInput, String currentFile,
                                       String focusSectionId, String focusElementHint, boolean styleUpgrade,
                                       boolean deepRefresh, boolean fullRefresh, boolean fullInject,
-                                      SseChannel channel, org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
-        // 1. 获取激活的模型配置
-        AiModelConfig modelConfig = modelConfigService.getActiveConfig();
-        if (modelConfig == null) {
-            sendError(channel, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
-            return;
-        }
-        ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
+                                      String feedback, SseChannel channel,
+                                      org.springframework.ai.chat.metadata.Usage[] lastUsage,
+                                      com.fastcms.ai.agent.AgentChatExecutor.Prepared prepared) throws Exception {
+        // 1. 模型/工具来自智能体装配（builtin.template-generator；轮次参数仍由管线自控，见 buildPipelineOptions）
+        AiModelConfig modelConfig = prepared.getModelConfig();
         // 聚焦注入模式 + 调整型会话：追加每请求闭包工具（read_template_file /
         // search_template_files），闭包捕获本会话工作目录与 SSE 通道，AI 可按需检索全站文件。
         // 全量注入（fullInject 请求级开关 > full 配置级开关）不挂——所有文件已注入，无按需检索必要
         boolean focusMode = !fullInject
                 && !"full".equalsIgnoreCase(aiProperties.getAdjustInjectMode())
                 && StringUtils.hasText(session.getTemplateId());
-        org.springframework.ai.tool.ToolCallback[] allTools;
-        if (focusMode) {
-            org.springframework.ai.tool.ToolCallback[] globalTools = toolCallbackProvider.getToolCallbacks();
-            org.springframework.ai.tool.ToolCallback[] perRequestTools =
-                    new com.fastcms.ai.tool.TemplateContextToolFactory()
-                            .createCallbacks(resolveEffectiveWorkDir(session), channel::send);
-            allTools = new org.springframework.ai.tool.ToolCallback[globalTools.length + perRequestTools.length];
-            System.arraycopy(globalTools, 0, allTools, 0, globalTools.length);
-            System.arraycopy(perRequestTools, 0, allTools, globalTools.length, perRequestTools.length);
-        } else {
-            allTools = toolCallbackProvider.getToolCallbacks();
-        }
-        ChatClient chatClient = ChatClient.builder(chatModel)
-                // 挂载 @AiTool 注册的工具（当前无工具时为空数组，不影响调用）
-                .defaultTools(allTools)
-                .build();
+        org.springframework.ai.tool.ToolCallback[] perRequestTools = focusMode
+                ? new com.fastcms.ai.tool.TemplateContextToolFactory()
+                        .createCallbacks(resolveEffectiveWorkDir(session), channel::send)
+                : new org.springframework.ai.tool.ToolCallback[0];
+        // 白名单全局工具（智能体 tools 勾选）+ 请求级闭包工具合并挂载
+        ChatClient chatClient = prepared.createChatClient(perRequestTools);
 
         // 2. 加载历史消息
         List<AiTemplateMessage> history = messageService.listBySessionId(session.getSessionId());
@@ -809,7 +1010,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             boolean deepRefreshAllowed = deepRefresh && styleUpgrader.hasUpgradePlan(upgradeDir);
             if (legacy || deepRefreshAllowed) {
                 runStyleUpgradePipeline(session, modelConfig, chatClient, channel, lastUsage,
-                        deepRefreshAllowed, fullRefresh);
+                        deepRefreshAllowed, fullRefresh, feedback);
                 return;
             }
             sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
@@ -1118,6 +1319,18 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, "已生成 " + successCount + " 个文件");
             }
 
+            // 问题2b：对话修改轮数 +1——调整型会话本轮真正写盘了文件才算一轮有效修改；
+            // 计数点在整轮对话收尾（渲染修复轮 continue 重入后此处只走一次，不重复计数），
+            // 供下次焕新的确认提示与基线整合播报使用
+            if (isAdjust && totalFiles > 0) {
+                try {
+                    styleUpgrader.incrAdjustCount(resolveEffectiveWorkDir(session));
+                } catch (Exception e) {
+                    log.warn("更新对话修改轮数失败（不影响本轮产物）: sessionId={}",
+                            session.getSessionId());
+                }
+            }
+
             // 推送完成事件；自动修复后仍存在渲染错误时如实告知（不再谎报"已完成"）
             String summary;
             if (!renderErrors.isEmpty()) {
@@ -1174,32 +1387,143 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      * @param deepRefresh 深度焕新：重置计划把文件（含已完成）再改造一轮；默认智能焕新
      *                    （先 AI 规划调用判定最小重做范围，只重做方向耦合的页面）
      * @param fullRefresh 全量焕新：跳过范围评估，全部计划文件恢复备份底稿重做（换设计方向兜底）
+     * @param userFeedback 用户焕新意见（可空；P0-1 定向修正目标 + P0-2 方向关键词命中）
      */
     private void runStyleUpgradePipeline(AiTemplateSession session, AiModelConfig modelConfig,
                                          ChatClient chatClient, SseChannel channel,
                                          org.springframework.ai.chat.metadata.Usage[] lastUsage,
-                                         boolean deepRefresh, boolean fullRefresh) throws Exception {
+                                         boolean deepRefresh, boolean fullRefresh,
+                                         String userFeedback) throws Exception {
         Path workDir = resolveEffectiveWorkDir(session);
         String sessionId = session.getSessionId();
 
         // ===== 阶段零：智能焕新范围评估（AI 规划调用；仅智能焕新，评估失败回退全量） =====
-        List<String> smartScope = null;
+        // P2-2：范围从文件级升级为区块级（整文件重做 + 仅恢复方向耦合区块），
+        // 解析失败自动回退文件级/全量（降级硬保证，管线不中断）
+        com.fastcms.ai.component.LegacyStyleUpgrader.RefreshScope smartScope = null;
         if (deepRefresh && !fullRefresh) {
-            smartScope = evaluateRefreshScope(session, chatClient, channel, workDir, lastUsage);
+            smartScope = evaluateRefreshScope(session, chatClient, channel, workDir, lastUsage,
+                    userFeedback);
+        }
+
+        // ===== 阶段零 b：上一轮上下文提取（P0-1 迭代记忆 + P1 功能补丁） =====
+        // 结构摘要必须在 restartPlan 恢复备份底稿【之前】对磁盘当前版本构建（恢复后即旧稿，
+        // 摘要失真）；实时构建而非读计划存储值——两轮之间用户可能对话微调过。
+        // 摘要失败（IO 等）仅降级为无回顾段（同现状逻辑），不中断焕新。
+        // 功能补丁（P1 治 R4）不限于焕新轮读取：中断焕新的断点续传同样要回喂——
+        // 续传批次改造的仍是恢复后的备份底稿，补丁不回喂则修复债务随恢复丢失。
+        com.fastcms.ai.component.LegacyStyleUpgrader.LastRoundInfo lastRound = null;
+        try {
+            lastRound = styleUpgrader.readLastRound(workDir);
+        } catch (Exception e) {
+            log.warn("读取上一轮上下文失败: sessionId={}", sessionId, e);
+        }
+        Map<String, com.fastcms.ai.component.LegacyStyleUpgrader.FileFixPatches> lastRoundFixPatches =
+                lastRound != null && lastRound.fixPatches() != null
+                        ? lastRound.fixPatches() : Map.of();
+        String lastRoundDigest = null;
+        if (deepRefresh) {
+            try {
+                List<String> digestScope = smartScope != null
+                        ? smartScope.allFiles() : styleUpgrader.listPlannedFiles(workDir);
+                Map<String, String> digest = styleUpgrader.buildStructureDigest(workDir, digestScope);
+                if (!digest.isEmpty()) {
+                    StringBuilder buf = new StringBuilder();
+                    if (lastRound != null && StringUtils.hasText(lastRound.direction())) {
+                        buf.append("（上一轮设计方向：").append(lastRound.direction()).append("）\n");
+                    }
+                    digest.forEach((file, d) ->
+                            buf.append(file).append(":\n").append(d).append("\n"));
+                    lastRoundDigest = buf.toString();
+                }
+            } catch (Exception e) {
+                log.warn("构建上一轮结构摘要失败，本轮焕新不带回顾段: sessionId={}", sessionId, e);
+            }
+        }
+
+        // ===== 阶段零 c：焕新上下文（否决方向集合 + 对话修改计数；问题3c/4/2a） =====
+        // 本轮否决集合 = 计划已持久化的 rejectedDirections + 上一轮方向反查（焕新触发 =
+        // 否决上一轮方向；restartPlan 内部同样会追加并持久化，此处先构建供方向解析用，
+        // 保证选方向时不会选回刚被否决的一轮——与 restartPlan 持久化的集合同口径）
+        Set<String> rejectedForThisRound = deepRefresh
+                ? readRejectedWithLastRound(workDir) : Set.of();
+        // 焕新前的对话修改轮数（restartPlan 会清零，必须在其之前读取）
+        int adjustCountBeforeRefresh = 0;
+        if (deepRefresh) {
+            try {
+                adjustCountBeforeRefresh = styleUpgrader.readAdjustCount(workDir);
+            } catch (Exception e) {
+                log.warn("读取对话修改轮数失败，本轮不播报整合提示: sessionId={}", sessionId);
+            }
         }
 
         // ===== 阶段一：确定性前置（幂等，断点续传时读计划不重复执行；深度焕新走 restartPlan） =====
+        // 问题3c 命中透出：反馈关键词命中即播报识别结果——用户能看到系统如何理解了自己的话，
+        // 发现反语义误解（如「不要太暗」被识别成提亮）可立即中断重填
+        if (deepRefresh && StringUtils.hasText(userFeedback)) {
+            String matchedDirection = com.fastcms.ai.template.TemplateGenPromptBuilder
+                    .matchedFeedbackDirectionName(userFeedback);
+            if (matchedDirection != null) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "已识别反馈方向：" + matchedDirection
+                                + "（若与你的意图不符可中断后换种说法，"
+                                + "「不要太暗」这类否定表达会被自动忽略，不会反向理解）\n");
+            }
+        }
+        // 问题4 池耗尽提示：全部设计方向（3 内置 + 4 反馈，见②扩池）均被否决才触发，
+        // 引导转向定向微调；仅内置耗尽时静默落反馈方向（有完整资产，属正常轮换）
+        if (deepRefresh && com.fastcms.ai.template.TemplateGenPromptBuilder
+                .rotationExhausted(rejectedForThisRound)) {
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "全部设计方向（含修正型方向）均已焕新过并被否决：本轮将按最早否决的方向重新轮换。"
+                            + "建议改为对话描述具体问题做定向微调（如「首页 banner 太单调，加强视觉层次」），"
+                            + "AI 只改相关页面，更快更准。\n");
+        }
+        int smartSectionCount = smartScope == null ? 0 : smartScope.sectionRedo().size();
         sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, deepRefresh
                 ? (smartScope != null
-                        ? "正在智能焕新：从原始备份恢复 " + smartScope.size() + " 个页面的旧版底稿 → "
-                                + "重置升级计划 → 刷新组件库 CSS → 以新的设计方向重新改造"
-                                + "（其余页面保留当前版本，自动继承 tokens.css 换肤）…\n"
+                        ? "正在智能焕新：从原始备份恢复 " + smartScope.allFiles().size() + " 个页面的旧版底稿"
+                                + (smartSectionCount > 0
+                                        ? "（其中 " + smartSectionCount + " 个仅恢复方向耦合的区块）" : "")
+                                + " → 重置升级计划 → 刷新组件库 CSS → 以新的设计方向重新改造"
+                                + "（其余页面/区块保留当前版本，自动继承 tokens.css 换肤）…\n"
                         : "正在全量焕新：从原始备份恢复旧版页面 → 重置升级计划 → 刷新组件库 CSS → "
                                 + "全部页面（含公共布局）以新的设计方向重新改造…\n")
                 : "正在准备样式组件化升级：备份原文件 → 扫描 JS 依赖锚点 → 引入组件库 CSS…\n");
+        // P0-3: 轮换方向资产键——深度焕新按资产 tokensOverride 重写 tokens.css（确定性换肤，
+        // 保留页面经变量同步换肤到新方向）；反馈定向修正/非焕新为 null（默认 tokens）。
+        // 轮次 = 计划 refreshCount + 1，与 restartPlan 内部递增及提示词方向解析同口径。
+        String directionKey = deepRefresh
+                ? com.fastcms.ai.template.TemplateGenPromptBuilder.resolveDirectionAssetKey(
+                        styleUpgrader.getStatus(workDir).refreshCount() + 1, userFeedback,
+                        rejectedForThisRound)
+                : null;
         com.fastcms.ai.component.LegacyStyleUpgrader.StyleUpgradePlan plan = deepRefresh
-                ? styleUpgrader.restartPlan(workDir, session.getTemplateName(), smartScope)
+                ? styleUpgrader.restartPlan(workDir, session.getTemplateName(), smartScope, directionKey)
                 : styleUpgrader.prepare(workDir, session.getTemplateName());
+
+        // 问题1c：区块级恢复降级实况播报——恢复失败静默降级为整文件重做会放大改动范围，
+        // 必须让用户看到（透明度），可据此决定接受或中断改用定向微调
+        if (plan.sectionDowngrades() != null && !plan.sectionDowngrades().isEmpty()) {
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "\n⚠ " + plan.sectionDowngrades().size() + " 个页面区块级底稿恢复失败，"
+                            + "已自动降级为整文件重做（" + String.join("、", plan.sectionDowngrades())
+                            + "）——改动范围比区块级焕新大，属正常回退不影响功能保留。\n");
+        }
+
+        // 问题2a/①：对话修改整合结果按基线重建实际结果播报（restartPlan 之后才能知道）。
+        // 重建失败时不得宣称"不会丢失"——重做页面已从旧基线恢复，微调会被新改造覆盖
+        if (deepRefresh && adjustCountBeforeRefresh > 0) {
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    plan.baselineRebuilt()
+                            ? "检测到焕新前有 " + adjustCountBeforeRefresh
+                                    + " 轮对话修改：本轮焕新已将它们整合进底稿基线"
+                                    + "（原版本自动另存备份目录），无需担心微调丢失。\n"
+                            : "⚠ 基线重建失败：焕新前 " + adjustCountBeforeRefresh
+                                    + " 轮对话修改未能整合进底稿，重做页面将从旧基线恢复、"
+                                    + "这些页面的微调会被新改造覆盖（保留页面不受影响）。"
+                                    + "焕新完成后可对话重新微调这些页面。\n");
+        }
 
         List<String> pending = new ArrayList<>(plan.pageFiles());
         if (pending.isEmpty()) {
@@ -1244,11 +1568,14 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             }
             // token 预算：批次文件总量超预算时从队尾裁剪（被裁文件留在 pending，
             // 下一批继续），防止大文件拼批撑爆模型上下文（400 溢出）
-            String batchSection = buildBatchFileSection(workDir, batch);
+            // P2-2：区块级重做文件带「仅区块 N/M 需重新设计」标注（AI 不动保留区块）
+            String batchSection = buildBatchFileSection(workDir, batch,
+                    smartScope != null ? smartScope.sectionRedo() : Map.of());
             int preTrimSize = batch.size();
             while (batch.size() > 1 && estimateTokens(batchSection) > UPGRADE_BATCH_TOKEN_BUDGET) {
                 batch.remove(batch.size() - 1);
-                batchSection = buildBatchFileSection(workDir, batch);
+                batchSection = buildBatchFileSection(workDir, batch,
+                        smartScope != null ? smartScope.sectionRedo() : Map.of());
             }
             if (batch.size() < preTrimSize) {
                 log.info("升级批次超出 token 预算({}), 已从 {} 个文件裁剪至 {}: sessionId={}",
@@ -1262,7 +1589,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             messages.add(new UserMessage(promptBuilder.buildStyleUpgradePrompt(
                     batchSection, plan.anchors(),
                     doneCount, doneCount + remaining.size(),
-                    batch.contains("_layout.html"), plan.refreshCount())));
+                    batch.contains("_layout.html"), plan.refreshCount(),
+                    lastRoundDigest, userFeedback, rejectedForThisRound,
+                    renderFixPatchesDigest(lastRoundFixPatches, batch))));
 
             java.util.function.Function<String, String> fileStatusResolver = path -> "正在改造 " + path + "…";
 
@@ -1317,12 +1646,18 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                             + " 时 AI 输出解析失败，已完成的文件已保存，可重新发起升级继续（自动从剩余文件续传）");
                 }
 
-                // 锚点存活校验：写盘前用旧内容对比新内容（写盘后旧内容被覆盖，无从校验）
+                // 锚点存活校验：写盘前用旧内容对比新内容（写盘后旧内容被覆盖，无从校验）；
+                // P1: 历史功能补丁校验（宏默认值/上一轮新增锚点在新内容中必须存活）并入同一修复链
                 List<String> missingAnchors = collectMissingAnchors(workDir, files);
+                for (String miss : collectMissingFixPatches(files, lastRoundFixPatches)) {
+                    if (!missingAnchors.contains(miss)) {
+                        missingAnchors.add(miss);
+                    }
+                }
                 if (!missingAnchors.isEmpty() && anchorFixRounds < STYLE_UPGRADE_MAX_FIX_ROUNDS) {
                     anchorFixRounds++;
                     sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
-                            "\n（检测到改造丢失 " + missingAnchors.size() + " 个 JS 锚点，正在自动找回…）\n");
+                            "\n（检测到改造丢失 " + missingAnchors.size() + " 个 JS 锚点/功能修复，正在自动找回…）\n");
                     String replySoFar = parsed.getReply();
                     if (StringUtils.hasText(replySoFar) && !replyExtractor.wasEmitted()) {
                         sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, replySoFar);
@@ -1447,22 +1782,48 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     "\n🔍 视觉审计发现 " + audit.issues().size() + " 个样式问题（失效 class / 未定义变量 / "
                             + "旧 CSS 残留等，这是页面显乱的原因），自动修复第 " + auditRound + " 轮…\n");
             runAuditFixRound(session, modelConfig, chatClient, channel, lastUsage, usageTotal,
-                    roundMaxTokens, audit);
+                    roundMaxTokens, audit, com.fastcms.ai.template.TemplateGenPromptBuilder
+                            .directionLanguage(plan.refreshCount(), userFeedback, rejectedForThisRound));
             audit = styleUpgrader.auditUpgrade(workDir);
         }
 
         // ===== 阶段四：收尾留痕 =====
+        // P0-1：组装本轮 lastRound（方向/结构摘要/用户意见/审计问题）落盘计划文件，
+        // 供下一轮焕新回喂——多轮焕新从「失忆重抽」变为「有记忆的定向精修」。
+        // P1：附带功能修复补丁（「备份原始稿 vs 当前产物」的功能维度 diff：宏默认值/
+        // 锚点补全/脚本修正）——下一轮恢复备份底稿后回喂重落实，修复债务不再随恢复丢失。
+        // 首次升级同样落盘（refreshCount=0 的产出摘要），第 1 次焕新即有回顾素材。
+        // 失败仅告警，不影响本轮产物与摘要输出。
+        try {
+            Map<String, String> roundDigest = styleUpgrader.buildStructureDigest(
+                    workDir, styleUpgrader.listPlannedFiles(workDir));
+            List<String> roundIssues = audit.issues().stream()
+                    .map(i -> i.file() + ": " + i.type())
+                    .limit(20)
+                    .toList();
+            Map<String, com.fastcms.ai.component.LegacyStyleUpgrader.FileFixPatches> roundPatches =
+                    plan.backupDir() == null ? Map.of()
+                            : styleUpgrader.buildFixPatches(workDir, plan.backupDir(),
+                                    styleUpgrader.listPlannedFiles(workDir), plan.anchors());
+            styleUpgrader.updatePlanLastRound(workDir,
+                    new com.fastcms.ai.component.LegacyStyleUpgrader.LastRoundInfo(
+                            designDirectionName(plan.refreshCount(), userFeedback, rejectedForThisRound),
+                            roundDigest, userFeedback, roundIssues, roundPatches));
+        } catch (Exception e) {
+            log.warn("收尾更新 lastRound 失败（不影响本轮产物）: sessionId={}", sessionId, e);
+        }
         String auditNote = audit.clean()
                 ? "视觉审计通过（无失效样式）"
                 : "仍有 " + audit.issues().size() + " 个样式问题未自动修复（可继续对话指定修复，或换设计方向再次深度焕新）";
         String scopeNote = deepRefresh && keptCount > 0
-                ? "重做 " + (doneCount - keptCount) + " 个文件（含公共布局），保留 "
-                        + keptCount + " 个页面（经 tokens.css 变量自动换肤）"
+                ? "重做 " + (doneCount - keptCount) + " 个文件（含公共布局"
+                        + (smartSectionCount > 0 ? "，其中 " + smartSectionCount + " 个为区块级重做" : "")
+                        + "），保留 " + keptCount + " 个页面（经 tokens.css 变量自动换肤）"
                 : deepRefresh ? "全部 " + doneCount + " 个文件（含公共布局）"
                 : "改造 " + doneCount + " 个文件（含公共布局）";
         String summary = (deepRefresh
                 ? "深度焕新（第 " + plan.refreshCount() + " 次，本轮设计方向："
-                        + designDirectionName(plan.refreshCount()) + "）完成："
+                        + designDirectionName(plan.refreshCount(), userFeedback, rejectedForThisRound) + "）完成："
                 : "样式组件化升级完成：")
                 + scopeNote + "，视觉切换为组件库风格，"
                 + "JS 功能与元素锚点已按契约保留，" + auditNote
@@ -1475,28 +1836,58 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     /**
-     * 深度焕新轮次对应的 设计方向名（与 TemplateGenPromptBuilder.buildStyleUpgradePrompt 的轮换表一致）
+     * 深度焕新轮次对应的设计方向名：委托 TemplateGenPromptBuilder 单一来源
+     * （用户反馈命中关键词时返回命中方向，否则按未被否决的轮换池；三处方向定义不再各自硬编码）
      */
-    private static String designDirectionName(int refreshRound) {
-        if (refreshRound <= 0) {
-            return "默认现代风";
+    private static String designDirectionName(int refreshRound, String userFeedback,
+                                              java.util.Set<String> rejectedKeys) {
+        return com.fastcms.ai.template.TemplateGenPromptBuilder.designDirectionName(
+                refreshRound, userFeedback, rejectedKeys);
+    }
+
+    /**
+     * 读取本轮焕新的否决方向集合（问题3c/4）：计划已持久化的 rejectedDirections
+     * + 上一轮方向反查（焕新触发 = 否决上一轮方向；与 restartPlan 持久化的集合同口径，
+     * 范围评估与实际焕新选方向不漂移）。读取失败返回空集（回退为不排除，不中断焕新）。
+     */
+    private Set<String> readRejectedWithLastRound(Path workDir) {
+        Set<String> rejected = new java.util.LinkedHashSet<>();
+        try {
+            rejected.addAll(styleUpgrader.readRejectedDirections(workDir));
+        } catch (Exception e) {
+            log.warn("读取已否决方向失败，本轮按空集处理: {}", e.getMessage());
         }
-        String[] names = {"现代商务风", "轻盈优雅风", "杂志编辑风"};
-        return names[(refreshRound - 1) % names.length];
+        try {
+            com.fastcms.ai.component.LegacyStyleUpgrader.LastRoundInfo lastRound =
+                    styleUpgrader.readLastRound(workDir);
+            if (lastRound != null && StringUtils.hasText(lastRound.direction())) {
+                String lastKey = com.fastcms.ai.component.DesignDirectionLibrary
+                        .nameToKey(lastRound.direction());
+                if (lastKey != null) {
+                    rejected.add(lastKey);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取上一轮方向失败，否决集合不含上一轮: {}", e.getMessage());
+        }
+        return rejected;
     }
 
     /**
      * 智能焕新范围评估（焕新前的 AI 规划调用）
      *
-     * <p>给 AI 一份各页面"方向耦合度指纹"（深色区/渐变/主色/hero 计数 + utility 密度），
-     * 让它判定落实新设计方向必须重做的最小文件集合；未选中的页面保留当前版本，
+     * <p>给 AI 一份各页面「方向耦合度指纹」（P2-2：文件级体量 + 每个顶层区块的
+     * 深色区/渐变/主色/超大标题/网格/卡片特征），让它判定落实新设计方向必须重做的
+     * 最小集合——可整文件，也可只到区块级；未选中的文件/区块保留当前版本，
      * 通过 tokens.css 变量自动换肤。规划失败/解析失败回退 null（调用方走全量焕新）。</p>
      *
-     * @return 重做文件清单（null = 回退全量）
+     * @return 焕新范围（整文件 + 区块级；null = 回退全量）
      */
-    private List<String> evaluateRefreshScope(AiTemplateSession session, ChatClient chatClient,
-                                              SseChannel channel, Path workDir,
-                                              org.springframework.ai.chat.metadata.Usage[] lastUsage) throws Exception {
+    private com.fastcms.ai.component.LegacyStyleUpgrader.RefreshScope evaluateRefreshScope(
+            AiTemplateSession session, ChatClient chatClient,
+            SseChannel channel, Path workDir,
+            org.springframework.ai.chat.metadata.Usage[] lastUsage,
+            String userFeedback) throws Exception {
         List<String> plannedFiles = styleUpgrader.listPlannedFiles(workDir);
         if (plannedFiles.isEmpty()) {
             return null;
@@ -1505,72 +1896,177 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
 
         sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                 "\n智能焕新范围评估：AI 正在分析 " + plannedFiles.size()
-                        + " 个页面的方向耦合度，判定最小重做集合…\n");
+                        + " 个页面的方向耦合度（文件级 + 区块级），判定最小重做集合…\n");
 
-        // 指纹：路径 + 体量 + 方向耦合特征统计（深色区/渐变/主色/hero/utility 密度）
+        // 指纹（P2-2 区块级）：文件体量 + 每个顶层区块的方向耦合特征统计
         StringBuilder fingerprints = new StringBuilder();
+        Map<String, Integer> blockCounts = new LinkedHashMap<>();
         for (String rel : plannedFiles) {
-            String line = "- " + rel + ": 文件不存在";
+            String line = "- " + rel + ": 文件不存在\n";
             try {
                 String content = java.nio.file.Files.readString(workDir.resolve(rel));
-                int dark = countMatches(content, "bg-slate-800", "bg-slate-900", "bg-gray-800",
-                        "bg-gray-900", "bg-primary-700", "bg-primary-800", "bg-primary-900", "text-white");
-                int gradient = countMatches(content, "gradient");
-                int primary = countMatches(content, "primary-");
-                int hero = countMatches(content, "hero", "banner");
+                List<int[]> spans = com.fastcms.ai.component.LegacyStyleUpgrader
+                        .locateTopLevelSections(content);
+                blockCounts.put(rel, spans.size());
+                StringBuilder fileLine = new StringBuilder("- ").append(rel).append(": ")
+                        .append(content.length() / 1024).append("K字符, 顶层区块 ")
+                        .append(spans.size()).append(" 个");
                 int utility = countMatches(content, "max-w-", "rounded-", "bg-", "text-", "px-", "py-");
-                line = "- " + rel + ": " + (content.length() / 1024) + "K字符, utility≈" + utility
-                        + ", 深色区=" + dark + ", 渐变=" + gradient
-                        + ", 主色=" + primary + ", hero=" + hero;
+                fileLine.append(", utility≈").append(utility).append('\n');
+                for (int i = 0; i < spans.size(); i++) {
+                    String block = content.substring(spans.get(i)[0], spans.get(i)[1]);
+                    fileLine.append("  · 区块").append(i + 1).append(": 深色=")
+                            .append(countMatches(block, "bg-slate-800", "bg-slate-900", "bg-gray-800",
+                                    "bg-gray-900", "bg-primary-700", "bg-primary-800",
+                                    "bg-primary-900", "text-white"))
+                            .append(", 渐变=").append(countMatches(block, "gradient"))
+                            .append(", 主色=").append(countMatches(block, "primary-"))
+                            .append(", 超大标题=").append(countMatches(block,
+                                    "text-6xl", "text-7xl", "text-8xl", "text-9xl"))
+                            .append(", 密集网格=").append(countMatches(block,
+                                    "grid-cols-3", "grid-cols-4"))
+                            .append(", 圆角卡片=").append(countMatches(block,
+                                    "rounded-xl", "rounded-lg", "rounded-2xl"))
+                            .append('\n');
+                }
+                line = fileLine.toString();
             } catch (java.io.IOException ignored) {
                 // 保留"文件不存在"默认行
             }
-            fingerprints.append(line).append('\n');
+            fingerprints.append(line);
         }
 
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(
                 session.getTemplateName(), isMobileAdaptive(session))));
         messages.add(new UserMessage(promptBuilder.buildRefreshScopePrompt(
-                fingerprints.toString(), nextRound)));
+                fingerprints.toString(), nextRound, userFeedback,
+                readRejectedWithLastRound(workDir))));
 
         long[] usageAgg = {0, 0, 0};
         String response = callModelRound(chatClient, messages, channel,
                 new ReplyStreamExtractor(), new StringBuilder(), usageAgg);
         lastUsage[0] = aggregateUsage(usageAgg);
 
-        // 解析 redesign 数组（容错：code fence / 前后说明文本都不影响）
-        List<String> scope = new ArrayList<>();
+        return parseRefreshScope(response, plannedFiles, blockCounts, channel);
+    }
+
+    /**
+     * 解析范围评估输出（P2-2 区块级，容错：code fence / 前后说明文本都不影响）：
+     * 对象条目 {@code {"file": "index.html", "sections": [1, 2]}} 为区块级重做
+     * （省略/非法 sections 降级整文件）；字符串条目 {@code "index.html"} 为整文件重做
+     * （向后兼容旧格式）。序号越界（对照当前版本区块数）同样降级整文件——
+     * 降级硬保证：任何解析失败都回退粗粒度，管线不中断
+     *
+     * @return 焕新范围（null = 未得出有效清单，回退全量）
+     */
+    private com.fastcms.ai.component.LegacyStyleUpgrader.RefreshScope parseRefreshScope(
+            String response, List<String> plannedFiles, Map<String, Integer> blockCounts,
+            SseChannel channel) {
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"redesign\"\\s*:\\s*\\[([^\\]]*)\\]")
                 .matcher(response == null ? "" : response);
-        if (m.find()) {
-            java.util.regex.Matcher entry = java.util.regex.Pattern
-                    .compile("\"([^\"]+)\"").matcher(m.group(1));
-            Set<String> planned = new java.util.HashSet<>(plannedFiles);
-            while (entry.find()) {
-                String p = entry.group(1).trim().replace('\\', '/');
-                while (p.startsWith("./")) {
-                    p = p.substring(2);
-                }
-                if (planned.contains(p) && !scope.contains(p)) {
-                    scope.add(p);
-                }
-            }
-        }
-        if (scope.isEmpty()) {
+        if (!m.find()) {
             sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
                     "\n（范围评估未得出有效清单，回退全量焕新）\n");
             return null;
         }
-        // _layout.html 强制纳入（站点门面）
-        if (plannedFiles.contains("_layout.html") && !scope.contains("_layout.html")) {
-            scope.add("_layout.html");
+        String arrayText = m.group(1);
+        Set<String> planned = new java.util.HashSet<>(plannedFiles);
+        List<String> fullFiles = new ArrayList<>();
+        Map<String, List<Integer>> sectionRedo = new LinkedHashMap<>();
+
+        // 对象条目（区块级）优先提取并从数组文本移除，剩余字符串条目按整文件解析
+        List<String> objectEntries = new ArrayList<>();
+        StringBuffer remainder = new StringBuffer();
+        java.util.regex.Matcher objM = java.util.regex.Pattern.compile("\\{[^{}]*\\}")
+                .matcher(arrayText);
+        while (objM.find()) {
+            objectEntries.add(objM.group());
+            objM.appendReplacement(remainder, " ");
         }
+        objM.appendTail(remainder);
+
+        for (String obj : objectEntries) {
+            java.util.regex.Matcher fm = java.util.regex.Pattern
+                    .compile("\"file\"\\s*:\\s*\"([^\"]+)\"").matcher(obj);
+            if (!fm.find()) {
+                continue;
+            }
+            String p = normalizeScopePath(fm.group(1));
+            if (!planned.contains(p) || fullFiles.contains(p) || sectionRedo.containsKey(p)) {
+                continue;
+            }
+            java.util.regex.Matcher sm = java.util.regex.Pattern
+                    .compile("\"sections\"\\s*:\\s*\\[([^\\]]*)\\]").matcher(obj);
+            List<Integer> sections = new ArrayList<>();
+            boolean sectionLevel = sm.find();
+            if (sectionLevel) {
+                java.util.regex.Matcher im = java.util.regex.Pattern.compile("\\d+")
+                        .matcher(sm.group(1));
+                while (im.find()) {
+                    sections.add(Integer.parseInt(im.group()));
+                }
+                // 非纯数字条目视为解析失败（降级整文件）
+                String leftovers = sm.group(1).replaceAll("\\d+", "")
+                        .replaceAll("[\\s,]", "");
+                sectionLevel = !sections.isEmpty() && leftovers.isEmpty();
+            }
+            if (sectionLevel) {
+                int blockCount = blockCounts.getOrDefault(p, 0);
+                for (int idx : sections) {
+                    if (idx < 1 || idx > blockCount) {
+                        sectionLevel = false;
+                        break;
+                    }
+                }
+            }
+            if (sectionLevel && !"_layout.html".equals(p)) {
+                sectionRedo.put(p, sections.stream().distinct().sorted().toList());
+            } else {
+                fullFiles.add(p);
+            }
+        }
+
+        // 字符串条目（整文件，向后兼容旧格式）
+        java.util.regex.Matcher entry = java.util.regex.Pattern
+                .compile("\"([^\"]+)\"").matcher(remainder.toString());
+        while (entry.find()) {
+            String p = normalizeScopePath(entry.group(1));
+            if (planned.contains(p) && !fullFiles.contains(p) && !sectionRedo.containsKey(p)) {
+                fullFiles.add(p);
+            }
+        }
+
+        if (fullFiles.isEmpty() && sectionRedo.isEmpty()) {
+            sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "\n（范围评估未得出有效清单，回退全量焕新）\n");
+            return null;
+        }
+        // _layout.html 强制纳入整文件（站点门面）
+        if (plannedFiles.contains("_layout.html") && !fullFiles.contains("_layout.html")) {
+            fullFiles.add("_layout.html");
+        }
+        int touched = fullFiles.size() + sectionRedo.size();
         sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
-                "\n评估结论：重做 " + scope.size() + " 个文件（" + String.join("、", scope)
-                        + "），保留 " + (plannedFiles.size() - scope.size()) + " 个页面。\n\n");
-        return scope;
+                "\n评估结论：重做 " + touched + " 个文件（" + String.join("、", fullFiles)
+                        + (sectionRedo.isEmpty() ? "" : "；区块级："
+                                + sectionRedo.entrySet().stream()
+                                .map(e -> e.getKey() + " 区块" + e.getValue())
+                                .collect(Collectors.joining("、")))
+                        + "），保留 " + (plannedFiles.size() - touched) + " 个页面。\n\n");
+        return new com.fastcms.ai.component.LegacyStyleUpgrader.RefreshScope(fullFiles, sectionRedo);
+    }
+
+    /**
+     * 范围路径归一化（容忍 AI 输出 "./xxx" 或反斜杠写法，与计划文件条目精确匹配）
+     */
+    private static String normalizeScopePath(String path) {
+        String p = path == null ? "" : path.trim().replace('\\', '/');
+        while (p.startsWith("./")) {
+            p = p.substring(2);
+        }
+        return p;
     }
 
     /**
@@ -1591,12 +2087,15 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     /**
      * 视觉审计修复轮：把审计问题清单 + 涉事文件交给 AI 修复，写盘前锚点校验（丢失找回一轮）、
      * 写盘后渲染校验（失败修复一轮）。与主改造轮共用用量统计与输出上限。
+     *
+     * @param directionLanguage 本轮设计方向的语言描述（P2-1：layout_language_mix 修复的统一基准，可空）
      */
     private void runAuditFixRound(AiTemplateSession session, AiModelConfig modelConfig,
                                   ChatClient chatClient, SseChannel channel,
                                   org.springframework.ai.chat.metadata.Usage[] lastUsage,
                                   long[] usageTotal, Integer roundMaxTokens,
-                                  com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeAuditReport audit) throws Exception {
+                                  com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeAuditReport audit,
+                                  String directionLanguage) throws Exception {
         Path workDir = resolveEffectiveWorkDir(session);
         List<String> affectedFiles = new ArrayList<>(audit.issues().stream()
                 .map(com.fastcms.ai.component.LegacyStyleUpgrader.AuditIssue::file)
@@ -1613,7 +2112,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         messages.add(new SystemMessage(promptBuilder.buildSystemPrompt(
                 session.getTemplateName(), isMobileAdaptive(session))));
         messages.add(new UserMessage(promptBuilder.buildAuditFixPrompt(
-                audit.issues(), buildBatchFileSection(workDir, affectedFiles))));
+                audit.issues(), buildBatchFileSection(workDir, affectedFiles), directionLanguage)));
 
         int fixRetries = 0;
         for (int round = 0; ; round++) {
@@ -1745,9 +2244,88 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     /**
+     * 渲染历史功能修复补丁摘要（P1 治 R4）：只输出本批涉及文件的补丁——
+     * 补丁在收尾时全量提取落盘，批次提示词只取交集，避免无关文件补丁冲爆上下文
+     *
+     * @return 补丁摘要文本；本批无命中文件或无补丁时返回 null（提示词不带该段）
+     */
+    private String renderFixPatchesDigest(
+            Map<String, com.fastcms.ai.component.LegacyStyleUpgrader.FileFixPatches> fixPatches,
+            List<String> batch) {
+        if (fixPatches.isEmpty() || batch == null || batch.isEmpty()) {
+            return null;
+        }
+        java.util.Set<String> batchSet = new java.util.HashSet<>();
+        for (String rel : batch) {
+            if (rel != null) {
+                batchSet.add(rel.trim().replace('\\', '/').replaceFirst("^\\./+", ""));
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        fixPatches.forEach((file, fp) -> {
+            if (!batchSet.contains(file) || fp == null) {
+                return;
+            }
+            sb.append("### ").append(file).append('\n');
+            for (String sig : fp.macroDefaults()) {
+                sb.append("- 宏定义需带默认值: <#macro ").append(sig).append(">\n");
+            }
+            for (String anchor : fp.addedAnchors()) {
+                sb.append("- 需新增锚点: ").append(anchor).append('\n');
+            }
+            for (String script : fp.scriptDiffs()) {
+                sb.append("- ").append(script).append('\n');
+            }
+            sb.append('\n');
+        });
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    /**
+     * 历史功能补丁存活校验（写盘前）：本批 AI 输出中命中补丁清单的文件，
+     * 其宏默认值/上一轮新增锚点必须在新内容中存活（脚本差异仅提示词回喂，不校验——
+     * 脚本无确定性指纹）。返回缺失项（与锚点校验同格式 "id:xxx"/"class:xxx"/"macro:签名"），
+     * 并入既有锚点修复循环，不新增循环
+     */
+    private List<String> collectMissingFixPatches(
+            List<AiTemplateFileDto> files,
+            Map<String, com.fastcms.ai.component.LegacyStyleUpgrader.FileFixPatches> fixPatches) {
+        List<String> missing = new ArrayList<>();
+        if (fixPatches.isEmpty()) {
+            return missing;
+        }
+        for (AiTemplateFileDto file : files) {
+            if (file.getPath() == null || file.getContent() == null
+                    || "delete".equalsIgnoreCase(file.getAction())) {
+                continue;
+            }
+            String normalized = file.getPath().trim().replace('\\', '/').replaceFirst("^\\./+", "");
+            com.fastcms.ai.component.LegacyStyleUpgrader.FileFixPatches fp = fixPatches.get(normalized);
+            if (fp == null) {
+                continue;
+            }
+            for (String miss : styleUpgrader.verifyFixPatches(file.getContent(), fp)) {
+                if (!missing.contains(miss)) {
+                    missing.add(miss);
+                }
+            }
+        }
+        return missing;
+    }
+
+    /**
      * 升级批次文件清单（相对路径 + 完整内容，与 buildTemplateFileSection 同构但只含本批文件）
      */
     private String buildBatchFileSection(Path workDir, List<String> relPaths) {
+        return buildBatchFileSection(workDir, relPaths, Map.of());
+    }
+
+    /**
+     * 升级批次文件清单（P2-2 区块级重载）：区块级重做文件在标题行标注
+     * 「仅区块 N、M 已恢复旧版底稿需重新设计」——AI 不动其余保留区块
+     */
+    private String buildBatchFileSection(Path workDir, List<String> relPaths,
+                                         Map<String, List<Integer>> sectionRedo) {
         StringBuilder sb = new StringBuilder();
         for (String rel : relPaths) {
             Path file = workDir.resolve(rel).normalize();
@@ -1755,7 +2333,16 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 continue;
             }
             try {
-                sb.append("### ").append(rel).append("\n```\n")
+                sb.append("### ").append(rel);
+                List<Integer> secs = sectionRedo.get(rel);
+                if (secs != null && !secs.isEmpty()) {
+                    sb.append("（注：本文件仅区块 ")
+                            .append(secs.stream().map(String::valueOf)
+                                    .collect(Collectors.joining("、")))
+                            .append(" 已恢复旧版底稿、需按本轮方向重新设计；")
+                            .append("其余区块已是新版，保持原样输出，不要改动）");
+                }
+                sb.append("\n```\n")
                         .append(Files.readString(file, StandardCharsets.UTF_8))
                         .append("\n```\n\n");
             } catch (IOException e) {
@@ -2939,6 +3526,14 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                                   String postReplyStatusLabel,
                                   java.util.function.Consumer<String> postReplyChunkConsumer) {
         StringBuilder responseBuffer = new StringBuilder();
+        // 思考流归一累积器（单轮私有）：统一识别累积/增量/重复帧/重启链四种透传形态。
+        // 重启链是本类存在前的实测事故——流式工具往返后思考流从头开始，旧逻辑"不匹配即
+        // 整段追加"使每个新轮快照都被全量追加，缓冲平方级膨胀直至 256KB 保险丝误报
+        // "思考失控"。累积器把差分基准切换为上一 chunk，多轮思考按增量拼接
+        ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
+        // 本轮真实累计思考字符数（独立于封顶缓冲 reasoningBuf：缓冲封顶后推送仍在继续，
+        // 只有此计数能反映思考失控的真实规模，用于下方失控保险丝判定）
+        long[] reasoningTotal = {0L};
         // 文件传输阶段状态是否已推送（每次调用独立）
         boolean[] filesStatusSent = {false};
         // 页面自动切换事件是否已推送（每轮只切一次：首个可路由 HTML 即目标页，
@@ -2973,35 +3568,27 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                             return;
                         }
                         org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
-                        // 推理模型的思考过程（非推理模型无此字段，跳过）
+                        // 推理模型的思考过程（非推理模型无此字段，跳过）。归一（累积/增量/
+                        // 重复帧/重启链，含零分配前缀匹配防 O(L²) 的内存教训）统一在累积器内，
+                        // 本处只推送真实增量；reasoningBuf 仅作落库镜像（差分追加 + 上限封顶）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
                         if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
-                            String rc = String.valueOf(reasoning);
-                            // 内存教训（native OOM 实例）：透传累积值时思考文本增长到 L，
-                            // 每 chunk 做 toString/startsWith/整体替换共 5 次全量复制，总量 O(L²)；
-                            // L 达 MB 级（推理模型重复循环）时产生海量 humongous 分配，
-                            // G1 扩堆失控最终耗尽 Windows 页面文件。故：
-                            // ① 前缀匹配改零分配 charAt 循环（不复制缓冲）；
-                            // ② 命中后只追加差分增量（不再 setLength(0)+append(rc) 整体替换）；
-                            // ③ 缓冲加硬上限，重复循环也打不爆内存
-                            int prevLen = reasoningBuf.length();
-                            boolean prefixMatch = rc.length() >= prevLen
-                                    && startsWithBuf(rc, reasoningBuf, prevLen);
-                            if (prefixMatch && rc.length() > prevLen) {
-                                // 累积模式（Spring AI 透传的是累积值）：推送差分增量，缓冲只追加增量
-                                String delta = rc.substring(prevLen);
-                                if (StringUtils.hasText(delta)) {
-                                    sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, delta);
-                                }
+                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
+                            if (delta != null && StringUtils.hasText(delta)) {
+                                sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, delta);
                                 appendReasoningCapped(reasoningBuf, delta);
-                            } else if (!prefixMatch) {
-                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加，
-                                // 覆盖缓冲会导致前端重复推送同一内容
-                                sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, rc);
-                                appendReasoningCapped(reasoningBuf, rc);
+                                reasoningTotal[0] += delta.length();
                             }
-                            // prefixMatch && 长度相等：累积模式的重复帧（无新增），跳过
+                            // 思考失控保险丝：真实累计思考量（含已推送前端的全部增量）超上限即主动中断模型流。
+                            // 缓冲封顶（appendReasoningCapped）只保内存不爆，但流不会停——会继续空转并持续
+                            // 向前端推送增量（实测 60 分钟失控会话：多轮思考全部顶满 256KB、正文零输出、
+                            // 前端无界累积最终超出 V8 字符串上限崩溃）。此处超限抛错中断流，与下方
+                            // responseBuffer 保险丝同构，走统一的失败处理（error 事件 + 失败落库）
+                            if (reasoningTotal[0] > REASONING_BUF_MAX_CHARS) {
+                                throw new RuntimeException("思考过程超出安全上限（" + (REASONING_BUF_MAX_CHARS / 1024)
+                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试或简化本次改动范围");
+                            }
                         }
                         // 正文增量
                         String chunk = output.getText();
@@ -3072,24 +3659,6 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             throw new RuntimeException("AI 调用失败: " + e.getMessage(), e);
         }
         return responseBuffer.toString();
-    }
-
-    /**
-     * 零分配前缀匹配：判断 s 的前 len 个字符是否与 buf 缓冲内容一致
-     *
-     * <p>替代 {@code rc.startsWith(reasoningBuf.toString())}——后者每个 chunk 都要
-     * 把整个缓冲复制成 String（思考文本 MB 级时是 humongous 分配的主要来源）。</p>
-     */
-    private static boolean startsWithBuf(String s, StringBuilder buf, int len) {
-        if (s.length() < len) {
-            return false;
-        }
-        for (int i = 0; i < len; i++) {
-            if (s.charAt(i) != buf.charAt(i)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /**
@@ -4335,6 +4904,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (request == null) {
             throw new IllegalArgumentException("请求不能为空");
         }
+        // 双模式字段校验（生成型/调整型会话统一生效，见 ai-template-two-mode-design.md §2.3）：
+        // 1) createMode 枚举白名单（防注入）；2) design 方向资产 key 必须命中 DesignDirectionLibrary。
+        // design/import 与 templateId 的互斥不在创建期拒绝——chat 分流处拦截并 SSE 提示（§6.1）。
+        String normalizedMode = StringUtils.hasText(request.getCreateMode())
+                ? request.getCreateMode().trim().toLowerCase() : null;
+        if (normalizedMode != null) {
+            if (!AiTemplateConstants.CREATE_MODE_PIPELINE.equals(normalizedMode)
+                    && !AiTemplateConstants.CREATE_MODE_DESIGN.equals(normalizedMode)
+                    && !AiTemplateConstants.CREATE_MODE_IMPORT.equals(normalizedMode)) {
+                throw new IllegalArgumentException("创建模式不合法: " + request.getCreateMode() + "（仅支持 pipeline/design/import）");
+            }
+            if (AiTemplateConstants.CREATE_MODE_DESIGN.equals(normalizedMode)
+                    && StringUtils.hasText(request.getDesignDirection())
+                    && com.fastcms.ai.component.DesignDirectionLibrary.get(request.getDesignDirection().trim()) == null) {
+                throw new IllegalArgumentException("设计方向不存在: " + request.getDesignDirection());
+            }
+        }
         // 调整型会话：模板名/需求描述均从正式模板与首轮对话中产生，跳过生成型校验
         if (StringUtils.hasText(request.getTemplateId())) {
             return;
@@ -4345,6 +4931,10 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // 模板目录名必须为英文、数字、下划线、横线
         if (!request.getTemplateName().matches("^[a-zA-Z][a-zA-Z0-9_-]*$")) {
             throw new IllegalArgumentException("模板目录名必须以英文字母开头，只能包含字母、数字、下划线、横线");
+        }
+        // 导入会话：页面内容来自上传文件，requirement 仅作补充说明（转化提示词），可空
+        if (AiTemplateConstants.CREATE_MODE_IMPORT.equals(normalizedMode)) {
+            return;
         }
         if (!StringUtils.hasText(request.getRequirement())) {
             throw new IllegalArgumentException("需求描述不能为空");

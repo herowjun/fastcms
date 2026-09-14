@@ -52,13 +52,19 @@ public class AiTemplateController {
 
     /**
      * SSE 超时时间：60 分钟（分批流水线逐文件生成，推理模型单文件可达 3-4 分钟，
-     * 10 个文件全程可能超 30 分钟；超时断流后后端仍会继续完成落盘，但前端看不到进度，
-     * 因此整体放宽。单轮流式调用超时由 AiModelConfigServiceImpl 的 callTimeout + Reactor 兜底控制）
+     * 10 个文件全程可能超 30 分钟，因此整体放宽。断流后任务后台续跑，重开页面可经
+     * stream 端点续看；单轮流式调用超时由 AiModelConfigServiceImpl 的 callTimeout + Reactor 兜底控制）
      */
     private static final long SSE_TIMEOUT = 60 * 60 * 1000L;
 
     @Autowired
     private IAiTemplateGenService templateGenService;
+
+    /**
+     * AI 配置（设计稿模式总开关：关闭时前端隐藏模式选项，等价于"功能不存在"，§7.5）
+     */
+    @Autowired
+    private com.fastcms.ai.autoconfigure.FastcmsAiProperties aiProperties;
 
     /**
      * 加载会话并校验属主：会话属于创建者本人，其他管理员（即使拥有 ai:template 权限）
@@ -108,6 +114,47 @@ public class AiTemplateController {
         } catch (IllegalArgumentException e) {
             return RestResultUtils.failed(e.getMessage());
         }
+    }
+
+    /**
+     * HTML 导入（zip 站包 / 单 HTML 文件）
+     *
+     * <p>createMode=import 会话专用：同步完成 ingest（解压防 slip + pageKey 推导 +
+     * 归一化落盘 + 资产归位 + plan.json 生成，状态 CONVERTING 起步）；
+     * 转化由前端随后走既有 chat 端点触发（编排器 CONVERTING 起步复用转化引擎）。</p>
+     *
+     * <p>multipart 表单，字段名 file；报告含 pageCount/assetCount/notes（显式标注）。</p>
+     */
+    @PostMapping("sessions/{sessionId}/import")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
+    public RestResult<java.util.Map<String, Object>> importHtml(
+            @PathVariable("sessionId") String sessionId,
+            @org.springframework.web.bind.annotation.RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        try {
+            return RestResultUtils.success(
+                    templateGenService.importHtml(sessionId, file, AuthUtils.getUserId()));
+        } catch (IllegalArgumentException e) {
+            return RestResultUtils.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * 设计稿先行模式选项（新建模板对话框"生成模式"数据源）
+     *
+     * <p>enabled=设计稿模式总开关（关闭时前端隐藏模式选项，§7.5 灰度语义）；
+     * directions=方向资产清单（key/name/summary，轮换池顺序，插件挂载的方向自动出现在尾部）。
+     * 读取端点复用 ai:template:list 资源点（打开对话框即可见，无独立权限域）。</p>
+     */
+    @GetMapping("design-options")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_LIST, resource = "ai:template:list", action = ActionTypes.READ)
+    public RestResult<java.util.Map<String, Object>> designOptions() {
+        java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("enabled", aiProperties.getTemplate().getDesign().isEnabled());
+        data.put("directions", com.fastcms.ai.component.DesignDirectionLibrary.listAssets());
+        return RestResultUtils.success(data);
     }
 
     /**
@@ -185,8 +232,62 @@ public class AiTemplateController {
                 request != null && Boolean.TRUE.equals(request.getDeepRefresh()),
                 request != null && Boolean.TRUE.equals(request.getFullRefresh()),
                 request != null && Boolean.TRUE.equals(request.getFullInject()),
+                request == null ? null : request.getFeedback(),
+                request == null ? null : request.getConfirmAction(),
                 emitter);
         return emitter;
+    }
+
+    // ==================== 任务运行态（关页后台续跑 + 重开续看） ====================
+
+    /**
+     * 会话运行态探测
+     *
+     * <p>前端打开会话时调用：任务仍在跑（页面关闭后后台续跑）则续连 stream 端点，
+     * 已结束则走终态恢复（loadMessages / refreshFiles）。</p>
+     */
+    @GetMapping("sessions/{sessionId}/run-status")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.READ)
+    public RestResult<IAiTemplateGenService.RunStatus> runStatus(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        return RestResultUtils.success(templateGenService.getRunStatus(sessionId));
+    }
+
+    /**
+     * 续看运行中的任务（SSE）
+     *
+     * <p>回放 since 之后的历史事件（含已发生的思考过程），再实时续接。
+     * 事件携带 SSE 标准 id（事件 seq），前端记录 lastSeq 供断线再次续连时增量回放。</p>
+     */
+    @GetMapping(value = "sessions/{sessionId}/stream", produces = "text/event-stream;charset=UTF-8")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.READ)
+    public SseEmitter stream(@PathVariable("sessionId") String sessionId,
+                             @RequestParam(value = "since", defaultValue = "0") long since) {
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
+        if (requireOwnedSession(sessionId) == null) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data("{\"message\":\"会话不存在\"}"));
+                emitter.complete();
+            } catch (java.io.IOException ignored) {
+            }
+            return emitter;
+        }
+        templateGenService.observeStream(sessionId, since, emitter);
+        return emitter;
+    }
+
+    /**
+     * 显式停止运行中的任务（断开连接不触发取消——关页面任务后台续跑，停止只能显式点击）
+     */
+    @PostMapping("sessions/{sessionId}/stop")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
+    public RestResult<Boolean> stop(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        return RestResultUtils.success(templateGenService.stopRun(sessionId));
     }
 
     /**
@@ -339,6 +440,22 @@ public class AiTemplateController {
             return RestResultUtils.failed("会话不存在");
         }
         return RestResultUtils.success(templateGenService.getLegacyUpgradeStatus(sessionId));
+    }
+
+    /**
+     * 设计稿先行模式确认状态（前端刷新后恢复确认卡片用）
+     *
+     * <p>plan.json 处于 AWAITING_CONFIRM 时返回确认卡片数据
+     * （{state, issues[], previewUrl, confirmAuto}，与 confirm_request SSE 事件同构），
+     * 其余状态返回 null——前端据此判断是否在会话历史末尾重建"确认转化/驳回修改"卡片。</p>
+     */
+    @GetMapping("sessions/{sessionId}/design-status")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_LIST, resource = "ai:template:list", action = ActionTypes.READ)
+    public RestResult<java.util.Map<String, Object>> designStatus(@PathVariable("sessionId") String sessionId) {
+        if (requireOwnedSession(sessionId) == null) {
+            return RestResultUtils.failed("会话不存在");
+        }
+        return RestResultUtils.success(templateGenService.getDesignConfirmCard(sessionId));
     }
 
     /**

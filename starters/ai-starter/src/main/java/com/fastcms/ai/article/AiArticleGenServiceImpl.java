@@ -16,23 +16,16 @@
  */
 package com.fastcms.ai.article;
 
-import com.fastcms.ai.audit.AiQuotaChecker;
+import com.fastcms.ai.agent.AgentChatExecutor;
+import com.fastcms.ai.agent.BuiltinAgents;
 import com.fastcms.ai.audit.AiQuotaExceededException;
 import com.fastcms.ai.audit.AiUsageRecorder;
-import com.fastcms.ai.service.IAiModelConfigService;
-import com.fastcms.ai.service.impl.AiModelConfigServiceImpl;
+import com.fastcms.ai.support.ReasoningStreamAccumulator;
 import com.fastcms.ai.support.ReplyStreamExtractor;
-import com.fastcms.ai.tool.AiToolCallbackProvider;
-import com.fastcms.entity.AiModelConfig;
 import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -56,7 +49,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * AI 文章内容生产服务实现（无状态）
  *
  * <p>三个能力：全文生成（SSE 流式）、划词改写（SSE 流式）、单字段候选（同步）。
- * 每次请求独立，不建会话；配额检查在模型调用前，审计落库在调用后。</p>
+ * 每次请求独立，不建会话。</p>
+ *
+ * <p>三个调用点均经 builtin.article-writer 智能体执行：{@link AgentChatExecutor}
+ * 统一装配模型/参数/技能注入/配额；提示词基底（人设 + 技能清单）来自智能体配置，
+ * 场景契约（输出 JSON 结构等）由本服务按解析逻辑追加；审计携带 agentId。</p>
  *
  * @author wjun_java@163.com
  * @since 0.2.0
@@ -67,6 +64,14 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
     private static final Logger log = LoggerFactory.getLogger(AiArticleGenServiceImpl.class);
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * 思考过程失控保险丝阈值：单轮累计思考字符数超此值视为模型陷入思考循环
+     * （正文零输出、持续空转烧 token），主动中断流。与模板管线
+     * {@code AiTemplateGenServiceImpl.REASONING_BUF_MAX_CHARS}（256KB）同构，
+     * 同时防止前端对 reasoning 增量的无界累积
+     */
+    private static final long REASONING_RUNAWAY_MAX_CHARS = 256L * 1024;
 
     /**
      * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）。
@@ -98,16 +103,10 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
     }
 
     @Autowired
-    private IAiModelConfigService modelConfigService;
-
-    @Autowired
-    private AiQuotaChecker quotaChecker;
+    private AgentChatExecutor agentChatExecutor;
 
     @Autowired
     private AiUsageRecorder usageRecorder;
-
-    @Autowired
-    private AiToolCallbackProvider toolCallbackProvider;
 
     @Autowired
     private com.fastcms.service.IAiArticleOpLogService articleOpLogService;
@@ -134,23 +133,21 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             return;
         }
 
-        AiModelConfig modelConfig = modelConfigService.getActiveConfig();
-        if (modelConfig == null) {
-            sendError(emitter, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
-            return;
-        }
-
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
         // 失败原因跟踪：finally 落审计时区分成功/失败（此前恒传 null，失败调用在 ai_usage_log 里 success=1）
         String[] errorMessage = {null};
         // 客户端断开标记：文章生成结果只推送给前端（无服务端持久化），断开后继续消费模型流纯属浪费上游 token
         final AtomicBoolean clientGone = new AtomicBoolean(false);
+        // 智能体执行要素（模型/参数/技能注入/配额一体装配；prepare 失败时为 null，审计降级记录）
+        AgentChatExecutor.Prepared prepared = null;
         try {
-            quotaChecker.check(userId);
+            prepared = agentChatExecutor.prepare(BuiltinAgents.ARTICLE_WRITER_ID, userId);
 
-            String systemPrompt = "你是专业的内容编辑，为 CMS 站点撰写文章。"
-                    + "输出严格的 JSON 对象（不要 markdown 代码块包裹），字段如下：\n"
+            // 智能体提示词基底（人设 + 技能清单，技能由 load_skill 按需加载）+ 全文生成场景契约
+            // （输出 JSON 结构由本服务的解析逻辑约定，属于代码契约而非可配置内容，故由调用方追加）
+            String systemPrompt = prepared.getBaseSystemPrompt() + "\n\n"
+                    + "全文生成任务契约：输出严格的 JSON 对象（不要 markdown 代码块包裹），字段如下：\n"
                     + "{\n"
                     + "  \"reply\": \"生成过程的一句话说明（20字内）\",\n"
                     + "  \"title\": \"文章标题，30字以内，含主关键词\",\n"
@@ -170,16 +167,16 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 userPrompt.append("\n补充要求：").append(request.getInstruction());
             }
 
-            ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
-            ChatClient chatClient = ChatClient.builder(chatModel)
-                    .defaultTools(toolCallbackProvider.getToolCallbacks())
-                    .build();
-
             StringBuilder responseBuffer = new StringBuilder();
             ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
             StringBuilder reasoningBuf = new StringBuilder();
+            // 思考流归一累积器（单轮私有）：累积/增量/重复帧/重启链统一差分（见类注释），
+            // reasoningBuf 只作落库镜像（差分追加），不再做 setLength+append 全量替换
+            ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
+            // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
+            long[] reasoningTotal = {0L};
 
-            chatClient.prompt(new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPrompt.toString()))))
+            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {
@@ -191,24 +188,22 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             return;
                         }
                         org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
-                        // 推理模型思考过程（累积值差分推送）
+                        // 推理模型思考过程（累积器归一后推送真实增量）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
                         if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
-                            String rc = String.valueOf(reasoning);
-                            String prev = reasoningBuf.toString();
-                            if (rc.length() > prev.length() && rc.startsWith(prev)) {
-                                // 累积模式：推送差分增量
-                                String delta = rc.substring(prev.length());
-                                if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta, clientGone);
-                                }
-                                reasoningBuf.setLength(0);
-                                reasoningBuf.append(rc);
-                            } else if (!rc.equals(prev)) {
-                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
-                                sendEvent(emitter, "reasoning", rc, clientGone);
-                                reasoningBuf.append(rc);
+                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
+                            if (delta != null && StringUtils.hasText(delta)) {
+                                sendEvent(emitter, "reasoning", delta, clientGone);
+                                reasoningBuf.append(delta);
+                                reasoningTotal[0] += delta.length();
+                            }
+                            // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
+                            // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
+                            if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
+                                throw new RuntimeException("思考过程超出安全上限（"
+                                        + (REASONING_RUNAWAY_MAX_CHARS / 1024)
+                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试");
                             }
                         }
                         String chunk = output.getText();
@@ -264,7 +259,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 opLog.setOriginalText(userPrompt.toString());
                 opLog.setRewrittenText(article.get("content"));
                 opLog.setReasoning(reasoningBuf.length() == 0 ? null : reasoningBuf.toString());
-                opLog.setModel(modelConfig.getModel());
+                opLog.setModel(prepared.getModelName());
                 opLog.setDurationMs(System.currentTimeMillis() - startTime);
                 opLogId = articleOpLogService.record(opLog);
             } catch (Exception logEx) {
@@ -276,7 +271,8 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             doneData.put("logId", opLogId);
             sendDone(emitter, MAPPER.writeValueAsString(doneData));
             log.info("AI 文章生成完成: userId={}, title={}", userId, article.get("title"));
-        } catch (AiQuotaExceededException e) {
+        } catch (AiQuotaExceededException | IllegalArgumentException e) {
+            // 配额超限 / 智能体配置问题（模型配置缺失、已停用等）：中文消息直接透出给用户
             errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
@@ -284,8 +280,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
-            recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_GEN, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
+            recordUsage(prepared, userId, IAiUsageLogService.Scene.ARTICLE_GEN, null, lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
@@ -311,18 +306,15 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             return;
         }
 
-        AiModelConfig modelConfig = modelConfigService.getActiveConfig();
-        if (modelConfig == null) {
-            sendError(emitter, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
-            return;
-        }
-
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
         String[] errorMessage = {null};
         final AtomicBoolean clientGone = new AtomicBoolean(false);
+        AgentChatExecutor.Prepared prepared = null;
         try {
-            quotaChecker.check(userId);
+            // 确定性文本变换场景：不注入技能清单（模型按场景契约直接执行，
+            // 技能清单会诱导中途 load_skill 读指令，输出风格被带偏且多一轮往返）
+            prepared = agentChatExecutor.prepare(BuiltinAgents.ARTICLE_WRITER_ID, userId, false);
 
             String operationDesc = switch (request.getOperation() == null ? "" : request.getOperation()) {
                 case AiArticleRewriteRequest.OP_EXPAND -> "扩写这段内容（保持原意，从多个角度补充细节、例证、数据或背景说明，"
@@ -332,7 +324,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 default -> "改写这段内容（换个表达方式，保持原意与篇幅）";
             };
 
-            String systemPrompt = "你是专业的文字编辑。只输出处理后的文本，"
+            // 智能体提示词基底 + 划词改写场景契约（纯文本输出、保留 HTML 结构，由本服务的流式推送逻辑约定）
+            String systemPrompt = prepared.getBaseSystemPrompt() + "\n\n"
+                    + "划词改写任务契约：只输出处理后的文本，"
                     + "保留原有 HTML 标签结构（如 h2/p/ul/strong），不要任何解释、不要代码块包裹。"
                     + "若提供了前后文，处理结果需与前后文在文风、语气、语义上自然衔接。";
 
@@ -352,12 +346,14 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             }
             userPrompt.append("\n内容：\n").append(request.getText());
 
-            ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-
             StringBuilder rewritten = new StringBuilder();
             StringBuilder reasoningBuf = new StringBuilder();
-            chatClient.prompt(new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPrompt.toString()))))
+            // 思考流归一累积器（单轮私有）：累积/增量/重复帧/重启链统一差分（见类注释），
+            // reasoningBuf 只作落库镜像（差分追加），不再做 setLength+append 全量替换
+            ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
+            // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
+            long[] reasoningTotal = {0L};
+            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {
@@ -372,20 +368,18 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
                         if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
-                            String rc = String.valueOf(reasoning);
-                            String prev = reasoningBuf.toString();
-                            if (rc.length() > prev.length() && rc.startsWith(prev)) {
-                                // 累积模式：推送差分增量
-                                String delta = rc.substring(prev.length());
-                                if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta, clientGone);
-                                }
-                                reasoningBuf.setLength(0);
-                                reasoningBuf.append(rc);
-                            } else if (!rc.equals(prev)) {
-                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
-                                sendEvent(emitter, "reasoning", rc, clientGone);
-                                reasoningBuf.append(rc);
+                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
+                            if (delta != null && StringUtils.hasText(delta)) {
+                                sendEvent(emitter, "reasoning", delta, clientGone);
+                                reasoningBuf.append(delta);
+                                reasoningTotal[0] += delta.length();
+                            }
+                            // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
+                            // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
+                            if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
+                                throw new RuntimeException("思考过程超出安全上限（"
+                                        + (REASONING_RUNAWAY_MAX_CHARS / 1024)
+                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试");
                             }
                         }
                         // 直接流式推送改写文本增量
@@ -419,7 +413,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 opLog.setOriginalText(request.getText());
                 opLog.setRewrittenText(rewritten.toString());
                 opLog.setReasoning(reasoningBuf.length() == 0 ? null : reasoningBuf.toString());
-                opLog.setModel(modelConfig.getModel());
+                opLog.setModel(prepared.getModelName());
                 opLog.setDurationMs(System.currentTimeMillis() - startTime);
                 opLogId = articleOpLogService.record(opLog);
             } catch (Exception logEx) {
@@ -433,7 +427,8 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             } catch (Exception e) {
                 sendDone(emitter, rewritten.toString());
             }
-        } catch (AiQuotaExceededException e) {
+        } catch (AiQuotaExceededException | IllegalArgumentException e) {
+            // 配额超限 / 智能体配置问题：中文消息直接透出给用户
             errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
@@ -441,8 +436,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
-            recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_REWRITE, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
+            recordUsage(prepared, userId, IAiUsageLogService.Scene.ARTICLE_REWRITE, null, lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
@@ -463,18 +457,14 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
     }
 
     private void doGenerateField(AiArticleFieldRequest request, Long userId, SseEmitter emitter) {
-        AiModelConfig modelConfig = modelConfigService.getActiveConfig();
-        if (modelConfig == null) {
-            sendError(emitter, "未配置 AI 模型，请先在模型管理中添加并激活一个配置");
-            return;
-        }
-
         long startTime = System.currentTimeMillis();
         Usage[] lastUsage = {null};
         String[] errorMessage = {null};
         final AtomicBoolean clientGone = new AtomicBoolean(false);
+        AgentChatExecutor.Prepared prepared = null;
         try {
-            quotaChecker.check(userId);
+            // 格式化候选生成场景：不注入技能清单（与划词改写同理，确定性任务按契约直接执行）
+            prepared = agentChatExecutor.prepare(BuiltinAgents.ARTICLE_WRITER_ID, userId, false);
 
             String fieldDesc = switch (request.getField() == null ? "" : request.getField()) {
                 case AiArticleFieldRequest.FIELD_TITLE -> "文章标题（30字以内，含主关键词，5个候选）";
@@ -484,7 +474,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 default -> throw new IllegalArgumentException("不支持的字段: " + request.getField());
             };
 
-            String systemPrompt = "你是 SEO 专家。输出严格的 JSON 数组（不要 markdown 代码块包裹），"
+            // 智能体提示词基底 + 字段候选场景契约（JSON 数组输出，由本服务的 parseCandidates 解析逻辑约定）
+            String systemPrompt = prepared.getBaseSystemPrompt() + "\n\n"
+                    + "字段候选生成任务契约：输出严格的 JSON 数组（不要 markdown 代码块包裹），"
                     + "数组元素为字符串候选，如 [\"候选1\",\"候选2\"]。不要输出任何解释。";
 
             StringBuilder userPrompt = new StringBuilder("基于以下文章生成").append(fieldDesc).append("。\n");
@@ -494,13 +486,14 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             userPrompt.append("文章正文（可能被截断）：\n")
                     .append(truncateForPrompt(request.getContent(), 4000));
 
-            ChatModel chatModel = AiModelConfigServiceImpl.buildChatModel(modelConfig);
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-
             StringBuilder responseBuffer = new StringBuilder();
             StringBuilder reasoningBuf = new StringBuilder();
-            chatClient.prompt(new Prompt(List.of(
-                    new SystemMessage(systemPrompt), new UserMessage(userPrompt.toString()))))
+            // 思考流归一累积器（单轮私有）：累积/增量/重复帧/重启链统一差分（见类注释），
+            // reasoningBuf 只作落库镜像（差分追加），不再做 setLength+append 全量替换
+            ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
+            // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
+            long[] reasoningTotal = {0L};
+            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {
@@ -512,24 +505,22 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             return;
                         }
                         org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
-                        // 推理模型思考过程（累积值差分推送）
+                        // 推理模型思考过程（累积器归一后推送真实增量）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
                         if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
-                            String rc = String.valueOf(reasoning);
-                            String prev = reasoningBuf.toString();
-                            if (rc.length() > prev.length() && rc.startsWith(prev)) {
-                                // 累积模式：推送差分增量
-                                String delta = rc.substring(prev.length());
-                                if (StringUtils.hasText(delta)) {
-                                    sendEvent(emitter, "reasoning", delta, clientGone);
-                                }
-                                reasoningBuf.setLength(0);
-                                reasoningBuf.append(rc);
-                            } else if (!rc.equals(prev)) {
-                                // 纯增量模式（部分端点透传增量而非累积值）：直接作为增量推送并追加
-                                sendEvent(emitter, "reasoning", rc, clientGone);
-                                reasoningBuf.append(rc);
+                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
+                            if (delta != null && StringUtils.hasText(delta)) {
+                                sendEvent(emitter, "reasoning", delta, clientGone);
+                                reasoningBuf.append(delta);
+                                reasoningTotal[0] += delta.length();
+                            }
+                            // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
+                            // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
+                            if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
+                                throw new RuntimeException("思考过程超出安全上限（"
+                                        + (REASONING_RUNAWAY_MAX_CHARS / 1024)
+                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试");
                             }
                         }
                         String chunk = output.getText();
@@ -563,7 +554,7 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                 opLog.setOriginalText("字段：" + fieldDesc);
                 opLog.setRewrittenText(String.join("\n", candidates));
                 opLog.setReasoning(reasoningBuf.length() == 0 ? null : reasoningBuf.toString());
-                opLog.setModel(modelConfig.getModel());
+                opLog.setModel(prepared.getModelName());
                 opLog.setDurationMs(System.currentTimeMillis() - startTime);
                 opLogId = articleOpLogService.record(opLog);
             } catch (Exception logEx) {
@@ -575,7 +566,8 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             doneData.put("candidates", candidates);
             doneData.put("logId", opLogId);
             sendDone(emitter, MAPPER.writeValueAsString(doneData));
-        } catch (AiQuotaExceededException e) {
+        } catch (AiQuotaExceededException | IllegalArgumentException e) {
+            // 配额超限 / 智能体配置问题 / 不支持的字段：中文消息直接透出给用户
             errorMessage[0] = e.getMessage();
             sendError(emitter, e.getMessage());
         } catch (Exception e) {
@@ -583,26 +575,28 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             errorMessage[0] = "AI 调用失败: " + e.getMessage();
             sendError(emitter, "AI 调用失败: " + e.getMessage());
         } finally {
-            recordUsage(userId, IAiUsageLogService.Scene.ARTICLE_FIELD, null,
-                    modelConfig == null ? null : modelConfig.getModel(), lastUsage[0], startTime, errorMessage[0]);
+            recordUsage(prepared, userId, IAiUsageLogService.Scene.ARTICLE_FIELD, null, lastUsage[0], startTime, errorMessage[0]);
         }
     }
 
     // ==================== 通用工具 ====================
 
     /**
-     * 记录审计（成功时记录 token 用量；异常时调用方已把错误信息返回用户，此处仅记成功调用的用量）
+     * 记录审计（成功时记录 token 用量；异常时调用方已把错误信息返回用户，此处仅记成功调用的用量）。
+     * prepared 为 null 时（prepare 阶段即失败）agentId/model 记为空，仅保留场景与失败原因。
      */
-    private void recordUsage(Long userId, String scene, String sessionId, String model, Usage usage, long startTime, String error) {
+    private void recordUsage(AgentChatExecutor.Prepared prepared, Long userId, String scene, String sessionId, Usage usage, long startTime, String error) {
         int promptTokens = usage == null || usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
         int completionTokens = usage == null || usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
         int totalTokens = usage == null || usage.getTotalTokens() == null
                 ? promptTokens + completionTokens : usage.getTotalTokens();
+        String agentId = prepared == null ? null : prepared.getAgentId();
+        String model = prepared == null ? null : prepared.getModelName();
         if (error == null) {
-            usageRecorder.record(userId, scene, sessionId, model, promptTokens, completionTokens, totalTokens,
+            usageRecorder.record(agentId, userId, scene, sessionId, model, promptTokens, completionTokens, totalTokens,
                     System.currentTimeMillis() - startTime);
         } else {
-            usageRecorder.recordError(userId, scene, sessionId, model, System.currentTimeMillis() - startTime, error);
+            usageRecorder.recordError(agentId, userId, scene, sessionId, model, System.currentTimeMillis() - startTime, error);
         }
     }
 

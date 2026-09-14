@@ -116,13 +116,54 @@ export function AiTemplateApi() {
 
 		/**
 		 * 创建会话
-		 * @param data { templateName, title?, requirement, mobileAdaptive? }
+		 * @param data { templateName, title?, requirement, mobileAdaptive?, createMode?, designDirection?, confirmAuto? }
 		 */
 		createSession(data: object) {
 			return request({
 				url: '/admin/ai/template/sessions',
 				method: 'post',
 				data: data
+			});
+		},
+
+		/**
+		 * 设计稿先行模式选项（新建模板对话框"生成模式"数据源）：
+		 * { enabled: 总开关（false 时前端隐藏模式选项）, directions: [{key, name, summary}] }
+		 */
+		designOptions() {
+			return request({
+				url: '/admin/ai/template/design-options',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * HTML 导入（zip 站包 / 单 HTML 文件；createMode=import 会话专用）
+		 *
+		 * 同步完成解压 + 归一化 + plan.json 落盘（秒级返回）；
+		 * 转化由前端随后走既有 chat 对话触发。
+		 * @param sessionId import 模式会话 ID
+		 * @param file 上传的 zip 或 HTML 文件
+		 * @returns { pageCount, assetCount, notes[] }（notes 为导入报告标注）
+		 */
+		importHtml(sessionId: string, file: File) {
+			const formData = new FormData();
+			formData.append('file', file);
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/import',
+				method: 'post',
+				data: formData
+			});
+		},
+
+		/**
+		 * 设计稿先行模式确认状态（会话加载后查询，刷新恢复确认卡片用）：
+		 * AWAITING_CONFIRM 时返回 { state, issues[], previewUrl, confirmAuto }，否则 data 为 null
+		 */
+		designStatus(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/design-status',
+				method: 'get'
 			});
 		},
 
@@ -208,6 +249,47 @@ export function AiTemplateApi() {
 				sessionId +
 				'/chat'
 			);
+		},
+
+		// ==================== 任务运行态（关页后台续跑 + 重开续看） ====================
+
+		/**
+		 * 会话运行态探测：任务与连接解耦后，SSE 断开（关页面/断网）不取消任务。
+		 * 打开会话时探测：仍在跑则续看 stream（回放思考过程 + 实时续接），
+		 * 已结束则走终态恢复（listMessages/listFiles）
+		 */
+		runStatus(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/run-status',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 构造续看运行任务的 SSE GET URL
+		 *
+		 * <p>since = 已收到的最新事件 seq（后端事件携带 SSE 标准 id 字段）：
+		 * 先回放 since 之后的历史事件（含已发生的思考过程），再实时续接。
+		 * 页面新开传 0（全量回放）；断流重连传 lastSeq（增量续接）。</p>
+		 */
+		streamUrl(sessionId: string, since: number = 0) {
+			return (
+				apiBaseUrl() +
+				'/admin/ai/template/sessions/' +
+				sessionId +
+				'/stream?since=' +
+				since
+			);
+		},
+
+		/**
+		 * 显式停止运行中的任务（断开连接不触发取消——关页任务后台续跑，停止只能显式调用）
+		 */
+		stopSession(sessionId: string) {
+			return request({
+				url: '/admin/ai/template/sessions/' + sessionId + '/stop',
+				method: 'post'
+			});
 		},
 
 		/**
@@ -378,6 +460,96 @@ export function AiUsageApi() {
 				url: '/admin/ai/usage/logs',
 				method: 'get',
 				params
+			});
+		}
+	};
+}
+
+/**
+ * AI 智能体 API（多智能体架构管理：内置 + 自定义）
+ */
+export function AiAgentApi() {
+	return {
+		/**
+		 * 智能体列表（内置 + 自定义合并）
+		 */
+		list() {
+			return request({
+				url: '/admin/ai/agent/list',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 智能体详情（按 agentId，内置或自定义）
+		 */
+		get(agentId: string) {
+			return request({
+				url: '/admin/ai/agent/get/' + agentId,
+				method: 'get'
+			});
+		},
+
+		/**
+		 * 保存自定义智能体（新建或更新）
+		 * @param data { id?, name, description?, systemPrompt, modelConfigId?, temperature?, maxTokens?, skills?, tools?, dailyTokenQuota?, sortNum?, status? }
+		 */
+		save(data: object) {
+			return request({
+				url: '/admin/ai/agent/save',
+				method: 'post',
+				data: data
+			});
+		},
+
+		/**
+		 * 复制智能体为自定义副本（内置/自定义皆可复制）
+		 */
+		copy(agentId: string) {
+			return request({
+				url: '/admin/ai/agent/copy/' + agentId,
+				method: 'post'
+			});
+		},
+
+		/**
+		 * 删除自定义智能体
+		 */
+		remove(id: number | string) {
+			return request({
+				url: '/admin/ai/agent/delete/' + id,
+				method: 'post'
+			});
+		},
+
+		/**
+		 * 可绑定的 skill 清单（能力绑定用）
+		 */
+		listSkills() {
+			return request({
+				url: '/admin/ai/agent/skills',
+				method: 'get'
+			});
+		},
+
+		/**
+		 * skill 详情规则（SKILL.md 正文，只读查看）
+		 */
+		getSkillContent(skillId: string) {
+			return request({
+				url: '/admin/ai/agent/skill-content',
+				method: 'get',
+				params: { skillId }
+			});
+		},
+
+		/**
+		 * 可绑定的工具清单（能力绑定用）
+		 */
+		listTools() {
+			return request({
+				url: '/admin/ai/agent/tools',
+				method: 'get'
 			});
 		}
 	};

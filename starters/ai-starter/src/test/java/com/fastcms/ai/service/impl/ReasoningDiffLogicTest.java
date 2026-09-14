@@ -1,155 +1,152 @@
 package com.fastcms.ai.service.impl;
 
+import com.fastcms.ai.support.ReasoningStreamAccumulator;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * reasoning 差分逻辑（零分配前缀匹配 + 上限缓冲）的等价性验证
+ * 思考流差分逻辑（{@link ReasoningStreamAccumulator}）的行为验证
  *
- * <p>背景：修复前每 chunk 做 toString/startsWith/整体替换共 5 次全量复制（O(L²)），
- * 推理模型重复循环时把 G1 堆推爆（native OOM 实例）。本测试用反射驱动私有静态方法，
- * 验证修复后的行为与旧逻辑在三种透传模式下等价：累积模式、纯增量模式、重复帧。</p>
+ * <p>历史演进：最初每 chunk 做 toString/startsWith/整体替换共 5 次全量复制（O(L²)），
+ * 推理模型重复循环时把 G1 堆推爆（native OOM 实例）——改零分配前缀匹配 + 差分追加。
+ * 后实测发现第四种形态<b>思考流重启链</b>：流式工具往返（load_skill）后模型开启新一轮
+ * 调用，思考流从头开始。新一轮快照既不以旧缓冲为前缀，旧逻辑"不匹配即整段追加"
+ * 使每个快照都被全量追加，缓冲呈平方级膨胀（16 秒内从正常思考膨胀至 256KB 保险丝
+ * 误报"思考失控"）。累积器把差分基准切换为上一 chunk，本轮测试覆盖全部四种形态。</p>
  */
 class ReasoningDiffLogicTest {
 
-    private static final int MAX_CHARS;
+    /** 模拟"喂入一个 chunk"并返回应推送的增量（feed 的直通封装，语义见被测类） */
+    private static String feed(ReasoningStreamAccumulator acc, String rc) {
+        return acc.feed(rc);
+    }
 
-    static {
-        try {
-            Method m = AiTemplateGenServiceImpl.class.getDeclaredMethod("appendReasoningCapped", StringBuilder.class, String.class);
-            m.setAccessible(true);
-            // 通过行为反推上限：填充直到停止追加
-            StringBuilder probe = new StringBuilder();
-            for (long i = 0; i < 100L * 1024 * 1024; i += 1024) {
-                m.invoke(null, probe, repeat('x', 1024));
-            }
-            MAX_CHARS = probe.length();
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
+    // ==================== 三种既有形态（回归） ====================
+
+    @Test
+    void cumulativeMode_pushesDeltasOnly() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        // 累积模式：每 chunk 携带从头到当前的全文快照（Spring AI 透传的常见形态）
+        assertEquals("AB", feed(acc, "AB"));
+        assertEquals("CD", feed(acc, "ABCD"));
+        assertEquals("EFG", feed(acc, "ABCDEFG"));
+        assertEquals("ABCDEFG", acc.bufferContent());
+    }
+
+    @Test
+    void incrementalMode_appendsAll() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        // 纯增量模式：每 chunk 只携带新增片段（不以缓冲开头、不延续上一 chunk）
+        assertEquals("Hello ", feed(acc, "Hello "));
+        assertEquals("world", feed(acc, "world"));
+        assertEquals("!", feed(acc, "!"));
+        assertEquals("Hello world!", acc.bufferContent());
+    }
+
+    @Test
+    void duplicateFrame_skipped() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        feed(acc, "AB");
+        // 重复帧：与上一 chunk 完全相同（网关重发同一快照）
+        assertNull(feed(acc, "AB"), "重复帧应被跳过");
+        assertEquals("AB", acc.bufferContent());
+        // 累积模式下的重复帧：快照与已累积缓冲完全相同
+        feed(acc, "ABCD");
+        assertNull(feed(acc, "ABCD"), "与缓冲等长且前缀匹配 = 重复帧，应被跳过");
+        assertEquals("ABCD", acc.bufferContent());
+    }
+
+    @Test
+    void mixedModeDrift_fallsBackToIncremental() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        feed(acc, "AB");
+        // 模式突变：新 chunk 与缓冲和上一 chunk 均无延续关系 → 按增量容忍处理
+        assertEquals("XY", feed(acc, "XY"));
+        assertEquals("ABXY", acc.bufferContent());
+    }
+
+    // ==================== 重启链（本次修复的核心场景） ====================
+
+    @Test
+    void restartChain_noSquareBlowup() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        // 第一轮思考（工具往返前）：正常累积快照
+        assertEquals("老思", feed(acc, "老思"));
+        assertEquals("考AB", feed(acc, "老思考AB"));
+
+        // 工具往返（load_skill）→ 模型新一轮调用，思考流从头开始：
+        // 新轮快照既不以旧缓冲为前缀，也整体重发了多次
+        assertEquals("新思", feed(acc, "新思"));
+        // 关键断言：第二个新轮快照延续了上一 chunk（而非旧缓冲），
+        // 只应推送差分——旧逻辑此处会整段追加"新思考XY"造成重复
+        assertEquals("考XY", feed(acc, "新思考XY"));
+        assertEquals("更", feed(acc, "新思考XY更"));
+        assertEquals("多", feed(acc, "新思考XY更多"));
+
+        // 缓冲 = 旧轮思考 + 新轮思考顺序拼接，无重复快照
+        assertEquals("老思考AB新思考XY更多", acc.bufferContent());
+    }
+
+    @Test
+    void restartChain_firstSnapshot_afterLongOldRound() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        String oldRound = "旧轮思考".repeat(2000);
+        // 旧轮累积到相当规模后重启
+        feed(acc, oldRound.substring(0, 5000));
+        feed(acc, oldRound);
+        // 新轮首个快照：不匹配旧缓冲、不延续上一 chunk → 整段作为增量（新思考就是新内容）
+        assertEquals("重启", feed(acc, "重启"));
+        // 新轮第二个快照延续上一 chunk → 只推差分
+        assertEquals("后的思考", feed(acc, "重启后的思考"));
+        // 平方级膨胀防护：总缓冲长度 = 两轮思考之和，不含任何快照重复
+        assertEquals(5000 + (oldRound.length() - 5000) + "重启后的思考".length(), acc.bufferLength());
+    }
+
+    @Test
+    void restartChain_duplicateResendOfNewRoundSnapshot() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        feed(acc, "旧思考");
+        feed(acc, "新思考A");
+        // 网关重发新轮同一快照：与上一 chunk 完全相同 → 重复帧跳过（不落纯增量分支）
+        assertNull(feed(acc, "新思考A"));
+        feed(acc, "新思考AB");
+        assertEquals("旧思考新思考AB", acc.bufferContent());
+    }
+
+    // ==================== 缓冲封顶 ====================
+
+    @Test
+    void bufferHardCap_stopsGrowingButKeepsReturningDeltas() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator(2048);
+        // 纯增量模式灌入超限内容：缓冲停在 2048，feed 仍返回增量供推送
+        long pushed = 0;
+        for (int i = 0; i < 8; i++) {
+            String chunk = String.format("%04d-", i) + "r".repeat(1024 - 5);
+            String delta = feed(acc, chunk);
+            pushed += delta == null ? 0 : delta.length();
         }
-    }
-
-    private static String repeat(char c, int n) {
-        StringBuilder sb = new StringBuilder(n);
-        for (int i = 0; i < n; i++) {
-            sb.append(c);
-        }
-        return sb.toString();
-    }
-
-    private static boolean startsWithBuf(String s, StringBuilder buf) throws Exception {
-        Method m = AiTemplateGenServiceImpl.class.getDeclaredMethod("startsWithBuf", String.class, StringBuilder.class, int.class);
-        m.setAccessible(true);
-        return (Boolean) m.invoke(null, s, buf, buf.length());
-    }
-
-    private static void appendCapped(StringBuilder buf, String delta) throws Exception {
-        Method m = AiTemplateGenServiceImpl.class.getDeclaredMethod("appendReasoningCapped", StringBuilder.class, String.class);
-        m.setAccessible(true);
-        m.invoke(null, buf, delta);
-    }
-
-    /**
-     * 模拟修复后的 doOnNext 差分分支，返回 [推送的 delta, 缓冲快照]
-     */
-    private static String[] feed(StringBuilder buf, String rc) throws Exception {
-        int prevLen = buf.length();
-        boolean prefixMatch = rc.length() >= prevLen && startsWithBuf(rc, buf);
-        if (prefixMatch && rc.length() > prevLen) {
-            String delta = rc.substring(prevLen);
-            appendCapped(buf, delta);
-            return new String[]{delta};
-        } else if (!prefixMatch) {
-            appendCapped(buf, rc);
-            return new String[]{rc};
-        }
-        return new String[]{null}; // 重复帧：跳过
+        assertEquals(2048, acc.bufferLength(), "缓冲必须停在上限");
+        assertEquals(8 * 1024, pushed, "推送增量不受缓冲上限影响");
     }
 
     @Test
-    void cumulativeMode_pushesDeltasOnly() throws Exception {
-        StringBuilder buf = new StringBuilder();
-        // 累积模式：chunk1="AB"，chunk2="ABCD"（携带全文），chunk3="ABCDEFG"
-        assertEquals("AB", feed(buf, "AB")[0]);
-        assertEquals("CD", feed(buf, "ABCD")[0]);
-        assertEquals("EFG", feed(buf, "ABCDEFG")[0]);
-        assertEquals("ABCDEFG", buf.toString());
+    void capBoundary_cumulativeModeStillDiffsCorrectly() {
+        // 封顶后的累积快照仍以缓冲头部为前缀（缓冲只保留头部），差分计算不受影响
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator(8);
+        assertEquals("12345678", feed(acc, "12345678"));
+        assertNull(feed(acc, "12345678"), "封顶后等长快照 = 重复帧");
+        // 快照超出封顶：前 8 字符仍前缀匹配，差分 = 超出部分
+        assertEquals("90", feed(acc, "1234567890"));
+        assertEquals(8, acc.bufferLength(), "缓冲保持封顶值");
     }
 
     @Test
-    void incrementalMode_appendsAll() throws Exception {
-        StringBuilder buf = new StringBuilder();
-        // 纯增量模式：每 chunk 是全新文本段（不以缓冲开头）
-        assertEquals("Hello ", feed(buf, "Hello ")[0]);
-        assertEquals("world", feed(buf, "world")[0]);
-        assertEquals("!", feed(buf, "!")[0]);
-        assertEquals("Hello world!", buf.toString());
-    }
-
-    @Test
-    void duplicateFrame_skipped() throws Exception {
-        StringBuilder buf = new StringBuilder();
-        feed(buf, "AB");
-        // 重复帧：与缓冲完全相同（累积模式无新增）
-        assertNullFrame(feed(buf, "AB"));
-        assertEquals("AB", buf.toString());
-    }
-
-    private void assertNullFrame(String[] result) {
-        assertTrue(result[0] == null, "重复帧应被跳过，实际推送: " + result[0]);
-    }
-
-    @Test
-    void mixedModeDrift_fallsBackToIncremental() throws Exception {
-        StringBuilder buf = new StringBuilder();
-        feed(buf, "AB");
-        // 模式突变：新 chunk 不以缓冲开头 → 按增量容忍处理
-        assertEquals("XY", feed(buf, "XY")[0]);
-        assertEquals("ABXY", buf.toString());
-    }
-
-    @Test
-    void bufferHardCap_stopsGrowingButKeepsPushingDeltas() throws Exception {
-        StringBuilder buf = new StringBuilder();
-        // 逐块填充至超限：缓冲停在 MAX_CHARS，推送不受影响。
-        // 注意每块内容必须互不相同（带序号前缀）：相同内容的连续 chunk 会被
-        // 正确判定为"累积模式重复帧"而跳过，走不到缓冲增长路径
-        int pushed = 0;
-        int blocks = MAX_CHARS / 1024 + 10;
-        for (int i = 0; i < blocks; i++) {
-            String chunk = String.format("%04d-", i) + repeat('r', 1024 - 5);
-            String[] out = feed(buf, chunk);
-            pushed += out[0] == null ? 0 : out[0].length();
-        }
-        assertEquals(MAX_CHARS, buf.length(), "缓冲必须停在上限");
-        // 增量模式下每块都推送（前缀不匹配），推送总量不受缓冲上限影响
-        assertEquals(blocks * 1024, pushed);
-    }
-
-    @Test
-    void capBoundary_partialAppend() throws Exception {
-        // 上限非整块对齐：最后一块只追加到上限为止
-        StringBuilder buf = new StringBuilder();
-        appendCapped(buf, repeat('a', MAX_CHARS - 10));
-        assertEquals(MAX_CHARS - 10, buf.length());
-        appendCapped(buf, "0123456789ABCDEF"); // 只应追加前 10 个
-        assertEquals(MAX_CHARS, buf.length());
-        assertEquals(repeat('a', MAX_CHARS - 10) + "0123456789", buf.toString());
-    }
-
-    @Test
-    void startsWithBuf_basics() throws Exception {
-        StringBuilder buf = new StringBuilder("abc");
-        assertTrue(startsWithBuf("abcdef", buf));
-        assertTrue(startsWithBuf("abc", buf));      // 相等也算前缀匹配（重复帧判定依赖）
-        assertFalse(startsWithBuf("abx", buf));
-        assertFalse(startsWithBuf("ab", buf));      // 短于缓冲
-        assertTrue(startsWithBuf("", new StringBuilder())); // 空对空
-        assertTrue(startsWithBuf("a", new StringBuilder())); // 空缓冲恒匹配
+    void blankInputs_skipped() {
+        ReasoningStreamAccumulator acc = new ReasoningStreamAccumulator();
+        assertNull(feed(acc, null));
+        assertNull(feed(acc, ""));
+        assertEquals(0, acc.bufferLength());
     }
 }

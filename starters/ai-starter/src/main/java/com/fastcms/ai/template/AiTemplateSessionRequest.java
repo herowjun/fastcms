@@ -59,6 +59,31 @@ public class AiTemplateSessionRequest implements Serializable {
      */
     private Boolean mobileAdaptive;
 
+    /**
+     * 创建模式（可选，默认 pipeline）
+     *
+     * <ul>
+     *     <li>pipeline（默认/空）：组件管线模式——沿用既有 PageSpec 组件化生成，行为不变</li>
+     *     <li>design：设计稿先行模式——AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板</li>
+     * </ul>
+     */
+    private String createMode;
+
+    /**
+     * 设计模式方向资产 key（可选，仅 design 模式生效）
+     *
+     * <p>如 modern-business / feedback-brighten，命中 DesignDirectionLibrary；
+     * 为空时由 AI 根据需求自选方向。</p>
+     */
+    private String designDirection;
+
+    /**
+     * 设计模式：机器审计通过后是否自动转化（可选，默认 true）
+     *
+     * <p>false 时审计通过后暂停，等待用户在对话中确认（confirm）再执行转化。</p>
+     */
+    private Boolean confirmAuto;
+
     public String getTemplateName() {
         return templateName;
     }
@@ -97,6 +122,30 @@ public class AiTemplateSessionRequest implements Serializable {
 
     public void setMobileAdaptive(Boolean mobileAdaptive) {
         this.mobileAdaptive = mobileAdaptive;
+    }
+
+    public String getCreateMode() {
+        return createMode;
+    }
+
+    public void setCreateMode(String createMode) {
+        this.createMode = createMode;
+    }
+
+    public String getDesignDirection() {
+        return designDirection;
+    }
+
+    public void setDesignDirection(String designDirection) {
+        this.designDirection = designDirection;
+    }
+
+    public Boolean getConfirmAuto() {
+        return confirmAuto;
+    }
+
+    public void setConfirmAuto(Boolean confirmAuto) {
+        this.confirmAuto = confirmAuto;
     }
 
 }
