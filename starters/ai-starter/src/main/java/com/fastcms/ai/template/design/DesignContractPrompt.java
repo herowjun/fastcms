@@ -105,7 +105,8 @@ public final class DesignContractPrompt {
                                boolean mobileAdaptive,
                                List<String> prevAuditIssues,
                                String prevFormatError,
-                               String userComment) {
+                               String userComment,
+                               String userReferenceHtml) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("【站点需求】\n").append(requirement == null ? "" : requirement.trim()).append('\n');
@@ -134,6 +135,20 @@ public final class DesignContractPrompt {
                 direction.referenceBlocks().stream().limit(2).forEach(block ->
                         sb.append(block).append("\n\n"));
             }
+        }
+
+        // 用户上传 landing HTML（c 形态单文件导入会话才有值）：
+        // 作为本站"设计语言的唯一权威参照"——AI 必须提取 :root CSS 变量、卡片/按钮/导航的
+        // class 命名与样式特征、视觉风格（圆角/阴影/留白），为本页（article_list/article/page）
+        // 设计沿用相同设计语言，但不复制其结构与文案（本页是 CMS 数据流页面，必须保留
+        // data-block 标记、:root 变量声明、nav/footer 公共结构）
+        if (StringUtils.hasText(userReferenceHtml)) {
+            sb.append("\n【用户上传参考样稿】（设计语言权威参照——颜色/字体/卡片/按钮风格必须与此一致；")
+              .append("不要复制其结构与文案，本页是 CMS 数据流页面，必须保留 data-block 标记、")
+              .append(":root 变量声明、nav/footer 公共结构与 #nav-toggle / #footer id）\n")
+              .append("<html-skeleton>\n")
+              .append(userReferenceHtml.trim())
+              .append("\n</html-skeleton>\n");
         }
 
         sb.append("\n【全站页面清单】\n").append(sitePageContext).append('\n');

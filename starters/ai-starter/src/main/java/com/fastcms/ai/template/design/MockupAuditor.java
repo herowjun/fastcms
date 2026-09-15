@@ -120,17 +120,25 @@ public final class MockupAuditor {
      * @param pages            全站页面规划
      * @param placeholderPages 占位页名单（A4 跨页一致性豁免：占位页 nav/footer 为确定性生成，
      *                         与 AI 页不同构是预期而非缺陷）
+     * @param importedPages    导入保真页名单（整体豁免：c 形态导入页按"保真"契约原样保留，
+     *                         原站色值 / id 命名是预期而非缺陷；A1~A7 是 AI 设计稿契约，
+     *                         对导入页误判会把保真页重置重设计，毁掉导入内容。其切分合规由
+     *                         ingest 归一化保证，缺失文件由转化段兜底报错）
      * @param mobileAdaptive   是否移动端适配（false 时 A3 整体跳过——桌面端契约不要求断点）
      * @return 问题清单（空 = 审计通过）
      */
     public static List<AuditIssue> audit(Path workDir, List<DesignPagePlanner.PagePlan> pages,
-                                         Set<String> placeholderPages, boolean mobileAdaptive) {
+                                         Set<String> placeholderPages, Set<String> importedPages,
+                                         boolean mobileAdaptive) {
         List<AuditIssue> issues = new ArrayList<>();
         Map<String, Document> docs = new LinkedHashMap<>();
         Map<String, String> htmls = new LinkedHashMap<>();
 
-        // 载入全部页面（缺文件按 A1 报——审计对象是落盘产物）
+        // 载入需审计页面（导入保真页整体跳过；缺文件按 A1 报——审计对象是落盘产物）
         for (DesignPagePlanner.PagePlan page : pages) {
+            if (importedPages != null && importedPages.contains(page.name())) {
+                continue;
+            }
             Path file = workDir.resolve("design").resolve(page.name() + ".html");
             String html;
             try {

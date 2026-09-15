@@ -1080,6 +1080,7 @@ const observeLoop = async (ctx: ReturnType<typeof createRunContext>) => {
  */
 const observeRunning = async (since: number) => {
 	if (!props.session?.sessionId || state.chatting) return;
+	state.chatting = true;
 	state.lastSeq = since;
 	const ctx = createRunContext(false, true);
 	await observeLoop(ctx);

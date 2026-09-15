@@ -28,6 +28,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -75,6 +78,8 @@ public class ImportService {
     static final String ASSET_DIR = "static/import";
     /** 转化后 CSS 接线注入 _layout.html 的幂等标记 */
     private static final String CSS_INJECT_MARKER = "fastcms-import-css";
+    /** 转化后 inline style 注入 _layout.html head 的幂等标记（外部 css link 之后，保真优先级最高） */
+    private static final String INLINE_STYLE_INJECT_MARKER = "fastcms-import-inline-style";
     /** 一次性解压暂存目录（ingest 结束即清理） */
     private static final String STAGING_DIR = "import-src";
 
@@ -100,9 +105,17 @@ public class ImportService {
     public record ImportResult(int pageCount, int assetCount, List<String> notes) {
     }
 
-    /** import-meta.json（design/ 下，转化后接线与诊断依据） */
+    /**
+     * import-meta.json（design/ 下，转化后接线与诊断依据）
+     *
+     * <p>{@code inlineStyle}：首页 inline {@code <style>} 内容拼接（首页口径，与 nav/footer
+     * 公共块一致；多页 zip 其他页的 inline style 差异进 note，不自动合并）。
+     * 转化段（{@link MockupConverter}）只提取 {@code :root} 变量到 tokens.css，
+     * inline style 中除 {@code :root} 外的 class 定义全部丢失——c 形态保真底线要求
+     * class 随 layout 全局生效，故 ingest 显式提取并在 postConvertWiring 注入 layout head。</p>
+     */
     private record ImportMeta(String version, String source, List<String> css, List<String> js,
-                              List<String> pages, List<String> notes) {
+                              String inlineStyle, List<String> pages, List<String> notes) {
     }
 
     // ==================== ingest 主入口 ====================
@@ -111,11 +124,14 @@ public class ImportService {
      * 导入 HTML（单文件或 zip 站包）：同步完成解压 + 归一化 + plan.json 落盘（CONVERTING），
      * 返回报告；随后由前端走既有 chat 触发转化（编排器 CONVERTING 起步）。
      *
+     * <p>允许的会话：design（AI 自主设计，参考文件上传为可选步骤——宿主 uploadReference 端点
+     * 在 ingest 成功后把 create_mode 归一为 import 血统）与 import（兼容旧客户端直传）。</p>
+     *
      * <p>幂等：重复调用按新一次导入处理（清掉上一轮导入产物后重建）。</p>
      */
     public ImportResult importHtml(AiTemplateSession session, Path workDir, MultipartFile file) throws IOException {
-        if (!AiTemplateConstants.isImportMode(session)) {
-            throw new IllegalArgumentException("该会话不是 HTML 导入模式，无法导入");
+        if (!AiTemplateConstants.isImportMode(session) && !AiTemplateConstants.isDesignMode(session)) {
+            throw new IllegalArgumentException("该会话不支持 HTML 导入（仅 AI 自主设计新建会话）");
         }
         if (StringUtils.hasText(session.getTemplateId())) {
             throw new IllegalArgumentException("导入仅支持新建模板会话");
@@ -196,6 +212,13 @@ public class ImportService {
         List<MockupOrchestrator.PageState> pageStates = new ArrayList<>();
         List<MockupConverter.SectionMapping> mappings = new ArrayList<>();
         List<String> pageSummaries = new ArrayList<>();
+        // 首页 inline <style> 内容（首页口径，与 nav/footer 公共块一致；多页 zip 其他页差异进 note）
+        String firstPageInlineStyle = null;
+        // 首页原始 HTML（归一化前的 Files.readString 结果；c 形态单文件触发时作为 referenceHtml
+        // 注入 AI 设计 prompt，让 AI 读 landing 设计语言推导子页设计稿）
+        String firstPageRawHtml = null;
+        // 首页归一化形态（c 形态单文件触发全站 AI 推导的条件之一）
+        HtmlNormalizer.Form firstPageForm = null;
         for (PageKeyResolver.ResolvedPage page : resolution.pages()) {
             String html = Files.readString(staging.resolve(page.sourceRelPath()), StandardCharsets.UTF_8);
             String htmlDir = parentDirOf(page.sourceRelPath());
@@ -217,6 +240,15 @@ public class ImportService {
             // nav/footer 为全站公共块（converter 仅从首页 anchor 切分，idx=-1/-2），只在首页生成映射；
             // b/a 形态首页的 nav/footer 留给 AI 映射（Tailwind 系组件映射是设计意图）
             boolean firstPage = resolution.pages().get(0) == page;
+            if (firstPage) {
+                firstPageRawHtml = html;
+                firstPageForm = result.form();
+                // 首页 inline <style> 提取（全量保留，含 :root 变量与 class 定义）：
+                // 转化段 MockupConverter 只提取 :root 变量到 tokens.css，
+                // inline style 中除 :root 外的 class 定义（.hero/.nav/.chat/.btn/...）会全部丢失，
+                // c 形态保真底线要求这些 class 随 layout 全局生效，故显式提取存 import-meta.json
+                firstPageInlineStyle = extractInlineStyles(html);
+            }
             if (result.form() == HtmlNormalizer.Form.C) {
                 if (firstPage && result.navPresent()) {
                     mappings.add(new MockupConverter.SectionMapping(page.name(), -1,
@@ -237,18 +269,49 @@ public class ImportService {
             }
         }
 
-        // plan.json（state=CONVERTING 起步，pages 全 done、c 形态 mappingCache 就绪；b/a 形态 AI 映射）
+        // c 形态单文件 landing → 触发 AI 推导全站子页（§4.2 页型闭环扩展）：
+        // 首页 design/index.html 已 done（保真 landing），追加 article_list/article/page 3 个 pending
+        // PageState，让 MockupOrchestrator.runDesigning 的 pendingPages 过滤命中——AI 读
+        // plan.json.referenceHtml 推导生成 3 个子页设计稿（用 landing 设计语言重新设计 CMS 数据流页面）。
+        // 多页 zip 不触发（避免覆盖用户实际多页 zip 行为）；a/b 形态不触发（走 AI 映射）。
+        boolean fullSiteDesign = resolution.pages().size() == 1
+                && firstPageForm == HtmlNormalizer.Form.C;
+        if (fullSiteDesign) {
+            pageStates.add(new MockupOrchestrator.PageState("article_list", "文章列表",
+                    "design/article_list.html", "pending", "article_list"));
+            pageStates.add(new MockupOrchestrator.PageState("article", "文章详情",
+                    "design/article.html", "pending", "article"));
+            pageStates.add(new MockupOrchestrator.PageState("page", "单页",
+                    "design/page.html", "pending", "page"));
+            pageSummaries.add("article_list（article_list，pending，AI 推导继承 landing 设计语言）");
+            pageSummaries.add("article（article，pending，AI 推导继承 landing 设计语言）");
+            pageSummaries.add("page（page，pending，AI 推导继承 landing 设计语言）");
+            notes.add("[AI 推导] 首页保真 landing，3 个子页待 AI 读 landing 设计语言推导生成");
+        }
+
+        // plan.json：c 形态单文件 landing → state=DESIGNING（触发 AI 推导子页），其他形态 → state=CONVERTING（原行为）
+        // referenceHtml 仅 c 形态单文件时传入（首页原始 HTML，AI 设计子页时作为"设计语言权威参照"注入 prompt）
+        String initialState = fullSiteDesign
+                ? MockupOrchestrator.STATE_DESIGNING
+                : MockupOrchestrator.STATE_CONVERTING;
+        String historyEntry = fullSiteDesign
+                ? "IMPORT→DESIGNING: " + sourceName + "，首页保真 landing + 3 子页待 AI 推导 / "
+                        + assetFiles.size() + " 资产 / " + mappings.size() + " 首页确定性映射"
+                : "IMPORT: " + sourceName + "，" + pageStates.size() + " 页 / "
+                        + assetFiles.size() + " 资产 / " + mappings.size() + " 确定性映射";
         MockupOrchestrator.DesignPlan plan = new MockupOrchestrator.DesignPlan(
-                1, MockupOrchestrator.STATE_CONVERTING, null,
+                1, initialState, null,
                 pageStates, mappings, List.of(), null, 0,
-                List.of("IMPORT: " + sourceName + "，" + pageStates.size() + " 页 / "
-                        + assetFiles.size() + " 资产 / " + mappings.size() + " 确定性映射"));
+                List.of(historyEntry),
+                fullSiteDesign ? firstPageRawHtml : null);
         Files.writeString(designDir.resolve("plan.json"),
                 JSON_MAPPER.writeValueAsString(plan), StandardCharsets.UTF_8);
 
-        // import-meta.json（转化后接线依据：css 注入 layout；js 仅报告不注入）
+        // import-meta.json（转化后接线依据：css 注入 layout；inline style 注入 layout head；
+        // js 仅报告不注入）
         Files.writeString(designDir.resolve("import-meta.json"), JSON_MAPPER.writeValueAsString(
-                        new ImportMeta("1", sourceName, cssFiles, jsFiles, pageSummaries, notes)),
+                        new ImportMeta("1", sourceName, cssFiles, jsFiles,
+                                firstPageInlineStyle, pageSummaries, notes)),
                 StandardCharsets.UTF_8);
 
         // 导入动作落消息表（历史可追溯；转化由下一次 chat 驱动）
@@ -280,6 +343,7 @@ public class ImportService {
 
             // ① layout head 注入 css link（custom 区块的 class 依赖外部样式，须随 layout 生效）
             Path layout = workDir.resolve(AiTemplateConstants.FILE_LAYOUT);
+            boolean layoutChanged = false;
             if (Files.isRegularFile(layout) && meta.css() != null && !meta.css().isEmpty()) {
                 String content = Files.readString(layout, StandardCharsets.UTF_8);
                 if (!content.contains(CSS_INJECT_MARKER)) {
@@ -295,17 +359,51 @@ public class ImportService {
                             ? new StringBuilder(content).insert(headIdx, inject.toString()).toString()
                             : inject + content;
                     Files.writeString(layout, content, StandardCharsets.UTF_8);
-                    registerFile(session, workDir, sse, AiTemplateConstants.FILE_LAYOUT);
+                    layoutChanged = true;
                     sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE,
                             "已接入导入站外部样式 " + meta.css().size() + " 个（随模板布局全局生效）\n");
                 }
             }
 
-            // ② 资产文件注册（前端文件树 + 应用前可见）
-            try (var stream = Files.walk(workDir.resolve(ASSET_DIR))) {
-                stream.filter(Files::isRegularFile).forEach(p ->
-                        registerFile(session, workDir, sse,
-                                workDir.relativize(p).normalize().toString().replace('\\', '/')));
+            // ② layout head 注入 inline <style>（c 形态保真底线，§5.2 规则 4）
+            // 转化段 extractRootTokens 只取 :root 变量到 tokens.css，原 HTML 的
+            // .hero/.nav/.chat/.btn/... 等 class 定义全部丢失——注入 layout head 让它们
+            // 随 layout 全局生效。加载顺序：fastcms 自带 css → 外部 css link（①）→
+            // inline style（②），inline style 最后加载，原视觉覆盖 fastcms 默认，保真优先。
+            // 后注入的插入到 </head> 之前最后位置，自然位于 css link 块之后（同 lastIndexOf）。
+            // 每次重读 layout 取最新内容（① 可能已改写），文件小、代价低。
+            if (Files.isRegularFile(layout)
+                    && meta.inlineStyle() != null && !meta.inlineStyle().isBlank()) {
+                String content = Files.readString(layout, StandardCharsets.UTF_8);
+                if (!content.contains(INLINE_STYLE_INJECT_MARKER)) {
+                    String inject = "<#-- " + INLINE_STYLE_INJECT_MARKER
+                            + ": 导入站 inline 样式（ingest 接线，c 形态保真） -->\n"
+                            + "<style>\n" + meta.inlineStyle() + "\n</style>\n";
+                    int headIdx = content.lastIndexOf("</head>");
+                    content = headIdx >= 0
+                            ? new StringBuilder(content).insert(headIdx, inject).toString()
+                            : inject + content;
+                    Files.writeString(layout, content, StandardCharsets.UTF_8);
+                    layoutChanged = true;
+                    sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE,
+                            "已接入导入站 inline 样式（c 形态保真，原视觉覆盖默认样式）\n");
+                }
+            }
+            if (layoutChanged) {
+                registerFile(session, workDir, sse, AiTemplateConstants.FILE_LAYOUT);
+            }
+
+            // ③ 资产文件注册（前端文件树 + 应用前可见）
+            // 单文件 HTML 导入时 assetFiles 为空，doIngest 不会创建 ASSET_DIR 目录；
+            // Files.walk 要求起始路径必须存在（FileTreeWalker 起步即读属性，不存在直接抛
+            // NoSuchFileException），零资产属正常路径，不视为失败。
+            Path assetDir = workDir.resolve(ASSET_DIR);
+            if (Files.isDirectory(assetDir)) {
+                try (var stream = Files.walk(assetDir)) {
+                    stream.filter(Files::isRegularFile).forEach(p ->
+                            registerFile(session, workDir, sse,
+                                    workDir.relativize(p).normalize().toString().replace('\\', '/')));
+                }
             }
         } catch (Exception e) {
             // 接线失败不阻塞转化收尾（custom 区块样式可能缺失，但模板主体完整），显式播报
@@ -511,14 +609,50 @@ public class ImportService {
         return slash > 0 ? normalized.substring(0, slash) : "";
     }
 
+    /**
+     * 提取原始 HTML 中所有 inline {@code <style>} 块的内容（保留原样，含 :root 变量与 class 定义）。
+     *
+     * <p>设计文档 §5.2 规则 4：inline style 保留原样，与 custom 块同生命周期。
+     * 转化段 {@code MockupConverter.extractRootTokens} 只取 :root 变量到 tokens.css，
+     * class 定义（.hero/.nav/.chat/.btn/...）会全部丢失——c 形态保真底线要求 class
+     * 随 layout 全局生效，故 ingest 显式提取，postConvertWiring 注入 layout head
+     * （位于 fastcms 自带 css 与外部 css link 之后，覆盖优先级最高，原视觉不变形）。</p>
+     *
+     * <p>不去重 :root 变量（与 tokens.css 重复定义无害，浏览器取最后加载的同名声明）；
+     * 不去除 {@code <style>} 标签外层（注入时用 {@code <style>} 包裹）；
+     * 多个 {@code <style>} 块按文档顺序拼接，每个之间空行分隔。</p>
+     */
+    private static String extractInlineStyles(String html) {
+        Document doc = Jsoup.parse(html);
+        StringBuilder sb = new StringBuilder();
+        for (Element style : doc.select("style")) {
+            String css = style.data();
+            if (css == null || css.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append("\n\n");
+            }
+            sb.append(css.strip());
+        }
+        return sb.isEmpty() ? null : sb.toString();
+    }
+
     // ==================== 清理 ====================
 
-    /** 重导入/重新转化前清掉上一轮产物（design、导入资产、转化生成的模板文件与静态目录） */
+    /**
+     * 重导入/重新转化前清掉上一轮产物（design、导入资产、转化生成的模板文件与静态目录）。
+     *
+     * <p><b>注意</b>：不清 {@link #STAGING_DIR}——当前轮的 staging 由 {@link #importHtml}
+     * 开头 {@code deleteDirectory(staging) + createDirectories} 重建并填充文件，
+     * 在 {@code doIngest} 内还会被读取（归一化 sourceRelPath 落在 staging 内），
+     * 这里清掉会把当前轮的源文件一并删掉，导致 {@link java.nio.file.NoSuchFileException}。</p>
+     */
     private void cleanupPreviousArtifacts(Path workDir) {
         try (var stream = Files.list(workDir)) {
             for (Path child : stream.toList()) {
                 String name = child.getFileName().toString();
-                if ("design".equals(name) || STAGING_DIR.equals(name) || "static".equals(name)) {
+                if ("design".equals(name) || "static".equals(name)) {
                     deleteDirectory(child);
                 } else if (Files.isRegularFile(child)
                         && (name.endsWith(".html") || name.startsWith("_"))) {

@@ -193,7 +193,7 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .login-content-form {
-	margin-top: 20px;
+	margin-top: 16px;
 	@for $i from 1 through 4 {
 		.login-animation#{$i} {
 			opacity: 0;
@@ -216,12 +216,6 @@ onMounted(() => {
 		padding: 0;
 		font-weight: bold;
 		letter-spacing: 5px;
-	}
-	.login-content-submit {
-		width: 100%;
-		letter-spacing: 2px;
-		font-weight: 300;
-		margin-top: 15px;
 	}
 }
 </style>

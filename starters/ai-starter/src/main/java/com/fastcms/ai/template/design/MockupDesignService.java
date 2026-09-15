@@ -135,6 +135,7 @@ public class MockupDesignService {
             List<DesignPagePlanner.PagePlan> allPages,
             List<String> prevAuditIssues,
             String userComment,
+            String userReferenceHtml,
             java.util.function.Consumer<String> pageDoneSink) {
     }
 
@@ -301,7 +302,8 @@ public class MockupDesignService {
                     sitePageContext, ctx.mobileAdaptive(),
                     round == 1 ? ctx.prevAuditIssues() : null,
                     round == 1 ? null : String.join("\n", lastErrors),
-                    ctx.userComment());
+                    ctx.userComment(),
+                    ctx.userReferenceHtml());
             String raw = callDesignModel(prepared, designOptions, designSystemPrompt, userPrompt, sse, usageAgg);
             Map<String, String> files = parseFileBlocks(raw);
             List<String> errors = new ArrayList<>(checkPathSafety(files));

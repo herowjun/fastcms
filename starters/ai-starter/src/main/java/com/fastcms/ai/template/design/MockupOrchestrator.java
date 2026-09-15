@@ -145,40 +145,45 @@ public class MockupOrchestrator {
      * @param userComment   用户否决意见（REJECT 携带；注入设计提示词，进入 AUDITING 后清空）
      * @param auditRounds   本轮设计迭代已消耗的审计失败次数（REJECT 重出时归零）
      * @param history       关键事件账本（AUDIT_FAIL/CONFIRM/CONVERT…，人读 + 诊断用）
+     * @param referenceHtml 用户上传的 landing 原始 HTML（仅 c 形态单文件导入会话有值）：
+     *                      作为 AI 设计子页（article_list/article/page）的"设计语言权威参照"，
+     *                      注入 DesignContractPrompt.build 的 prompt；首页 design/index.html
+     *                      由 c 形态导入保真生成不调 AI，子页由 AI 读 referenceHtml 推导设计。
+     *                      null/空表示非 c 形态导入会话，不影响既有 a/b 形态行为。
      */
     public record DesignPlan(int version, String state, String direction,
                              List<PageState> pages, List<MockupConverter.SectionMapping> mappingCache,
                              List<String> pendingIssues, String userComment,
-                             int auditRounds, List<String> history) {
+                             int auditRounds, List<String> history, String referenceHtml) {
 
         DesignPlan withState(String newState) {
             return new DesignPlan(version, newState, direction, pages, mappingCache,
-                    pendingIssues, userComment, auditRounds, history);
+                    pendingIssues, userComment, auditRounds, history, referenceHtml);
         }
 
         DesignPlan withPages(List<PageState> newPages) {
             return new DesignPlan(version, state, direction, newPages, mappingCache,
-                    pendingIssues, userComment, auditRounds, history);
+                    pendingIssues, userComment, auditRounds, history, referenceHtml);
         }
 
         DesignPlan withMappingCache(List<MockupConverter.SectionMapping> cache) {
             return new DesignPlan(version, state, direction, pages, cache,
-                    pendingIssues, userComment, auditRounds, history);
+                    pendingIssues, userComment, auditRounds, history, referenceHtml);
         }
 
         DesignPlan withPendingIssues(List<String> issues) {
             return new DesignPlan(version, state, direction, pages, mappingCache,
-                    issues, userComment, auditRounds, history);
+                    issues, userComment, auditRounds, history, referenceHtml);
         }
 
         DesignPlan withUserComment(String comment) {
             return new DesignPlan(version, state, direction, pages, mappingCache,
-                    pendingIssues, comment, auditRounds, history);
+                    pendingIssues, comment, auditRounds, history, referenceHtml);
         }
 
         DesignPlan withAuditRounds(int rounds) {
             return new DesignPlan(version, state, direction, pages, mappingCache,
-                    pendingIssues, userComment, rounds, history);
+                    pendingIssues, userComment, rounds, history, referenceHtml);
         }
 
         DesignPlan appendHistory(String entry) {
@@ -188,7 +193,7 @@ public class MockupOrchestrator {
                 next.remove(0);
             }
             return new DesignPlan(version, state, direction, pages, mappingCache,
-                    pendingIssues, userComment, auditRounds, List.copyOf(next));
+                    pendingIssues, userComment, auditRounds, List.copyOf(next), referenceHtml);
         }
     }
 
@@ -284,10 +289,13 @@ public class MockupOrchestrator {
                 plan = resetForRedesign(plan, comment).appendHistory(marker);
             }
         } else if (STATE_FAILED.equals(plan.state())) {
-            // FAILED 续传归位：导入会话回 CONVERTING（mappingCache 续传重试转化）；
-            // 设计会话有未完成页 → 续设计，无 → 复审（审计纯代码，重跑无成本）
-            plan = plan.withState(importMode ? STATE_CONVERTING
-                            : (hasPendingPage(plan) ? STATE_DESIGNING : STATE_AUDITING))
+            // FAILED 续传归位：有未完成页（pending/placeholder，含 c 形态导入会话的 AI 推导页）
+            // → 一律续设计（导入保真页 status=done 不在其中，不会被重设计；占位页重入翻盘）；
+            // 无未完成页：导入会话回 CONVERTING（mappingCache 续传重试转化，与 ingest 初始态一致），
+            // 设计会话回 AUDITING 复审（审计纯代码，重跑无成本）。
+            // 曾把导入会话无条件短路到 CONVERTING：c 形态降级的占位页未经重设计与占位门禁直接转化，产出占位站点
+            plan = plan.withState(hasPendingPage(plan) ? STATE_DESIGNING
+                            : (importMode ? STATE_CONVERTING : STATE_AUDITING))
                     .appendHistory("RESUME: from FAILED");
         }
         persistPlan(workDir, plan);
@@ -349,12 +357,17 @@ public class MockupOrchestrator {
                     session, workDir, session.getRequirement(), directionAsset(plan),
                     isMobileAdaptive(session), allPages,
                     plan.pendingIssues(), plan.userComment(),
+                    plan.referenceHtml(),
                     pageName -> {
-                        planRef[0] = markPageDone(planRef[0], pageName);
+                        planRef[0] = markPageDone(planRef[0], pageName, session.getSessionId());
                         persistPlan(workDir, planRef[0]);
                     });
             MockupDesignService.DesignOutcome outcome = designService.designPages(ctx, pendingPages, sse);
             plan = applyDesignOutcome(planRef[0], outcome);
+            // 设计轮结果落库：设计过程的 SSE 播报只存在于内存 journal（任务结束/服务重启即清空），
+            // 中间节点不落库曾导致重进会话只余用户消息、AI 回复内容为空——与管线模式每轮
+            // assistant 消息落库同口径，此处补齐设计轮摘要
+            saveAssistant(session.getSessionId(), buildDesignRoundSummary(outcome));
         }
         // userComment 单轮消费（已在设计提示词注入），pendingIssues 保留至审计重判
         plan = plan.withUserComment(null).withState(STATE_AUDITING);
@@ -375,20 +388,34 @@ public class MockupOrchestrator {
                 placeholders.add(p.name());
             }
         }
+        // 导入保真页豁免审计：其契约合规由 ingest 归一化保证，
+        // A2/A4 等 AI 设计稿规则对保真页是误判——曾把导入首页判不合格重置重设计，毁掉导入内容
         List<MockupAuditor.AuditIssue> issues = MockupAuditor.audit(
-                workDir, allPages, placeholders, isMobileAdaptive(session));
+                workDir, allPages, placeholders, importedPages(plan), isMobileAdaptive(session));
 
         if (issues.isEmpty()) {
             boolean confirmAuto = Boolean.TRUE.equals(session.getConfirmAuto());
             plan = plan.withPendingIssues(List.of()).appendHistory("AUDIT_PASS");
-            if (confirmAuto) {
+            // 占位页闸门：存在占位页时即使 confirmAuto 也不自动转化——占位页是格式校验
+            // 多轮未收敛的降级产物，直接转化会产出占位站点；进人工确认
+            //（重新发消息可要求重新设计占位页，确认则按占位页转化）
+            if (confirmAuto && placeholders.isEmpty()) {
+                // 落库（与设计轮摘要同因）：自动转化路径无人工确认播报，转化耗时较长，
+                // 中途关页重进须能看到"审计通过、正在转化"的进展锚点
+                saveAssistant(session.getSessionId(), "审计通过，正在将设计稿转化为模板…");
                 plan = plan.withState(STATE_CONVERTING);
                 persistPlan(workDir, plan);
                 return plan;
             }
-            plan = plan.withState(STATE_AWAITING_CONFIRM);
+            List<String> confirmIssues = new ArrayList<>();
+            if (!placeholders.isEmpty()) {
+                confirmIssues.add("占位页（" + String.join("、", placeholders)
+                        + "）：多轮未通过格式校验已降级为占位页，确认前可重新发消息要求重新设计，"
+                        + "或确认后按占位页转化");
+            }
+            plan = plan.withPendingIssues(confirmIssues).withState(STATE_AWAITING_CONFIRM);
             persistPlan(workDir, plan);
-            enterAwaitingConfirm(session, plan, List.of(), sse);
+            enterAwaitingConfirm(session, plan, confirmIssues, sse);
             return null;
         }
 
@@ -401,6 +428,8 @@ public class MockupOrchestrator {
             // 修正轮：仅重出问题页（含 A4 跨页差异页），已通过页不重设计（省 token 且防已过项回归）
             sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE,
                     "审计发现 " + issues.size() + " 个问题（" + codes + "），正在修正…\n");
+            // 落库（与设计轮摘要同因）：SSE 播报不持久，重进会话须能看到审计问题与修正走向
+            saveAssistant(session.getSessionId(), buildAuditRoundSummary(issues.size(), codes, issues));
             plan = plan.withAuditRounds(nextRound).withPendingIssues(instructions)
                     .withPages(resetIssuePages(plan, issues))
                     .withState(STATE_DESIGNING)
@@ -485,6 +514,35 @@ public class MockupOrchestrator {
         log.info("设计稿等待人工确认: sessionId={}, issues={}", session.getSessionId(), issues.size());
     }
 
+    /** 设计轮结果摘要（落库文案：逐页完成/降级状态，重进会话的历史锚点） */
+    private static String buildDesignRoundSummary(MockupDesignService.DesignOutcome outcome) {
+        StringBuilder sb = new StringBuilder("本轮设计完成：");
+        for (MockupDesignService.PageResult r : outcome.pages()) {
+            sb.append("\n- ").append(r.title()).append("：");
+            if (r.status() == MockupDesignService.PageStatus.DONE) {
+                sb.append("设计稿已生成（").append(r.roundsUsed()).append(" 轮通过格式校验）");
+            } else {
+                sb.append("多轮未通过格式校验，已降级为占位页");
+                if (r.lastErrors() != null && !r.lastErrors().isEmpty()) {
+                    sb.append("（").append(r.lastErrors().size())
+                            .append(" 处问题，重新发送消息可要求重新设计）");
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 审计修正轮摘要（落库文案：问题清单 + 修正走向） */
+    private static String buildAuditRoundSummary(int count, String codes,
+                                                 List<MockupAuditor.AuditIssue> issues) {
+        StringBuilder sb = new StringBuilder("审计发现 ").append(count).append(" 个问题（")
+                .append(codes).append("），正在修正问题页…");
+        for (MockupAuditor.AuditIssue issue : issues) {
+            sb.append("\n- ").append(issue.toInstruction());
+        }
+        return sb.toString();
+    }
+
     /** DONE 收尾播报文案（页面结果 + 结构一致性报告 + 降级说明） */
     private String buildDoneSummary(MockupConverter.ConvertOutcome outcome) {
         StringBuilder sb = new StringBuilder("设计稿已转化为模板。\n页面结果：");
@@ -554,29 +612,45 @@ public class MockupOrchestrator {
                         PAGE_PENDING, p.fastcmsPageKey()))
                 .toList();
         return new DesignPlan(PLAN_VERSION, STATE_DESIGNING, session.getDesignDirection(),
-                pages, List.of(), List.of(), null, 0, List.of());
+                pages, List.of(), List.of(), null, 0, List.of(), null);
     }
 
     /**
-     * REJECT 重出：全页 pending + mappingCache/pendingIssues/auditRounds 清零 + 携带用户意见
-     * （否决针对整体设计而非单页，全量重出语义最直观；done 页设计稿保留在盘但不再信任）
+     * REJECT 重出：AI 设计页重置 pending + 携带用户意见（否决针对整体设计而非单页，
+     * 全量重出语义最直观；done 页设计稿保留在盘但不再信任）
+     *
+     * <p><b>导入保真页除外</b>（c 形态 landing 首页）：保真页与首页 import 确定性映射是
+     * ingest 产物而非 AI 设计结果，否决只针对 AI 设计——重置保真页会让 AI 重写摧毁导入内容；
+     * mappingCache 仅剔除 AI 映射（source=ai，重出后对新设计稿失效），import 映射保留
+     * （首页转化仍走保真链路）。</p>
      */
     private DesignPlan resetForRedesign(DesignPlan plan, String comment) {
+        Set<String> imported = importedPages(plan);
         List<PageState> pages = plan.pages().stream()
-                .map(p -> p.withStatus(PAGE_PENDING)).toList();
-        return plan.withPages(pages).withMappingCache(List.of()).withPendingIssues(List.of())
+                .map(p -> imported.contains(p.name()) ? p : p.withStatus(PAGE_PENDING))
+                .toList();
+        List<MockupConverter.SectionMapping> keptMappings = plan.mappingCache().stream()
+                .filter(m -> "import".equals(m.source()))
+                .toList();
+        return plan.withPages(pages).withMappingCache(keptMappings).withPendingIssues(List.of())
                 .withAuditRounds(0).withUserComment(comment).withState(STATE_DESIGNING);
     }
 
     /**
      * 页级进度回写（pageDoneSink 的实现体）：单页 DONE 即时标记并落盘——
      * 中断（停止/失败）后重入 pendingPages 筛选即跳过该页，不重做。
+     * 同时落页级锚点消息：单页设计可长达数分钟，任务中断/服务重启时轮末摘要
+     * 来不及落库，页级锚点保证重进会话至少能看到"设计进行到了第几页"。
      * 与 {@link #applyDesignOutcome} 幂等兼容（DONE 再应用 DONE 无副作用）
      */
-    private DesignPlan markPageDone(DesignPlan plan, String pageName) {
+    private DesignPlan markPageDone(DesignPlan plan, String pageName, String sessionId) {
         List<PageState> pages = plan.pages().stream()
                 .map(p -> p.name().equals(pageName) ? p.withStatus(PAGE_DONE) : p)
                 .toList();
+        String title = pages.stream()
+                .filter(p -> p.name().equals(pageName))
+                .map(PageState::title).findFirst().orElse(pageName);
+        saveAssistant(sessionId, "「" + title + "」设计稿已生成（design/" + pageName + ".html）");
         return plan.withPages(pages);
     }
 
@@ -612,6 +686,22 @@ public class MockupOrchestrator {
 
     private boolean hasPendingPage(DesignPlan plan) {
         return plan.pages().stream().anyMatch(p -> !PAGE_DONE.equals(p.status()));
+    }
+
+    /**
+     * 导入保真页集合（mappingCache 存在 source=import 映射的页；AI 映射 source=ai，两类不混）
+     *
+     * <p>审计豁免与 REJECT 重出共用的判定：保真页不适用 AI 设计稿契约（A2/A4），
+     * 也不参与否决重出（AI 重写会摧毁 ingest 的保真内容）。</p>
+     */
+    private static Set<String> importedPages(DesignPlan plan) {
+        Set<String> pages = new LinkedHashSet<>();
+        for (MockupConverter.SectionMapping m : plan.mappingCache()) {
+            if ("import".equals(m.source())) {
+                pages.add(m.page());
+            }
+        }
+        return pages;
     }
 
     private String pageStatus(DesignPlan plan, String pageName) {

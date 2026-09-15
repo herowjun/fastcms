@@ -256,21 +256,30 @@ onMounted(() => {
 		align-items: center;
 		white-space: nowrap;
 		&-photo {
-			width: 25px;
-			height: 25px;
+			width: 32px;
+			height: 32px;
 			border-radius: 100%;
+			border: 2px solid #fff;
+			box-shadow: 0 0 0 1px var(--next-border-color-light);
+			object-fit: cover;
 		}
 	}
 	&-icon {
-		padding: 0 10px;
+		height: 34px;
+		width: 34px;
+		margin: 0 2px;
+		padding: 0;
 		cursor: pointer;
 		color: var(--next-bg-topBarColor);
-		height: 50px;
-		line-height: 50px;
+		border-radius: 8px;
 		display: flex;
 		align-items: center;
+		justify-content: center;
+		transition: background 0.15s, color 0.15s;
 		&:hover {
-			background: var(--next-color-user-hover);
+			// 原型 icon-btn：hover 浅灰蓝底 + 深墨字色
+			background: var(--next-bg-main-color);
+			color: #0f172a;
 			i {
 				display: inline-block;
 				animation: logoAnimation 0.3s ease-in-out;
@@ -281,13 +290,13 @@ onMounted(() => {
 		color: var(--next-bg-topBarColor);
 	}
 	:deep(.el-badge) {
-		height: 40px;
-		line-height: 40px;
+		height: 34px;
+		line-height: 34px;
 		display: flex;
 		align-items: center;
 	}
 	:deep(.el-badge__content.is-fixed) {
-		top: 12px;
+		top: 10px;
 	}
 }
 </style>

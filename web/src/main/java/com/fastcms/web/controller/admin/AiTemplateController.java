@@ -117,17 +117,18 @@ public class AiTemplateController {
     }
 
     /**
-     * HTML 导入（zip 站包 / 单 HTML 文件）
+     * 参考文件上传（zip 站包 / 单 HTML 文件）
      *
-     * <p>createMode=import 会话专用：同步完成 ingest（解压防 slip + pageKey 推导 +
-     * 归一化落盘 + 资产归位 + plan.json 生成，状态 CONVERTING 起步）；
+     * <p>design（AI 自主设计）新建会话的可选步骤：上传后 AI 按其仿写（单 HTML 首页 1:1 保真、
+     * 子页继承设计语言；zip 整站迁移）。同步完成 ingest（解压防 slip + pageKey 推导 +
+     * 归一化落盘 + 资产归位 + plan.json 生成），ingest 成功后 create_mode 归一为 import 血统；
      * 转化由前端随后走既有 chat 端点触发（编排器 CONVERTING 起步复用转化引擎）。</p>
      *
      * <p>multipart 表单，字段名 file；报告含 pageCount/assetCount/notes（显式标注）。</p>
      */
-    @PostMapping("sessions/{sessionId}/import")
+    @PostMapping("sessions/{sessionId}/reference")
     @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
-    public RestResult<java.util.Map<String, Object>> importHtml(
+    public RestResult<java.util.Map<String, Object>> uploadReference(
             @PathVariable("sessionId") String sessionId,
             @org.springframework.web.bind.annotation.RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
         if (requireOwnedSession(sessionId) == null) {
@@ -135,7 +136,7 @@ public class AiTemplateController {
         }
         try {
             return RestResultUtils.success(
-                    templateGenService.importHtml(sessionId, file, AuthUtils.getUserId()));
+                    templateGenService.uploadReference(sessionId, file, AuthUtils.getUserId()));
         } catch (IllegalArgumentException e) {
             return RestResultUtils.failed(e.getMessage());
         }

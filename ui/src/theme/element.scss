@@ -75,13 +75,49 @@
 	border-right: none !important;
 	width: 220px;
 }
-.el-menu-item {
-	height: 56px !important;
-	line-height: 56px !important;
+// 深空蓝：菜单项卡片化（原型 side-item：40px 高、左右留边 10px、圆角 8px、13.5px）
+.el-menu-item,
+.el-sub-menu__title {
+	height: 40px !important;
+	line-height: 40px !important;
+	margin: 1px 10px;
+	padding: 0 14px !important;
+	border-radius: 8px;
+	font-size: 13.5px;
+	color: var(--next-bg-menuBarColor);
+}
+// 折叠态：取消留边，图标由 Element Plus 居中
+.el-menu--collapse {
+	.el-menu-item,
+	.el-sub-menu__title {
+		margin: 1px 8px;
+	}
 }
 .el-menu-item,
 .el-sub-menu__title {
 	color: var(--next-bg-menuBarColor);
+}
+// 深空蓝：hover 浅灰蓝（原型 rgba(148,163,184,.08)）
+.el-menu-item:hover,
+.el-sub-menu:not(.is-opened):hover .el-sub-menu__title {
+	color: #e2e8f0 !important;
+	background-color: rgba(148, 163, 184, 0.08) !important;
+}
+// 深空蓝：菜单激活项渐变竖条 + 白字高亮（原型：条贴菜单区左缘、上下留 8px、135deg 渐变）
+.el-menu-item.is-active {
+	position: relative;
+	color: var(--el-color-white) !important;
+	font-weight: 600;
+	&::before {
+		content: '';
+		position: absolute;
+		left: -10px;
+		top: 8px;
+		bottom: 8px;
+		width: 3px;
+		border-radius: 0 3px 3px 0;
+		background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+	}
 }
 // 修复点击左侧菜单折叠再展开时，宽度不跟随问题
 .el-menu--collapse {
@@ -102,13 +138,9 @@
 .el-sub-menu .fa {
 	@include generalIcon;
 }
-// 水平菜单、横向菜单高亮 背景色，鼠标 hover 时，有子级菜单的背景色
+// 深空蓝：激活项背景（menuBarActiveColor = 原型 rgba(59,130,246,.14)；hover 背景已由上方原型浅灰蓝规则接管）
 .el-menu-item.is-active,
-.el-sub-menu.is-active .el-sub-menu__title,
-.el-sub-menu:not(.is-opened):hover .el-sub-menu__title {
-	@extend .el-menu-hover-bg-color;
-}
-.el-menu-item:hover {
+.el-sub-menu.is-active .el-sub-menu__title {
 	@extend .el-menu-hover-bg-color;
 }
 .el-sub-menu.is-active.is-opened .el-sub-menu__title {

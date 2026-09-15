@@ -325,23 +325,38 @@
                     <el-input v-model="state.createDialog.templateName" placeholder="英文目录名，以字母开头，如 my-company"
                               @input="onTemplateNameInput" />
                 </el-form-item>
-                <el-form-item label="需求描述" :required="state.createDialog.createMode !== 'import'">
+                <el-form-item label="需求描述"
+                              :required="!(state.createDialog.createMode === 'design' && state.createDialog.importFile)">
                     <el-input v-model="state.createDialog.requirement" type="textarea" :rows="4"
-                              :placeholder="state.createDialog.createMode === 'import'
-                                  ? '可选。补充说明导入站点的定位（如：企业官网），供 AI 转化时参考'
+                              :placeholder="state.createDialog.createMode === 'design' && state.createDialog.importFile
+                                  ? '可选。补充说明站点定位（如：企业官网），AI 仿写时参考；与上传文件冲突时以文件为准'
                                   : '描述模板需求，例如：企业官网模板，蓝色调，响应式设计'" />
                 </el-form-item>
                 <el-form-item label="生成模式">
                     <el-radio-group v-model="state.createDialog.createMode">
                         <!-- element-plus 2.3.x：radio 用 label 绑定值（value 属性为新版 API，此处不生效） -->
                         <el-radio label="pipeline">组件编排</el-radio>
-                        <el-radio label="design">设计稿先行</el-radio>
-                        <el-radio label="import">导入 HTML</el-radio>
+                        <el-radio label="design">AI 自主设计</el-radio>
                     </el-radio-group>
                     <div class="mode-tip">{{ createModeTip }}</div>
                 </el-form-item>
                 <template v-if="state.createDialog.createMode === 'design'">
-                    <el-form-item label="设计方向">
+                    <!-- 参考文件（可选）：选择即切换为仿写链路——提交路由见 onCreateConfirm -->
+                    <el-form-item label="参考 HTML">
+                        <el-upload accept=".html,.htm,.zip" :limit="1" :auto-upload="false"
+                                   :file-list="state.createDialog.importFileList"
+                                   :on-change="onImportFileChange" :on-remove="onImportFileRemove"
+                                   :on-exceed="onImportFileExceed">
+                            <el-button type="primary" plain>
+                                <el-icon><ele-UploadFilled /></el-icon>选择 HTML / ZIP 文件
+                            </el-button>
+                            <template #tip>
+                                <div class="el-upload__tip">可选。单个 .html：首页 1:1 保真、子页按其设计语言仿写；zip 站包：整站 1:1 迁移</div>
+                            </template>
+                        </el-upload>
+                    </el-form-item>
+                    <!-- 设计方向：仅无参考文件时可选（有文件时文件本身即方向） -->
+                    <el-form-item v-if="!state.createDialog.importFile" label="设计方向">
                         <el-select v-model="state.createDialog.designDirection" placeholder="AI 自选方向" clearable style="width: 100%">
                             <el-option v-for="d in state.designOptions.directions" :key="d.key"
                                        :label="d.name" :value="d.key">
@@ -352,21 +367,6 @@
                     </el-form-item>
                     <el-form-item label="确认方式">
                         <el-checkbox v-model="state.createDialog.confirmAuto">审计通过后自动转化（跳过人工确认）</el-checkbox>
-                    </el-form-item>
-                </template>
-                <template v-if="state.createDialog.createMode === 'import'">
-                    <el-form-item label="导入文件" required>
-                        <el-upload accept=".html,.htm,.zip" :limit="1" :auto-upload="false"
-                                   :file-list="state.createDialog.importFileList"
-                                   :on-change="onImportFileChange" :on-remove="onImportFileRemove"
-                                   :on-exceed="onImportFileExceed">
-                            <el-button type="primary" plain>
-                                <el-icon><ele-UploadFilled /></el-icon>选择 HTML / ZIP 文件
-                            </el-button>
-                            <template #tip>
-                                <div class="el-upload__tip">单个 .html 文件，或含多个 HTML/CSS/JS/图片的 zip 站包（首页需含 index.html）</div>
-                            </template>
-                        </el-upload>
                     </el-form-item>
                 </template>
                 <el-form-item label="移动端适配">
@@ -416,7 +416,7 @@
                     </el-button>
                     <el-button @click="state.createDialog.visible = false">取 消</el-button>
                     <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">
-                        {{ state.createDialog.createMode === 'import' ? '导入并转化' : '开始生成' }}
+                        开始生成
                     </el-button>
                 </template>
                 <template v-else>
@@ -502,14 +502,14 @@ const state = reactive({
         requirement: '',
         // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
         mobileAdaptive: true,
-        // 生成模式：pipeline=组件编排（默认，兼容旧客户端不传字段的后端口径）；design=设计稿先行；
-        // import=导入 HTML（zip 站包/单文件 → 归一化 → 转化为模板）
-        createMode: 'pipeline' as 'pipeline' | 'design' | 'import',
+        // 生成模式（UI 两项）：pipeline=组件编排（默认，兼容旧客户端不传字段的后端口径）；
+        // design=AI 自主设计。'import' 不再是 UI 选项——自主设计 + 参考文件时提交路由改走 import 口径
+        createMode: 'pipeline' as 'pipeline' | 'design',
         // 设计稿模式：设计方向 key（空 = AI 自选；选项来自后端方向资产库，不写死）
         designDirection: '',
         // 设计稿模式：审计通过后自动转化（跳过人工确认；关闭时审计通过停在确认卡片）
         confirmAuto: false,
-        // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 importHtml 提交）
+        // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 uploadReference 提交）
         importFile: null as File | null,
         importFileList: [] as any[],
         loading: false,
@@ -829,7 +829,7 @@ const applyImagePickHooks = () => {
             style.textContent = `
                 img { outline: 2px dashed #e6a23c !important; outline-offset: 2px; cursor: pointer !important; }
                 img:hover { outline-style: solid !important; filter: brightness(1.08); }
-                [data-ai-slot] { outline: 2px dashed var(--el-color-primary, #409eff) !important; outline-offset: 2px; cursor: pointer !important; }
+                [data-ai-slot] { outline: 2px dashed var(--el-color-primary, #3b82f6) !important; outline-offset: 2px; cursor: pointer !important; }
                 [data-ai-slot]:hover { outline-style: solid !important; filter: brightness(1.08); }
             `;
             (doc.head || doc.documentElement).appendChild(style);
@@ -1306,13 +1306,12 @@ const onOpenAiAdjust = async () => {
     }
 };
 
-/** 生成模式提示：随选择切换，说明三种模式的定位与成本差异（文案与后端默认开关口径一致） */
+/** 生成模式提示：随选择与参考文件切换（文案与后端默认开关口径一致） */
 const createModeTip = computed(() => {
     if (state.createDialog.createMode === 'design') {
-        return 'AI 自由设计整页视觉（设计稿先行）：灵活度高、效果上限高，但耗时与 token 成本约为组件模式的 2~3 倍';
-    }
-    if (state.createDialog.createMode === 'import') {
-        return '导入已有 HTML 站点（zip 包或单文件）：自动归一化结构并转化为 fastcms 模板，保真优先（适合迁移现成网站）';
+        return state.createDialog.importFile
+            ? '已选参考文件：AI 以其为权威仿写——单个 HTML 首页 1:1 保真、子页继承其设计语言；zip 整站 1:1 迁移'
+            : 'AI 自主设计整页视觉：灵活度高、效果上限高，但耗时与 token 成本约为组件模式的 2~3 倍。可上传参考 HTML 让 AI 照其仿写';
     }
     return '组件拼装 + 定向润色：快、稳、省 token，由组件数量决定丰富度（默认模式）';
 });
@@ -1346,26 +1345,26 @@ const onOpenAiCreate = () => {
     state.createDialog.createMode = 'pipeline';
     state.createDialog.designDirection = '';
     state.createDialog.confirmAuto = true;
-    // 导入模式文件每次重置（残留会让用户误以为已选择新文件）
+    // 参考文件每次重置（残留会让用户误以为已选择新文件）
     state.createDialog.importFile = null;
     state.createDialog.importFileList = [];
     state.createDialog.visible = true;
     loadDesignOptions();
 };
 
-/** 导入模式：选择文件（手动上传，暂存待创建会话后提交） */
+/** 参考文件选择（自主设计模式，手动上传暂存待创建会话后提交） */
 const onImportFileChange = (file: any) => {
     state.createDialog.importFile = (file && file.raw) || null;
     state.createDialog.importFileList = file ? [{ name: file.name }] : [];
 };
 
-/** 导入模式：移除已选文件 */
+/** 参考文件移除 */
 const onImportFileRemove = () => {
     state.createDialog.importFile = null;
     state.createDialog.importFileList = [];
 };
 
-/** 导入模式：limit=1 下重复选择 → 替换既有文件（el-upload 不自动替换，手动接管） */
+/** 参考文件 limit=1 下重复选择 → 替换既有文件（el-upload 不自动替换，手动接管） */
 const onImportFileExceed = (files: any[]) => {
     const file = files && files[0];
     if (!file) return;
@@ -1430,13 +1429,15 @@ const onTemplateNameInput = (val: string) => {
 };
 
 /**
- * 确认新建模板：创建生成型会话并自动发送首条需求；
- * 导入模式：创建会话 → 上传 HTML（同步 ingest）→ 自动发送消息触发转化（CONVERTING 起步）
+ * 确认新建模板：创建生成型会话并自动发送首条需求。
+ * 自主设计模式带参考文件：创建会话（createMode=design）→ 上传 HTML（同步 ingest，
+ * 后端归一为 import 血统）→ 自动发送消息触发转化（单文件 landing 起步 DESIGNING，AI 仿写子页；zip 起步 CONVERTING）
  */
 const onCreateConfirm = async () => {
     const name = state.createDialog.templateName.trim();
     const requirement = state.createDialog.requirement.trim();
-    const isImport = state.createDialog.createMode === 'import';
+    // 自主设计 + 参考文件 = 仿写链路（上传后由后端归一血统）；无文件 = 纯 AI 自主设计
+    const withReference = state.createDialog.createMode === 'design' && !!state.createDialog.importFile;
     if (!name) {
         ElMessage.warning('请输入模板目录名');
         return;
@@ -1445,31 +1446,27 @@ const onCreateConfirm = async () => {
         ElMessage.warning('模板目录名必须以英文字母开头，只能包含字母、数字、下划线、横线');
         return;
     }
-    if (!requirement && !isImport) {
+    if (!requirement && !withReference) {
         ElMessage.warning('请输入需求描述');
-        return;
-    }
-    if (isImport && !state.createDialog.importFile) {
-        ElMessage.warning('请选择要导入的 HTML 或 zip 文件');
         return;
     }
     state.createDialog.loading = true;
     try {
-        // 设计稿先行模式三字段（pipeline 模式下 direction/confirmAuto 后端忽略，统一携带无害）
+        // 模式只传 pipeline/design 两种；带参考文件时方向不传（文件本身即方向）
         const d = state.createDialog;
         const res = await aiApi.createSession({
             templateName: name, requirement, mobileAdaptive: d.mobileAdaptive,
             createMode: d.createMode,
-            designDirection: d.designDirection || undefined,
+            designDirection: (!withReference && d.designDirection) || undefined,
             confirmAuto: d.confirmAuto === true
         });
         if (!res.data) {
             ElMessage.error(res.msg || '创建会话失败');
             return;
         }
-        if (isImport) {
-            // 上传导入文件（同步完成解压 + 归一化 + plan.json 落盘，秒级）
-            const impRes = await aiApi.importHtml(res.data.sessionId, d.importFile as File);
+        if (withReference) {
+            // 上传参考文件（同步完成解压 + 归一化 + plan.json 落盘，秒级；后端归一为 import 血统）
+            const impRes = await aiApi.uploadReference(res.data.sessionId, d.importFile as File);
             if (!impRes.data) {
                 ElMessage.error(impRes.msg || '导入失败');
                 return;
@@ -1490,8 +1487,8 @@ const onCreateConfirm = async () => {
         // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
         loadSessionFileTree().then(() => initAiPreviewEntry());
         // 抽屉渲染后自动发送首条消息（aiChat 内部会等待会话历史加载完成）：
-        // 导入模式触发转化（编排器 CONVERTING 起步）；生成模式发送需求
-        const firstMessage = isImport ? '开始转化导入的模板页面' : requirement;
+        // 仿写链路触发编排器推进（单文件 landing DESIGNING 起步 / zip CONVERTING 起步）；生成模式发送需求
+        const firstMessage = withReference ? '开始转化导入的模板页面' : requirement;
         nextTick(() => {
             aiChatRef.value?.autoSend(firstMessage);
         });

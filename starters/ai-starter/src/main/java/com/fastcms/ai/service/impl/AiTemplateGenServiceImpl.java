@@ -492,16 +492,18 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
     }
 
     @Override
-    public java.util.Map<String, Object> importHtml(String sessionId,
-                                                     org.springframework.web.multipart.MultipartFile file,
-                                                     Long userId) {
+    public java.util.Map<String, Object> uploadReference(String sessionId,
+                                                         org.springframework.web.multipart.MultipartFile file,
+                                                         Long userId) {
         AiTemplateSession session = getSession(sessionId);
         if (session == null || !java.util.Objects.equals(session.getUserId(), userId)) {
             // 不区分"不存在/非属主"（与 Controller 会话校验同口径，避免向非属主泄露会话存在性）
             throw new IllegalArgumentException("会话不存在");
         }
-        if (!AiTemplateConstants.isImportMode(session)) {
-            throw new IllegalArgumentException("该会话不是 HTML 导入模式，请从「导入 HTML」创建会话");
+        // 参考文件上传：design（AI 自主设计）新建会话可选步骤；import 为兼容旧客户端的直传口径。
+        // 调整型会话（create_mode 为 null/pipeline）不支持
+        if (!AiTemplateConstants.isImportMode(session) && !AiTemplateConstants.isDesignMode(session)) {
+            throw new IllegalArgumentException("参考文件上传仅支持「AI 自主设计」新建会话");
         }
         if (StringUtils.hasText(session.getTemplateId())) {
             throw new IllegalArgumentException("导入仅支持新建模板会话");
@@ -510,6 +512,14 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         try {
             com.fastcms.ai.template.htmlimport.ImportService.ImportResult result =
                     importService.importHtml(session, workDir, file);
+            // design 会话上传参考文件 → 血统归一为 import（编排器 importMode 分支全量生效：
+            // 页面来自 plan.json、转化后 postConvertWiring、plan 丢失提示重传、FAILED 续传回 CONVERTING）。
+            // 方向字段随之清空（参考文件本身即设计方向）
+            if (AiTemplateConstants.isDesignMode(session)) {
+                session.setCreateMode(AiTemplateConstants.CREATE_MODE_IMPORT);
+                session.setDesignDirection(null);
+                sessionService.updateById(session);
+            }
             java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
             data.put("pageCount", result.pageCount());
             data.put("assetCount", result.assetCount());
@@ -704,22 +714,25 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         // SSE 通道封装：RunChannel 适配（journal + 多订阅者扇出 + 显式取消），管线零改动（见 SseChannel）
         RunChannel run = new RunChannel(AiTemplateConstants.SSE_EVENT_REASONING);
         SseChannel channel = new SseChannel(run);
+        // 提交者连接作为第一个订阅者；断开/超时仅摘除订阅者（任务后台续跑），取消只由 stop 端点触发。
+        // 必须前置于所有 sendError+complete 的拒绝/异常路径——订阅在后才拒绝的话，错误事件只进
+        // journal 而无接收方、complete 也无订阅者可完成，HTTP 响应永不关闭，前端 fetch 永久
+        // 挂起"生成中"（实测：任务完成后 5 分钟保留期内发消息即触发）
+        run.subscribe(emitter, 0);
+        emitter.onError(t -> run.unsubscribe(emitter));
+        emitter.onTimeout(() -> run.unsubscribe(emitter));
         AiTemplateSession session = getSession(sessionId);
         if (session == null) {
             sendError(channel, "会话不存在: " + sessionId);
             channel.complete();
             return;
         }
-        // 会话级单任务防御：已有运行中任务（含终态未过期）时拒绝新任务——续看走 stream 端点
+        // 会话级单任务防御：已有运行中任务时拒绝新任务——续看走 stream 端点
         if (!runRegistry.tryRegister(sessionId, run)) {
             sendError(channel, "该会话已有生成任务进行中，请等待完成或点击停止后再发送");
             channel.complete();
             return;
         }
-        // 提交者连接作为第一个订阅者；断开/超时仅摘除订阅者（任务后台续跑），取消只由 stop 端点触发
-        run.subscribe(emitter, 0);
-        emitter.onError(t -> run.unsubscribe(emitter));
-        emitter.onTimeout(() -> run.unsubscribe(emitter));
 
         try {
             sseExecutor.execute(() -> {
@@ -4904,8 +4917,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (request == null) {
             throw new IllegalArgumentException("请求不能为空");
         }
-        // 双模式字段校验（生成型/调整型会话统一生效，见 ai-template-two-mode-design.md §2.3）：
-        // 1) createMode 枚举白名单（防注入）；2) design 方向资产 key 必须命中 DesignDirectionLibrary。
+        // 模式字段校验（生成型/调整型会话统一生效，见 ai-template-two-mode-design.md §2.3）：
+        // 1) createMode 枚举白名单（防注入）——对外两种（pipeline/design），import 为兼容值
+        //    （旧客户端直传 = design+参考文件，行为等价）；2) design 方向资产 key 必须命中 DesignDirectionLibrary。
         // design/import 与 templateId 的互斥不在创建期拒绝——chat 分流处拦截并 SSE 提示（§6.1）。
         String normalizedMode = StringUtils.hasText(request.getCreateMode())
                 ? request.getCreateMode().trim().toLowerCase() : null;
@@ -4913,7 +4927,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             if (!AiTemplateConstants.CREATE_MODE_PIPELINE.equals(normalizedMode)
                     && !AiTemplateConstants.CREATE_MODE_DESIGN.equals(normalizedMode)
                     && !AiTemplateConstants.CREATE_MODE_IMPORT.equals(normalizedMode)) {
-                throw new IllegalArgumentException("创建模式不合法: " + request.getCreateMode() + "（仅支持 pipeline/design/import）");
+                throw new IllegalArgumentException("创建模式不合法: " + request.getCreateMode() + "（仅支持 pipeline/design）");
             }
             if (AiTemplateConstants.CREATE_MODE_DESIGN.equals(normalizedMode)
                     && StringUtils.hasText(request.getDesignDirection())
@@ -4932,8 +4946,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (!request.getTemplateName().matches("^[a-zA-Z][a-zA-Z0-9_-]*$")) {
             throw new IllegalArgumentException("模板目录名必须以英文字母开头，只能包含字母、数字、下划线、横线");
         }
-        // 导入会话：页面内容来自上传文件，requirement 仅作补充说明（转化提示词），可空
-        if (AiTemplateConstants.CREATE_MODE_IMPORT.equals(normalizedMode)) {
+        // design/import 会话 requirement 可空：页面内容可来自上传的参考文件
+        //（requirement 仅作补充说明）；纯 design 不上传文件时前端已强制必填，此处不重复收紧。
+        // 仅 pipeline（组件编排）必须有需求描述
+        if (AiTemplateConstants.CREATE_MODE_DESIGN.equals(normalizedMode)
+                || AiTemplateConstants.CREATE_MODE_IMPORT.equals(normalizedMode)) {
             return;
         }
         if (!StringUtils.hasText(request.getRequirement())) {

@@ -865,9 +865,9 @@ onMounted(() => {
     transition: all 0.15s;
     line-height: 1.5;
     &:hover {
-        border-color: #409eff;
-        background: #ecf5ff;
-        color: #409eff;
+        border-color: var(--el-color-primary);
+        background: var(--el-color-primary-light-9);
+        color: var(--el-color-primary);
     }
 }
 
@@ -913,7 +913,7 @@ onMounted(() => {
     user-select: none;
 }
 .ai-thinking-title {
-    color: #409eff;
+    color: var(--el-color-primary);
 }
 .ai-thinking-arrow {
     color: #909399;

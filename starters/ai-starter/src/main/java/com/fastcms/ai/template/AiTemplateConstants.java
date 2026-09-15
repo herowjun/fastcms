@@ -32,20 +32,26 @@ public final class AiTemplateConstants {
     }
 
     /**
-     * 会话创建模式（见 doc/wiki/ai-template-two-mode-design.md §2.2、html-import-to-template-design.md §1）
+     * 会话创建模式——对外两种（见 doc/wiki/ai-template-two-mode-design.md §2.2）：
      *
      * <ul>
-     *     <li>pipeline（默认）：组件管线模式——PageSpec → 组件渲染，既有行为</li>
-     *     <li>design：设计稿先行模式——AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板</li>
-     *     <li>import：HTML 导入模式——上传既有 HTML/zip 站包，ingest 归一化（零 AI）后复用转化段</li>
+     *     <li>pipeline（默认）：组件编排——PageSpec → 组件渲染，既有行为</li>
+     *     <li>design：AI 自主设计——AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板；
+     *         可选上传参考 HTML/zip（design 会话调 uploadReference 端点），AI 按其仿写</li>
      * </ul>
+     *
+     * <p>{@code import} 为<b>血统标记</b>而非对外选项：design 会话上传参考文件 ingest 成功后
+     * create_mode 归一为 import（编排器 importMode 分支全量生效：页面来自 plan.json、
+     * 转化后 postConvertWiring、plan 丢失提示重传、FAILED 续传回 CONVERTING）。
+     * 兼容口径：新建接口白名单仍接受 import（旧客户端/脚本直传，行为与 design+上传等价），
+     * 存量 import 会话全部照常工作。</p>
      */
     public static final String CREATE_MODE_PIPELINE = "pipeline";
     public static final String CREATE_MODE_DESIGN = "design";
     public static final String CREATE_MODE_IMPORT = "import";
 
     /**
-     * 判断会话是否为设计稿先行（design）模式。
+     * 判断会话是否为 AI 自主设计（design）模式。
      *
      * <p><b>全代码唯一出口</b>：create_mode 的判空逻辑（null/"pipeline"=管线模式）只允许出现在这里，
      * 禁止各处散落 equals 判断（存量会话 create_mode=NULL 必须视为管线模式）。</p>
@@ -57,7 +63,8 @@ public final class AiTemplateConstants {
     }
 
     /**
-     * 判断会话是否为 HTML 导入（import）模式。
+     * 判断会话是否为导入血统（import）——design 会话上传参考文件 ingest 后归一、
+     * 或旧客户端直传 import 创建。
      *
      * <p>与 {@link #isDesignMode} 同口径：全代码唯一出口，禁止散落 equals 判断。</p>
      *

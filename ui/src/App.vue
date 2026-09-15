@@ -73,8 +73,46 @@ onMounted(() => {
 		});
 		// 获取缓存中的布局配置
 		if (Local.get('themeConfig')) {
-			storesThemeConfig.setThemeConfig({ themeConfig: Local.get('themeConfig') });
+			// 深空蓝换肤迁移：旧缓存中的旧默认色一次性归一到新主题（仅命中旧默认值时替换，用户手动改过的不受影响）
+			const cachedTheme: any = Local.get('themeConfig');
+			let themeMigrated = false;
+			// 旧默认值 → 深空蓝原型值映射表
+			const colorMigrations: Record<string, [string, string]> = {
+				primary: ['#409eff', '#3b82f6'],
+				topBarColor: ['#606266', '#475569'],
+				menuBar: ['#545c64', '#0f172a'],
+				menuBarColor: ['#eaeaea', '#94a3b8'],
+				menuBarActiveColor: ['rgba(0, 0, 0, 0.2)', 'rgba(59, 130, 246, 0.14)'],
+				columnsMenuBar: ['#545c64', '#0f172a'],
+				columnsMenuBarColor: ['#e6e6e6', '#94a3b8'],
+			};
+			for (const key in colorMigrations) {
+				const [oldVal, newVal] = colorMigrations[key];
+				if (cachedTheme[key] === oldVal) {
+					cachedTheme[key] = newVal;
+					themeMigrated = true;
+				}
+			}
+			// 中间过渡版本的 menuBarActiveColor（0.18 → 0.14）
+			if (cachedTheme.menuBarActiveColor === 'rgba(59, 130, 246, 0.18)') {
+				cachedTheme.menuBarActiveColor = 'rgba(59, 130, 246, 0.14)';
+				themeMigrated = true;
+			}
+			if (themeMigrated) Local.set('themeConfig', cachedTheme);
+			storesThemeConfig.setThemeConfig({ themeConfig: cachedTheme });
 			document.documentElement.style.cssText = Local.get('themeConfigStyle');
+			// 迁移后按新主题重刷 CSS 变量并回写缓存样式，防止旧 cssText 继续命中旧色
+			if (themeMigrated) {
+				const rootStyle = document.documentElement.style;
+				rootStyle.setProperty('--next-bg-menuBar', cachedTheme.menuBar);
+				rootStyle.setProperty('--next-bg-menuBarColor', cachedTheme.menuBarColor);
+				rootStyle.setProperty('--next-bg-menuBarActiveColor', cachedTheme.menuBarActiveColor);
+				rootStyle.setProperty('--next-bg-topBar', cachedTheme.topBar);
+				rootStyle.setProperty('--next-bg-topBarColor', cachedTheme.topBarColor);
+				rootStyle.setProperty('--next-bg-columnsMenuBar', cachedTheme.columnsMenuBar);
+				rootStyle.setProperty('--next-bg-columnsMenuBarColor', cachedTheme.columnsMenuBarColor);
+				Local.set('themeConfigStyle', rootStyle.cssText);
+			}
 		}
 		// 获取缓存中的全屏配置
 		if (Session.get('isTagsViewCurrenFull')) {

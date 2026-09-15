@@ -5,6 +5,10 @@
 			<el-scrollbar class="flex-auto" ref="layoutAsideScrollbarRef" @mouseenter="onAsideEnterLeave(true)" @mouseleave="onAsideEnterLeave(false)">
 				<Vertical :menuList="state.menuList" />
 			</el-scrollbar>
+			<!-- 版本脚注（折叠态隐藏；版本号由 vite define 注入 package.json 版本） -->
+			<div v-if="!themeConfig.isCollapse" class="layout-aside-foot">
+				v{{ appVersion }} <span class="ver">AI CORE</span>
+			</div>
 		</el-aside>
 	</div>
 </template>
@@ -23,6 +27,8 @@ const Vertical = defineAsyncComponent(() => import('/@/layout/navMenu/vertical.v
 
 // 定义变量内容
 const layoutAsideScrollbarRef = ref();
+// 版本号：在 script 中引用 __NEXT_VERSION__ 保证 vite define 静态替换（模板直写会被编译成 _ctx 属性访问导致替换失效）
+const appVersion = __NEXT_VERSION__;
 const stores = useRoutesList();
 const storesThemeConfig = useThemeConfig();
 const storesTagsViewRoutes = useTagsViewRoutes();
@@ -150,9 +156,30 @@ watch(
 );
 // 监听用户权限切换，用于演示 `权限管理 -> 前端控制 -> 页面权限` 权限切换不生效
 watch(
-	() => routesList.value,
-	() => {
-		setFilterRoutes();
-	}
-);
+		() => routesList.value,
+		() => {
+			setFilterRoutes();
+		}
+	);
 </script>
+
+<style scoped lang="scss">
+// 侧边栏版本脚注（深空蓝原型 side-foot：菜单区沉底）
+.layout-aside-foot {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 20px;
+	border-top: 1px solid rgba(148, 163, 184, 0.1);
+	font-size: 11.5px;
+	color: #475569;
+	.ver {
+		font-size: 10px;
+		color: #60a5fa;
+		border: 1px solid rgba(96, 165, 250, 0.35);
+		padding: 0 6px;
+		border-radius: 99px;
+	}
+}
+</style>

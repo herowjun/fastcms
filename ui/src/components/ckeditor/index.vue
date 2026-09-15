@@ -403,7 +403,7 @@ watch(() => props.modelValue, val => {
   .ck-ai-bar button {
     border: none;
     background: #f5f7fa;
-    color: #409eff;
+    color: var(--el-color-primary);
     font-size: 12px;
     padding: 4px 8px;
     border-radius: 4px;
@@ -411,7 +411,7 @@ watch(() => props.modelValue, val => {
     white-space: nowrap;
   }
   .ck-ai-bar button:hover {
-    background: #409eff;
+    background: var(--el-color-primary);
     color: #fff;
   }
 </style>

@@ -214,21 +214,23 @@ public interface IAiTemplateGenService {
     java.util.Map<String, Object> getDesignConfirmCard(String sessionId);
 
     /**
-     * HTML 导入（zip 站包 / 单 HTML 文件）
+     * 参考文件上传（zip 站包 / 单 HTML 文件）
      *
-     * <p>仅 createMode=import 的新建会话可用。同步完成 ingest：解压（防 slip）→
-     * pageKey 推导 → 归一化落盘（design/*.html）→ 资产归位 → plan.json（CONVERTING）；
+     * <p>design（AI 自主设计）新建会话的可选步骤：上传后 AI 按其仿写；ingest 成功后
+     * create_mode 归一为 import 血统（编排器 importMode 分支全量生效）。兼容 createMode=import
+     * 的旧直传口径（行为等价）。同步完成 ingest：解压（防 slip）→ pageKey 推导 →
+     * 归一化落盘（design/*.html）→ 资产归位 → plan.json（CONVERTING）；
      * 转化由既有 chatStream 驱动（编排器 CONVERTING 起步，html-import 设计 §5.4）。</p>
      *
-     * @param sessionId 会话 ID（import 模式、未绑定正式模板）
+     * @param sessionId 会话 ID（design/import 新建会话、未绑定正式模板）
      * @param file      上传的 zip 或 HTML 文件
      * @param userId    当前用户 ID（属主校验）
      * @return 导入报告（页数 / 资产数 / 显式标注）
-     * @throws IllegalArgumentException 会话不存在 / 非属主 / 非 import 模式 / 文件不合法
+     * @throws IllegalArgumentException 会话不存在 / 非属主 / 模式不支持 / 文件不合法
      */
-    java.util.Map<String, Object> importHtml(String sessionId,
-                                             org.springframework.web.multipart.MultipartFile file,
-                                             Long userId);
+    java.util.Map<String, Object> uploadReference(String sessionId,
+                                                  org.springframework.web.multipart.MultipartFile file,
+                                                  Long userId);
 
     /**
      * 更新图片槽位（AI 调整页点选图片换图，不经 AI 对话）

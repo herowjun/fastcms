@@ -117,6 +117,8 @@ export function AiTemplateApi() {
 		/**
 		 * 创建会话
 		 * @param data { templateName, title?, requirement, mobileAdaptive?, createMode?, designDirection?, confirmAuto? }
+		 * createMode 仅两种：pipeline=组件编排（默认）、design=AI 自主设计；
+		 * design + uploadReference 上传参考文件 = 仿写链路（后端归一为 import 血统）
 		 */
 		createSession(data: object) {
 			return request({
@@ -127,7 +129,7 @@ export function AiTemplateApi() {
 		},
 
 		/**
-		 * 设计稿先行模式选项（新建模板对话框"生成模式"数据源）：
+		 * AI 自主设计模式选项（新建模板对话框"设计方向"数据源）：
 		 * { enabled: 总开关（false 时前端隐藏模式选项）, directions: [{key, name, summary}] }
 		 */
 		designOptions() {
@@ -138,21 +140,25 @@ export function AiTemplateApi() {
 		},
 
 		/**
-		 * HTML 导入（zip 站包 / 单 HTML 文件；createMode=import 会话专用）
+		 * 参考文件上传（zip 站包 / 单 HTML 文件；design 新建会话可选步骤）
 		 *
-		 * 同步完成解压 + 归一化 + plan.json 落盘（秒级返回）；
+		 * 同步完成解压 + 归一化 + plan.json 落盘（秒级返回），后端将 create_mode 归一为 import 血统；
 		 * 转化由前端随后走既有 chat 对话触发。
-		 * @param sessionId import 模式会话 ID
+		 * @param sessionId design 模式新建会话 ID
 		 * @param file 上传的 zip 或 HTML 文件
 		 * @returns { pageCount, assetCount, notes[] }（notes 为导入报告标注）
 		 */
-		importHtml(sessionId: string, file: File) {
+		uploadReference(sessionId: string, file: File) {
 			const formData = new FormData();
 			formData.append('file', file);
 			return request({
-				url: '/admin/ai/template/sessions/' + sessionId + '/import',
+				url: '/admin/ai/template/sessions/' + sessionId + '/reference',
 				method: 'post',
-				data: formData
+				data: formData,
+				// axios 实例默认 headers 写死了 'Content-Type: application/json'（见 utils/request.ts:11），
+				// 不会因 FormData 自动切换为 multipart；这里显式声明 multipart/form-data，
+				// axios 1.x 检测到 data 是 FormData 时会自动追加 boundary 后缀
+				headers: { 'Content-Type': 'multipart/form-data' }
 			});
 		},
 

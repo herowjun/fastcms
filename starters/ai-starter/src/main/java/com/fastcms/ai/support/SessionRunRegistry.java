@@ -48,16 +48,17 @@ public class SessionRunRegistry {
     /**
      * 登记运行任务
      *
-     * @return false = 该会话已有任务（含终态未过期），调用方应拒绝新任务
+     * @return false = 该会话仍有任务在运行，调用方应拒绝新任务
      */
     public boolean tryRegister(String sessionId, RunChannel run) {
         RunChannel existing = runs.putIfAbsent(sessionId, run);
         if (existing == null) {
             return true;
         }
-        // 前任已结束且过期：替换登记（惰性清理路径之一）
-        return existing.isFinished() && existing.finishedForMs() > FINISHED_RETENTION_MS
-                && runs.replace(sessionId, existing, run);
+        // 前任已结束：立即让位（不等终态保留期）——已完成的任务阻塞新消息属于误伤，
+        // 曾导致任务完成后 5 分钟内发消息全部被拒。替换后旧 run 的引用仍被迟到续连的
+        // 回放持有（replayAndComplete 操作旧对象，不受替换影响），终态回放语义保留
+        return existing.isFinished() && runs.replace(sessionId, existing, run);
     }
 
     /**

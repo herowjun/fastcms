@@ -7,24 +7,28 @@
 		:unique-opened="getThemeConfig.isUniqueOpened"
 		:collapse-transition="false"
 	>
-		<template v-for="val in menuLists">
-			<el-sub-menu :index="val.path" v-if="val.children && val.children.length > 0" :key="val.path">
-				<template #title>
-					<SvgIcon :name="val.meta.icon" />
-					<span>{{ $t(val.meta.title) }}</span>
-				</template>
-				<SubItem :chil="val.children" />
-			</el-sub-menu>
-			<template v-else>
-				<el-menu-item :index="val.path" :key="val.path">
-					<SvgIcon :name="val.meta.icon" />
-					<template #title v-if="!val.meta.isLink || (val.meta.isLink && val.meta.isIframe)">
+		<template v-for="(group, gIndex) in groupedMenus" :key="gIndex">
+			<!-- 深空蓝：分组小标题（折叠态隐藏） -->
+			<div v-if="group.title && !state.isCollapse" class="menu-group-title">{{ group.title }}</div>
+			<template v-for="val in group.items">
+				<el-sub-menu :index="val.path" v-if="val.children && val.children.length > 0" :key="val.path">
+					<template #title>
+						<SvgIcon :name="val.meta.icon" />
 						<span>{{ $t(val.meta.title) }}</span>
 					</template>
-					<template #title v-else>
-						<a class="w100" @click.prevent="onALinkClick(val)">{{ $t(val.meta.title) }}</a>
-					</template>
-				</el-menu-item>
+					<SubItem :chil="val.children" />
+				</el-sub-menu>
+				<template v-else>
+					<el-menu-item :index="val.path" :key="val.path">
+						<SvgIcon :name="val.meta.icon" />
+						<template #title v-if="!val.meta.isLink || (val.meta.isLink && val.meta.isIframe)">
+							<span>{{ $t(val.meta.title) }}</span>
+						</template>
+						<template #title v-else>
+							<a class="w100" @click.prevent="onALinkClick(val)">{{ $t(val.meta.title) }}</a>
+						</template>
+					</el-menu-item>
+				</template>
 			</template>
 		</template>
 	</el-menu>
@@ -63,6 +67,37 @@ const state = reactive({
 const menuLists = computed(() => {
 	return <RouteItems>props.menuList;
 });
+// 深空蓝：菜单按域分组（前端展示层分组，不改路由；未命中分组的路径按原顺序保留）
+const menuGroupMap: Record<string, string> = {
+	// 内容管理
+	'/article': '内容管理',
+	'/page': '内容管理',
+	'/attach': '内容管理',
+	'/order': '内容管理',
+	// 模板与 AI
+	'/template': '模板与 AI',
+	// 站点设置
+	'/plugin': '站点设置',
+	'/user': '站点设置',
+	'/setting': '站点设置',
+	// 系统
+	'/system': '系统',
+};
+const groupedMenus = computed(() => {
+	const groups: { title: string; items: RouteItems }[] = [];
+	const pushToGroup = (title: string, item: RouteItems) => {
+		let group = title ? groups.find((g) => g.title === title) : groups.find((g) => !g.title);
+		if (!group) {
+			group = { title, items: [] };
+			groups.push(group);
+		}
+		group.items.push(item);
+	};
+	menuLists.value.forEach((item) => {
+		pushToGroup(menuGroupMap[item.path] || '', item);
+	});
+	return groups;
+});
 // 获取布局配置信息
 const getThemeConfig = computed(() => {
 	return themeConfig.value;
@@ -100,3 +135,15 @@ watch(
 	}
 );
 </script>
+
+<style scoped lang="scss">
+// 深空蓝：菜单分组小标题（原型 side-group：11px/600/#475569/letter-spacing .1em）
+.menu-group-title {
+	padding: 14px 20px 6px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	color: #475569;
+	user-select: none;
+}
+</style>

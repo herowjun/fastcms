@@ -95,7 +95,12 @@ public final class RunChannel {
         if (journal.size() > MAX_JOURNAL_ENTRIES) {
             journal.remove(0);
         }
-        for (SseEmitter emitter : subscribers) {
+        // 迭代副本而非原列表：失败的订阅者在循环内从原 subscribers 摘除，
+        // 若直接 for-each 原列表，List.remove(Object) 使 modCount++ 而迭代器
+        // expectedModCount 不变，下一次 next() 即抛 ConcurrentModificationException
+        //（单线程内的迭代-修改自碰撞，synchronized 防不住；订阅者断开即触发，
+        // 会沿 reactor 流式回调链传播导致整个设计任务失败）
+        for (SseEmitter emitter : List.copyOf(subscribers)) {
             try {
                 emitter.send(SseEmitter.event().id(String.valueOf(seq)).name(eventName).data(data));
             } catch (IOException | IllegalStateException e) {
