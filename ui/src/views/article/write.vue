@@ -137,7 +137,7 @@
                 <span class="ai-thinking-title">{{ state.aiThinking ? '正在思考…' : '已深度思考' }}</span>
                 <span class="ai-thinking-arrow" :class="{ collapsed: !state.aiReasoningExpanded }">▸</span>
             </div>
-            <div v-show="state.aiReasoningExpanded" class="ai-thinking-text">{{ formatReasoning(state.aiReasoning) }}</div>
+            <div v-show="state.aiReasoningExpanded" ref="aiThinkingTextRef" class="ai-thinking-text">{{ formatReasoning(state.aiReasoning) }}</div>
         </div>
 
         <!-- 模式：生成文章 -->
@@ -153,7 +153,7 @@
                     {{ state.aiGen.generating ? '生成中…' : '生成' }}
                 </el-button>
             </div>
-            <div v-if="state.aiGen.output" class="ai-gen-output">
+            <div v-if="state.aiGen.output" ref="aiGenOutputRef" class="ai-gen-output">
                 <pre class="ai-gen-text">{{ state.aiGen.output }}</pre>
             </div>
             <div v-if="state.aiGen.result" class="ai-gen-result">
@@ -196,7 +196,7 @@
                 </div>
                 <div class="ai-rewrite-section">
                     <div class="ai-op-label">AI 结果</div>
-                    <div class="ai-op-text result">{{ state.aiRewriteResult }}<span
+                    <div class="ai-op-text result" ref="aiRewriteResultRef">{{ state.aiRewriteResult }}<span
                         v-if="state.aiRewriting" class="typing-cursor">▌</span></div>
                 </div>
                 <div v-if="!state.aiRewriting" class="ai-rewrite-actions">
@@ -242,7 +242,7 @@
 </template>
 
 <script lang="ts" name="articleWrite" setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
 import AttachDialog from '/@/components/attach/index.vue';
@@ -503,6 +503,30 @@ const formatReasoning = (text: string): string => {
 };
 
 /**
+ * 流式输出容器的自动跟随滚动。
+ *
+ * <p>仅当用户位于底部附近（距底 &lt; 40px）时才跟随：用户向上翻阅已输出的内容时
+ * 不打断阅读；回到接近底部后恢复跟随。nextTick 后解析 ref，兼容首个 chunk
+ * 到达时容器（v-if / v-show）尚未挂载的情况。</p>
+ */
+const followScroll = (getEl: () => HTMLElement | null) => {
+    nextTick(() => {
+        const el = getEl();
+        if (!el) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) {
+            el.scrollTop = el.scrollHeight;
+        }
+    });
+};
+
+/** 思考过程容器（generate/field/rewrite 三模式共用） */
+const aiThinkingTextRef = ref<HTMLElement | null>(null);
+/** 全文生成输出容器 */
+const aiGenOutputRef = ref<HTMLElement | null>(null);
+/** 划词改写结果容器 */
+const aiRewriteResultRef = ref<HTMLElement | null>(null);
+
+/**
  * 打开统一 AI 抽屉（指定模式），重置思考过程状态
  */
 const openAiDrawer = (mode: 'generate' | 'field' | 'rewrite') => {
@@ -537,8 +561,12 @@ const onAiGenerate = async () => {
             instruction: state.aiGen.instruction,
             articleId: state.articleId || undefined,
         }, {
-            onMessage: (delta: string) => { state.aiGen.output += delta; },
-            onReasoning: (delta: string) => { state.aiReasoning += delta; },
+            onMessage: (delta: string) => { state.aiGen.output += delta; followScroll(() => aiGenOutputRef.value); },
+            onReasoning: (delta: string) => {
+                // 防爆：思考累积超 512KB 丢弃增量（后端单轮 256KB 保险丝正常时远达不到，纯纵深防御）
+                if (state.aiReasoning.length < 512 * 1024) state.aiReasoning += delta;
+                followScroll(() => aiThinkingTextRef.value);
+            },
             onDone: (data: string) => {
                 state.aiThinking = false;
                 try {
@@ -627,7 +655,11 @@ const onAiFieldBtn = async (field: string) => {
             title: state.ruleForm.title,
             articleId: state.articleId || undefined,
         }, {
-            onReasoning: (delta: string) => { state.aiReasoning += delta; },
+            onReasoning: (delta: string) => {
+                // 防爆：思考累积超 512KB 丢弃增量（后端单轮 256KB 保险丝正常时远达不到，纯纵深防御）
+                if (state.aiReasoning.length < 512 * 1024) state.aiReasoning += delta;
+                followScroll(() => aiThinkingTextRef.value);
+            },
             onDone: (data: string) => {
                 state.aiThinking = false;
                 try {
@@ -748,8 +780,12 @@ const doAiRewrite = async (payload: any) => {
             articleTitle: state.ruleForm.title,
             articleId: state.articleId || undefined,
         }, {
-            onReasoning: (delta: string) => { state.aiReasoning += delta; },
-            onMessage: (delta: string) => { result += delta; state.aiRewriteResult += delta; },
+            onReasoning: (delta: string) => {
+                // 防爆：思考累积超 512KB 丢弃增量（后端单轮 256KB 保险丝正常时远达不到，纯纵深防御）
+                if (state.aiReasoning.length < 512 * 1024) state.aiReasoning += delta;
+                followScroll(() => aiThinkingTextRef.value);
+            },
+            onMessage: (delta: string) => { result += delta; state.aiRewriteResult += delta; followScroll(() => aiRewriteResultRef.value); },
             onDone: (data: string) => {
                 state.aiThinking = false;
                 state.aiReasoningExpanded = false; // 折叠思考，突出结果对比
@@ -829,9 +865,9 @@ onMounted(() => {
     transition: all 0.15s;
     line-height: 1.5;
     &:hover {
-        border-color: #409eff;
-        background: #ecf5ff;
-        color: #409eff;
+        border-color: var(--el-color-primary);
+        background: var(--el-color-primary-light-9);
+        color: var(--el-color-primary);
     }
 }
 
@@ -877,7 +913,7 @@ onMounted(() => {
     user-select: none;
 }
 .ai-thinking-title {
-    color: #409eff;
+    color: var(--el-color-primary);
 }
 .ai-thinking-arrow {
     color: #909399;
@@ -892,6 +928,25 @@ onMounted(() => {
     white-space: pre-wrap;
     line-height: 1.6;
     border-top: 1px dashed #e4e7ed;
+}
+/* 全文生成输出：限高滚动（流式时由 followScroll 自动跟随） */
+.ai-gen-output {
+    max-height: 320px;
+    overflow-y: auto;
+    margin-top: 10px;
+    border: 1px solid #ebeef5;
+    border-radius: 6px;
+    background: #fafafa;
+}
+.ai-gen-text {
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: inherit;
+    color: #303133;
 }
 
 /* ===== AI 操作历史抽屉 ===== */

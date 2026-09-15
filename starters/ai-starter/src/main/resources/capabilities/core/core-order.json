@@ -1,0 +1,58 @@
+{
+  "capabilityId": "core:order",
+  "name": "订单创建与状态查询",
+  "description": "主应用统一订单接口：按商品（文章等）创建订单、轮询支付状态。支付类能力的公共底座",
+  "category": "payment-channel",
+  "capabilityRole": "core",
+  "appliesTo": ["article", "page", "index"],
+  "contractVersion": "1.0",
+  "requiresChannel": null,
+  "authFlow": {
+    "mechanism": "jwt-bearer-or-query-param",
+    "tokenTransport": "请求头 Authorization: Bearer <token>，或查询参数 accessToken=<token>（iframe/文件下载等无法带 header 的场景）",
+    "tokenStorage": "站点登录逻辑写入 localStorage，自包含代码用查询参数 accessToken 传递最稳妥",
+    "anonymousBehavior": "未登录调用返回未授权响应，前端应先引导用户去登录页，不要裸调接口吃 401"
+  },
+  "endpoints": [
+    {
+      "id": "createOrder",
+      "method": "POST",
+      "path": "/fastcms/api/client/order/save",
+      "contentType": "application/json",
+      "params": {
+        "products": "商品数组，文章购买填 [{\"id\": 文章ID, \"type\": \"\", \"sku\": \"\", \"num\": 1}]，id 从 FTL 变量 ${(article.id)!} 取",
+        "buyerMsg": "买家留言，可空字符串"
+      },
+      "response": {
+        "code": "200=成功，500=失败",
+        "message": "失败时的错误信息（如：下单人不能为空=未登录）",
+        "data": "订单 id（long），后续支付与状态查询都依赖它"
+      },
+      "auth": "required"
+    },
+    {
+      "id": "queryStatus",
+      "method": "GET",
+      "path": "/fastcms/api/client/order/status/check/{orderId}",
+      "params": {
+        "orderId": "long，来自 createOrder 返回"
+      },
+      "response": {
+        "convention": "成功回调（code=200）= 已支付；失败回调（code=500 或 HTTP 错误）= 未支付。没有独立的 status 业务字段，靠成功/失败回调区分"
+      },
+      "auth": "required",
+      "usageHint": "用 setInterval 每 2 秒轮询；成功回调里 clearInterval。注意失败回调是未支付的常态（不是异常），不要在失败回调里弹错误提示"
+    }
+  ],
+  "frontendFlow": [
+    "本能力是底座，通常不单独使用：由支付渠道能力（如 payment:wxpay）组合成完整流程",
+    "创建订单：POST /fastcms/api/client/order/save（products + buyerMsg）→ 拿 orderId",
+    "轮询状态：GET /fastcms/api/client/order/status/check/{orderId}，成功回调=已支付"
+  ],
+  "errorHandling": {
+    "未登录": "跳转登录页，登录成功后引导用户回到原页面重试",
+    "创建订单失败": "提示用户稍后重试；不要自动反复重试创建订单"
+  },
+  "detectionPatterns": ["/fastcms/api/client/order/save", "/fastcms/api/client/order/status/check"],
+  "suggestedPosition": "after-content"
+}

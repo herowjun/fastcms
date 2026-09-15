@@ -1,0 +1,26 @@
+{
+  "key": "editorial-magazine",
+  "name": "杂志编辑风",
+  "summary": "内容优先的排版——大图视觉、超大标题、编辑式不对称网格、去卡片化的开放分区、强烈的排版节奏与编号/线条装饰",
+  "tokensOverride": {
+    "primaryColor": "#b91c1c",
+    "stylePreset": "elegant"
+  },
+  "referenceBlocks": [
+    "<section class=\"py-16 md:py-24\">\n  <div class=\"max-w-7xl mx-auto px-4\">\n    <div class=\"grid grid-cols-1 md:grid-cols-12 gap-8 items-end\">\n      <div class=\"md:col-span-7\">\n        <p class=\"text-primary-600 text-sm font-semibold tracking-widest mb-4\">VOL.01 — 栏目标签</p>\n        <h1 class=\"text-slate-900 text-5xl md:text-6xl font-bold leading-none mb-6\">超大编辑式主标题<br/>占据视觉主导</h1>\n        <p class=\"text-slate-500 text-lg leading-relaxed mb-8\">编辑导语一到两行，克制而有力地点出本期主题。</p>\n        <a href=\"#\" class=\"text-primary-600 font-semibold border-b-2 border-primary-600 pb-1 hover:text-primary-700 transition\">阅读专题 →</a>\n      </div>\n      <div class=\"md:col-span-5\">\n        <img src=\"#\" alt=\"专题主视觉\" class=\"w-full h-80 md:h-96 object-cover\"/>\n      </div>\n    </div>\n  </div>\n</section>",
+    "<section class=\"py-16 md:py-20\">\n  <div class=\"max-w-7xl mx-auto px-4\">\n    <div class=\"border-t border-slate-200 pt-10 mb-12 flex items-end justify-between\">\n      <h2 class=\"text-3xl md:text-4xl font-bold text-slate-900\">分区标题</h2>\n      <span class=\"text-slate-400 text-sm\">01 / 专题</span>\n    </div>\n    <div class=\"grid grid-cols-1 md:grid-cols-12 gap-10\">\n      <article class=\"md:col-span-5\">\n        <img src=\"#\" alt=\"文章配图\" class=\"w-full h-64 object-cover mb-5\"/>\n        <h3 class=\"text-xl font-bold text-slate-900 mb-2\">文章标题使用较强字重</h3>\n        <p class=\"text-slate-500 text-sm leading-relaxed\">摘要两到三行，去卡片化的开放排版，靠留白与线条分区。</p>\n      </article>\n      <div class=\"md:col-span-7 divide-y divide-slate-200\">\n        <a href=\"#\" class=\"flex items-baseline gap-6 py-5 hover:text-primary-600 transition\">\n          <span class=\"text-slate-300 font-bold\">02</span>\n          <span class=\"text-base font-semibold\">条目标题靠线条与编号组织</span>\n        </a>\n      </div>\n    </div>\n  </div>\n</section>"
+  ],
+  "do": [
+    "超大标题（text-5xl md:text-6xl，正文标题也保持较强字重）",
+    "大图视觉（h-80/h-96 object-cover 的专题主图）",
+    "编辑式不对称网格（md:grid-cols-12 + col-span-7/5）",
+    "去卡片化开放分区：靠 border-t 线条、divide-y 与留白组织内容",
+    "编号装饰（VOL.01 / 01/02 条目编号）强化排版节奏"
+  ],
+  "dont": [
+    "小卡片密集排列（等宽三列卡片墙）",
+    "全圆角柔和风（rounded-2xl/full 大面积使用）",
+    "居中对称的呆板布局",
+    "细小标题与弱字重（内容优先被削弱）"
+  ]
+}

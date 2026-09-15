@@ -1,0 +1,25 @@
+{
+  "key": "feedback-unify",
+  "name": "统一语言",
+  "summary": "统一全站版式语言——一致的卡片/栅格/圆角/间距规范、消除同站混搭的版式差异，让页面整体协调",
+  "tokensOverride": {
+    "stylePreset": "corporate"
+  },
+  "referenceBlocks": [
+    "<section class=\"py-16 md:py-20\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <div class=\"mb-10\">\n      <p class=\"text-primary-600 text-sm font-semibold tracking-widest mb-2\">统一格式的分区眉题</p>\n      <h2 class=\"text-2xl md:text-3xl font-bold text-slate-900\">统一格式的分区标题</h2>\n    </div>\n    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-6\">\n      <div class=\"bg-white rounded-lg border border-slate-200 p-6\">\n        <div class=\"w-10 h-10 bg-primary-50 rounded-md flex items-center justify-center mb-4\"><span class=\"text-primary-600\">◆</span></div>\n        <h3 class=\"text-base font-semibold text-slate-900 mb-2\">卡片规格全站一致</h3>\n        <p class=\"text-slate-600 text-sm leading-relaxed\">同样的圆角 rounded-lg、同样的边框 border-slate-200、同样的内边距 p-6。</p>\n      </div>\n    </div>\n  </div>\n</section>",
+    "<section class=\"bg-slate-50 py-16 md:py-20\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <div class=\"mb-10\">\n      <p class=\"text-primary-600 text-sm font-semibold tracking-widest mb-2\">统一格式的分区眉题</p>\n      <h2 class=\"text-2xl md:text-3xl font-bold text-slate-900\">另一个分区，同一套语言</h2>\n    </div>\n    <div class=\"grid grid-cols-1 md:grid-cols-2 gap-6\">\n      <div class=\"bg-white rounded-lg border border-slate-200 p-6 flex items-start gap-4\">\n        <div class=\"w-10 h-10 shrink-0 bg-primary-50 rounded-md flex items-center justify-center\"><span class=\"text-primary-600\">◆</span></div>\n        <div>\n          <h3 class=\"text-base font-semibold text-slate-900 mb-2\">横向卡片同一圆角</h3>\n          <p class=\"text-slate-600 text-sm leading-relaxed\">布局变了（纵向卡 → 横向卡），但圆角/边框/内边距/标题层级完全一致。</p>\n        </div>\n      </div>\n    </div>\n  </div>\n</section>"
+  ],
+  "do": [
+    "全站统一圆角档位（容器 rounded-lg、图标容器 rounded-md，不混用其他档）",
+    "全站统一分区头格式（眉题 + 标题 + 说明的三段式）",
+    "卡片统一规格（bg-white + border-slate-200 + p-6）",
+    "统一间距节奏（分区间 py-16~py-20、卡片间 gap-6）",
+    "标题层级全站一致（h2 固定 text-2xl md:text-3xl font-bold）"
+  ],
+  "dont": [
+    "同页混用多种圆角档（rounded-md/rounded-xl/rounded-3xl 并存）",
+    "卡片分区与裸排分区随意交替（同种内容一会儿有卡片一会儿没有）",
+    "多个分区各用一套标题风格（有的居中有的左对齐、字号不一）",
+    "随意混入与其他分区不协调的装饰元素"
+  ]
+}

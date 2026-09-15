@@ -66,4 +66,22 @@ public class AiTemplateMessageServiceImpl
                 .eq(AiTemplateMessage::getSessionId, sessionId));
     }
 
+    @Override
+    public void updateTokenUsage(String sessionId, Integer promptTokens, Integer completionTokens, Integer totalTokens) {
+        // 定位最近一条 assistant 消息（created 同秒时按 id 兜底排序，与 listBySessionId 的排序规则对齐）
+        AiTemplateMessage latest = getOne(Wrappers.<AiTemplateMessage>lambdaQuery()
+                .eq(AiTemplateMessage::getSessionId, sessionId)
+                .eq(AiTemplateMessage::getRole, "assistant")
+                .orderByDesc(AiTemplateMessage::getCreated)
+                .orderByDesc(AiTemplateMessage::getId)
+                .last("LIMIT 1"));
+        if (latest == null) {
+            return;
+        }
+        latest.setPromptTokens(promptTokens);
+        latest.setCompletionTokens(completionTokens);
+        latest.setTotalTokens(totalTokens);
+        updateById(latest);
+    }
+
 }

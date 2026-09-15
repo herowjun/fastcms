@@ -207,6 +207,11 @@ public class User implements Serializable {
     private Integer errorCount;
 
     /**
+     * 是否必须修改密码：1=首次登录须强制设置新密码（如手工导入SQL的默认账号），0=正常
+     */
+    private Integer mustChangePwd;
+
+    /**
      * 标签名称集合
      */
     @TableField(exist = false)
@@ -350,6 +355,14 @@ public class User implements Serializable {
 
     public void setErrorCount(Integer errorCount) {
         this.errorCount = errorCount;
+    }
+
+    public Integer getMustChangePwd() {
+        return mustChangePwd;
+    }
+
+    public void setMustChangePwd(Integer mustChangePwd) {
+        this.mustChangePwd = mustChangePwd;
     }
     public Integer getVersion() {
         return version;

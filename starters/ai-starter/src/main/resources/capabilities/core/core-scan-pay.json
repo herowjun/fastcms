@@ -1,0 +1,59 @@
+{
+  "capabilityId": "core:scan-pay",
+  "name": "扫码支付二维码获取",
+  "description": "主应用统一支付接口：按订单获取支付二维码 code_url（NATIVE 扫码模式），{platform} 由具体支付渠道插件决定（装微信支付插件后可用 wxPay）",
+  "category": "payment-channel",
+  "capabilityRole": "core",
+  "appliesTo": ["article", "page", "index"],
+  "contractVersion": "1.0",
+  "requiresChannel": null,
+  "authFlow": {
+    "mechanism": "jwt-bearer-or-query-param",
+    "tokenTransport": "请求头 Authorization: Bearer <token>，或查询参数 accessToken=<token>",
+    "tokenStorage": "站点登录逻辑写入 localStorage，自包含代码用查询参数 accessToken 传递最稳妥",
+    "anonymousBehavior": "未登录时接口报错，前端应先引导登录"
+  },
+  "endpoints": [
+    {
+      "id": "getQrImage",
+      "method": "GET",
+      "path": "/fastcms/api/client/pay/{platform}/NATIVE/toQrPay.jpg",
+      "params": {
+        "platform": "支付平台标识，来自具体渠道能力（如 payment:wxpay → wxPay）",
+        "orderId": "long，来自 core:order 的 createOrder 返回"
+      },
+      "response": {
+        "type": "image/jpeg",
+        "description": "服务端直接渲染好的支付二维码图片流（不是 JSON）。前端把它当 <img> 的 src 用即可，无需任何二维码渲染库"
+      },
+      "auth": "optional",
+      "usageHint": "推荐方式：<img src=\"该路径?orderId=X\">，可直接放 img 标签（无需带 token）。自包含代码优先用本端点而不是 getQrCode，省掉二维码库依赖"
+    },
+    {
+      "id": "getQrCode",
+      "method": "GET",
+      "path": "/fastcms/api/client/pay/{platform}/NATIVE/getQrPay",
+      "params": {
+        "platform": "支付平台标识，来自具体渠道能力（如 payment:wxpay → wxPay）",
+        "orderId": "long，来自 core:order 的 createOrder 返回"
+      },
+      "response": {
+        "type": "text",
+        "description": "返回支付平台 code_url 字符串（如 weixin://wxpay/...），不是图片地址。前端需用二维码库把 code_url 渲染成二维码图片展示"
+      },
+      "auth": "required",
+      "usageHint": "返回值是字符串（不是 JSON），成功回调直接拿到 code_url 文本；二维码渲染建议优先使用 getQrImage 端点或官方 snippet（自带渲染方案），手写时不要把返回值当图片 URL 用"
+    }
+  ],
+  "frontendFlow": [
+    "本能力是底座，通常不单独使用：由支付渠道能力（如 payment:wxpay）组合成完整流程",
+    "取码（推荐）：<img src=/fastcms/api/client/pay/{platform}/NATIVE/toQrPay.jpg?orderId=X>，服务端渲染二维码图片",
+    "取码（文本）：GET /fastcms/api/client/pay/{platform}/NATIVE/getQrPay?orderId=X → code_url 字符串 → 二维码库渲染成图"
+  ],
+  "errorHandling": {
+    "未安装支付渠道插件": "platform 参数无对应实现时接口报错，AI 集成前应先确认渠道能力（payment:wxpay 等）可用性为 ready",
+    "订单过期": "code_url 有效期由支付平台决定（微信 2 小时），过期后用户扫码无反应，轮询应设置超时上限（建议 5~15 分钟）后提示重新下单"
+  },
+  "detectionPatterns": ["/fastcms/api/client/pay/.*NATIVE/(getQrPay|toQrPay)"],
+  "suggestedPosition": "after-content"
+}

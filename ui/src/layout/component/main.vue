@@ -46,12 +46,12 @@ const setBacktopClass = computed(() => {
 	if (themeConfig.value.isFixedHeader) return `.layout-backtop-header-fixed .el-scrollbar__wrap`;
 	else return `.layout-backtop .el-scrollbar__wrap`;
 });
-// 设置主内容区的高度
+// 设置主内容区的高度（原型：顶栏 56px + 标签栏 38px）
 const setMainHeight = computed(() => {
 	if (isTagsViewCurrenFull.value) return '0px';
 	const { isTagsview, layout } = themeConfig.value;
-	if (isTagsview && layout !== 'classic') return '85px';
-	else return '51px';
+	if (isTagsview && layout !== 'classic') return '94px';
+	else return '57px';
 });
 // 页面加载前
 onMounted(() => {

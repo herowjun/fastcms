@@ -42,6 +42,23 @@ public interface AiUsageLogMapper extends BaseMapper<AiUsageLog> {
                         @Param("endTime") LocalDateTime endTime);
 
     /**
+     * 统计某智能体当日（自然日，全体用户合计）已消耗的总 token 数，用于智能体级配额检查
+     */
+    @Select("SELECT COALESCE(SUM(total_tokens), 0) FROM ai_usage_log WHERE agent_id = #{agentId} AND created >= #{startTime} AND created < #{endTime}")
+    Long sumTodayTokensByAgent(@Param("agentId") String agentId,
+                               @Param("startTime") LocalDateTime startTime,
+                               @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * 按智能体聚合当日（自然日，全体用户合计）已消耗 token，用于智能体列表用量展示。
+     * 返回行：agentId（agent_id 别名）/ tokens（合计别名）。
+     */
+    @Select("SELECT agent_id AS agentId, COALESCE(SUM(total_tokens), 0) AS tokens FROM ai_usage_log "
+            + "WHERE agent_id IS NOT NULL AND created >= #{startTime} AND created < #{endTime} GROUP BY agent_id")
+    List<Map<String, Object>> sumTodayTokensGroupByAgent(@Param("startTime") LocalDateTime startTime,
+                                                         @Param("endTime") LocalDateTime endTime);
+
+    /**
      * 管理端统计：按场景聚合指定时间段的调用次数与 token 消耗
      */
     @Select("SELECT scene, COUNT(*) AS callCount, COALESCE(SUM(total_tokens), 0) AS totalTokens, " +

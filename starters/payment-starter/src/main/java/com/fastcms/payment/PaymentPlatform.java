@@ -19,16 +19,22 @@ package com.fastcms.payment;
 import com.egzosn.pay.common.api.PayService;
 import com.egzosn.pay.common.bean.BasePayType;
 import com.egzosn.pay.common.http.HttpConfigStorage;
+import org.pf4j.ExtensionPoint;
 
 /**
  * 支付平台
+ *
+ * <p>继承 {@link ExtensionPoint}：支付渠道以插件形式提供（如 wechat-pay-plugin 的
+ * {@code @Extension} 实现类），主应用经 {@code PluginUtils.getExtensions(PaymentPlatform.class)}
+ * 发现注册；不继承则插件侧 @Extension 注解处理器编译报错且无法进 extensions.idx。</p>
+ *
  * @author： wjun_java@163.com
  * @date： 2021/6/21
  * @description：
  * @modifiedBy：
  * @version: 1.0
  */
-public interface PaymentPlatform<S extends PayService> extends BasePayType {
+public interface PaymentPlatform<S extends PayService> extends BasePayType, ExtensionPoint {
 
     /**
      * 获取商户平台

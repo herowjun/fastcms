@@ -105,10 +105,56 @@ public interface IAiTemplateGenService {
      *                       spec 片段，AI 只修改该区块，其他 section 原样保留）
      * @param focusElementHint 用户点选区块时命中的具体元素描述（可空；元素级语义提示）
      * @param styleUpgrade 样式组件化升级标志（true 且为旧模板时走升级管线，忽略常规对话）
+     * @param deepRefresh 深度焕新标志（配合 styleUpgrade：升级已完成时重置计划再改造一轮，
+     *                    需存在升级计划；未开始升级的模板等同首次升级；默认智能焕新——
+     *                    AI 规划调用判定最小重做范围）
+     * @param fullRefresh 全量焕新标志（配合 deepRefresh：跳过范围评估，全部计划文件重做）
+     * @param fullInject 全量注入标志（调整型会话：true 时预算内全部模板文件注入提示词，
+     *                   不挂按需检索工具；默认 false 走聚焦注入）
+     * @param feedback 用户焕新意见（可空；深度焕新时作为定向修正目标注入提示词，
+     *                 并落盘计划文件 lastRound.userFeedback 供下一轮回喂）
+     * @param confirmAction 设计稿模式确认动作（可空，仅 design 会话生效，管线会话忽略）：
+     *                      APPROVE（审计通过稿放行转化）/ REJECT（附 input 作为修改意见重出设计稿），
+     *                      见 doc/wiki/ai-template-two-mode-design.md §6.2
      * @param emitter   SSE emitter
      */
     void chatStream(String sessionId, String userInput, String currentFile, String focusSectionId,
-                    String focusElementHint, boolean styleUpgrade, SseEmitter emitter);
+                    String focusElementHint, boolean styleUpgrade, boolean deepRefresh,
+                    boolean fullRefresh, boolean fullInject, String feedback, String confirmAction,
+                    SseEmitter emitter);
+
+    // ==================== 任务运行态（关页后台续跑 + 重开续看） ====================
+
+    /**
+     * 会话运行态探测（前端打开会话时调用，决定是否续连 stream 端点）
+     *
+     * <p>长任务与页面连接解耦后，SSE 断开（关页面/断网）不再取消任务——用户重新打开
+     * 会话时先探测：任务仍在跑则续看（思考过程回放 + 实时续接），已结束则走终态恢复。</p>
+     */
+    RunStatus getRunStatus(String sessionId);
+
+    /**
+     * 续看运行中的任务：回放 journal 中 {@code seq > since} 的历史事件（含已发生的思考过程），
+     * 再挂为实时订阅者续接。无运行任务时发 run-status 事件（running=false）后结束
+     */
+    void observeStream(String sessionId, long since, SseEmitter emitter);
+
+    /**
+     * 显式停止运行中的任务（用户点击停止；断开连接不触发取消）
+     *
+     * @return false = 当前无运行中的任务
+     */
+    boolean stopRun(String sessionId);
+
+    /**
+     * 会话运行态
+     *
+     * @param running   是否有运行中的任务（终态短保留期内为 false）
+     * @param lastSeq   最新事件序号（续连 since 基准）
+     * @param startedAt 任务开始时间戳（ms；无任务为 0）
+     */
+    record RunStatus(boolean running, long lastSeq, long startedAt) {
+    }
 
     /**
      * 将会话工作目录的模板文件应用到 fastcms 正式模板目录
@@ -157,6 +203,34 @@ public interface IAiTemplateGenService {
      * 进度数据，用于横幅区分"未升级"与"上次升级未完成，可断点续传"。</p>
      */
     com.fastcms.ai.component.LegacyStyleUpgrader.UpgradeStatusInfo getLegacyUpgradeStatus(String sessionId);
+
+    /**
+     * 设计稿先行模式状态查询（前端刷新后恢复确认卡片用）
+     *
+     * <p>plan.json 处于 AWAITING_CONFIRM 时返回确认卡片数据
+     * （{state, issues[], previewUrl, confirmAuto}，与 confirm_request SSE 事件同构），
+     * 其余状态（含非 design 会话、无 plan）返回 null。</p>
+     */
+    java.util.Map<String, Object> getDesignConfirmCard(String sessionId);
+
+    /**
+     * 参考文件上传（zip 站包 / 单 HTML 文件）
+     *
+     * <p>design（AI 自主设计）新建会话的可选步骤：上传后 AI 按其仿写；ingest 成功后
+     * create_mode 归一为 import 血统（编排器 importMode 分支全量生效）。兼容 createMode=import
+     * 的旧直传口径（行为等价）。同步完成 ingest：解压（防 slip）→ pageKey 推导 →
+     * 归一化落盘（design/*.html）→ 资产归位 → plan.json（CONVERTING）；
+     * 转化由既有 chatStream 驱动（编排器 CONVERTING 起步，html-import 设计 §5.4）。</p>
+     *
+     * @param sessionId 会话 ID（design/import 新建会话、未绑定正式模板）
+     * @param file      上传的 zip 或 HTML 文件
+     * @param userId    当前用户 ID（属主校验）
+     * @return 导入报告（页数 / 资产数 / 显式标注）
+     * @throws IllegalArgumentException 会话不存在 / 非属主 / 模式不支持 / 文件不合法
+     */
+    java.util.Map<String, Object> uploadReference(String sessionId,
+                                                  org.springframework.web.multipart.MultipartFile file,
+                                                  Long userId);
 
     /**
      * 更新图片槽位（AI 调整页点选图片换图，不经 AI 对话）

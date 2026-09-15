@@ -1,50 +1,60 @@
 <template>
-	<div class="login-container flex">
-		<div class="login-left">
-			<div class="login-left-logo">
-				<!-- <img :src="logoMini" v-if="false" /> -->
-				<div class="login-left-logo-text">
-					<span>{{ getThemeConfig.globalViceTitle }}</span>
-					<span class="login-left-logo-text-msg">{{ getThemeConfig.globalViceTitleMsg }}</span>
+	<div class="login-container">
+		<div class="login-panel">
+			<!-- 左：深空蓝品牌区（CSS 动态视觉，无位图） -->
+			<div class="login-left">
+				<div class="orb orb-a"></div>
+				<div class="orb orb-b"></div>
+				<div class="logo">
+					<div class="logo-mark">F</div>
+					<div class="logo-name">FastCMS<small>AI-POWERED CONTENT</small></div>
 				</div>
-			</div>
-			<div class="login-left-img">
-				<img :src="loginMain" />
-			</div>
-			<img :src="loginBg" class="login-left-waves" />
-		</div>
-		<div class="login-right flex">
-			<div class="login-right-warp flex-margin">
-				<!-- <div class="login-right-warp-one"></div>
-				<span class="login-right-warp-two"></span> -->
-				<div class="login-right-warp-mian">
-					<div class="login-right-warp-main-title">{{ getThemeConfig.globalTitle }} 欢迎您！</div>
-					<div class="login-right-warp-main-form">
-						<div v-if="!state.isScan">
-							<el-tabs v-model="state.tabsActiveName">
-								<el-tab-pane :label="$t('message.label.one1')" name="account">
-									<Account />
-								</el-tab-pane>
-								<el-tab-pane v-if="state.isEnableMobileLogin" :label="$t('message.label.two2')" name="mobile">
-									<Mobile />
-								</el-tab-pane>
-							</el-tabs>
-							<div class="mt10">
-								<el-button link type="primary" @click="toRegister" v-if="state.public_register_enable">{{ $t('message.link.one3') }}</el-button>
-								<el-button link type="primary" @click="toRestPassword" v-if="state.public_reset_password_enable">{{ $t('message.link.two6') }}</el-button>
-								<el-button link type="primary" @click="toWechatMpOAuth" v-if="state.isWechatBrowser">{{ $t('message.link.two7') }}</el-button>
-							</div>
-						</div>
-						<Scan v-if="state.isScan" />
-						<div v-if="state.isEnableScan" class="login-content-main-sacn" @click="state.isScan = !state.isScan">
-							<i class="iconfont" :class="state.isScan ? 'icon-diannao1' : 'icon-barcode-qr'"></i>
-							<div class="login-content-main-sacn-delta"></div>
+				<div class="login-headline">
+					<h1>用一句话，<br />生成一个<em>会生长</em>的网站</h1>
+					<p>AI 模板引擎 + 组件编排，从需求描述到可发布站点，分钟级交付；内容、订单、评论在同一后台统一管理。</p>
+				</div>
+				<div class="ai-demo">
+					<div class="ai-demo-user">企业官网模板，蓝色调，响应式设计</div>
+					<div class="ai-demo-ai">
+						<div class="dot">F</div>
+						<div class="body">
+							正在生成 <b>my-company</b> 模板… 已编排 5/6 个组件（导航 · 首页 Hero · 产品 · 关于 · 联系），正在定向润色视觉细节。
+							<div class="bar"><i></i></div>
+							<div class="tip">预计还需 40 秒 · 生成完成后可在编辑器中继续对话调整</div>
 						</div>
 					</div>
 				</div>
 			</div>
+			<!-- 右：白色表单区（登录逻辑不变，仅换皮肤） -->
+			<div class="login-right">
+				<div class="login-box">
+					<h2>欢迎回来</h2>
+					<p class="sub">登录你的 FastCMS 控制台</p>
+					<div class="login-right-warp-mian">
+							<div v-if="!state.isScan">
+								<el-tabs v-model="state.tabsActiveName">
+									<el-tab-pane :label="$t('message.label.one1')" name="account">
+										<Account />
+									</el-tab-pane>
+									<el-tab-pane v-if="state.isEnableMobileLogin" :label="$t('message.label.two2')" name="mobile">
+										<Mobile />
+									</el-tab-pane>
+								</el-tabs>
+								<div class="login-links">
+									<el-button link type="primary" @click="toRestPassword" v-if="state.public_reset_password_enable">{{ $t('message.link.two6') }}</el-button>
+									<el-button link type="primary" @click="toRegister" v-if="state.public_register_enable">{{ $t('message.link.one3') }}</el-button>
+									<el-button link type="primary" @click="toWechatMpOAuth" v-if="state.isWechatBrowser">{{ $t('message.link.two7') }}</el-button>
+								</div>
+							</div>
+							<Scan v-if="state.isScan" />
+						</div>
+						<!-- 扫码登录切换：底部分割线 + 圆角按钮（原型 login-scan） -->
+						<div v-if="state.isEnableScan" class="login-scan" @click="state.isScan = !state.isScan">
+							<button type="button">{{ state.isScan ? '账号密码登录' : '微信扫码登录' }}</button>
+						</div>
+				</div>
+			</div>
 		</div>
-
 	</div>
 </template>
 
@@ -54,9 +64,6 @@ import { storeToRefs } from 'pinia';
 import { useThemeConfig } from '/@/stores/themeConfig';
 import { NextLoading } from '/@/utils/loading';
 import { useRouter } from 'vue-router';
-// import logoMini from '/@/assets/logo-mini.svg';
-import loginMain from '/@/assets/login-main.svg';
-import loginBg from '/@/assets/login-bg.svg';
 import { ConfigApi } from '/@/api/config/index';
 import qs from 'qs';
 
@@ -87,11 +94,9 @@ const getThemeConfig = computed(() => {
 });
 
 const toRegister = () => {
-	console.log("========toRegister")
 	router.push('/register');
 }
 const toRestPassword = () => {
-	console.log("========toRestPassword")
 	router.push('/rest/password');
 }
 const toWechatMpOAuth = () => {
@@ -152,183 +157,369 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+// 深空蓝登录页：左深色品牌区 + 右白色表单（原型画框式：浅灰底 + 居中白色圆角卡片）
 .login-container {
-	height: 100%;
-	background: var(--el-color-white);
+	min-height: 100vh;
+	overflow: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 40px 24px;
+	background: var(--next-bg-main-color);
+	.login-panel {
+		width: 100%;
+		max-width: 1280px;
+		min-height: 620px;
+		display: grid;
+		grid-template-columns: 1.25fr 1fr;
+		background: #fff;
+		border-radius: 14px;
+		overflow: hidden;
+		box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
+	}
 	.login-left {
-		flex: 1;
 		position: relative;
-		background-color: rgba(211, 239, 255, 1);
-		margin-right: 100px;
-		.login-left-logo {
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+		padding: 48px 44px;
+		color: #e2e8f0;
+		background: radial-gradient(1200px 600px at -10% -20%, #1e3a8a 0%, transparent 55%),
+			radial-gradient(900px 500px at 110% 120%, #1e40af 0%, transparent 50%), #0b1020;
+		&::before {
+			// 细网格底纹
+			content: '';
+			position: absolute;
+			inset: 0;
+			background-image: linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+				linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+			background-size: 44px 44px;
+			-webkit-mask-image: radial-gradient(700px 500px at 40% 30%, #000 30%, transparent 75%);
+			mask-image: radial-gradient(700px 500px at 40% 30%, #000 30%, transparent 75%);
+			pointer-events: none;
+		}
+		.orb {
+			position: absolute;
+			border-radius: 50%;
+			filter: blur(70px);
+			opacity: 0.5;
+			pointer-events: none;
+		}
+		.orb-a {
+			width: 340px;
+			height: 340px;
+			left: -90px;
+			top: -70px;
+			background: rgba(59, 130, 246, 0.55);
+			animation: loginOrbDrift 14s ease-in-out infinite alternate;
+		}
+		.orb-b {
+			width: 300px;
+			height: 300px;
+			right: -80px;
+			bottom: -60px;
+			background: rgba(37, 99, 235, 0.4);
+			animation: loginOrbDrift 18s ease-in-out infinite alternate-reverse;
+		}
+		&>:not(.orb) {
+			position: relative;
+			z-index: 1;
+		}
+		.logo {
 			display: flex;
 			align-items: center;
-			position: absolute;
-			top: 50px;
-			left: 80px;
-			z-index: 1;
-			animation: logoAnimation 0.3s ease;
-			img {
-				width: 52px;
-				height: 52px;
-			}
-			.login-left-logo-text {
-				display: flex;
-				flex-direction: column;
-				span {
-					margin-left: 10px;
-					font-size: 28px;
-					color: #26a59a;
-				}
-				.login-left-logo-text-msg {
-					font-size: 12px;
-					color: #32a99e;
-				}
+			gap: 10px;
+		}
+		.logo-mark {
+			width: 34px;
+			height: 34px;
+			border-radius: 9px;
+			background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+			display: grid;
+			place-items: center;
+			font-weight: 800;
+			font-size: 15px;
+			color: #fff;
+			box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+		}
+		.logo-name {
+			font-size: 18px;
+			font-weight: 700;
+			color: #fff;
+			letter-spacing: 0.02em;
+			small {
+				font-weight: 400;
+				font-size: 11px;
+				color: #a5b3c9;
+				margin-left: 8px;
+				letter-spacing: 0.08em;
 			}
 		}
-		.login-left-img {
-			position: absolute;
-			top: 50%;
-			left: 50%;
-			transform: translate(-50%, -50%);
-			width: 100%;
-			height: 52%;
-			img {
-				width: 100%;
-				height: 100%;
-				animation: error-num 0.6s ease;
+		.login-headline {
+			margin-top: 64px;
+			h1 {
+				font-size: 34px;
+				line-height: 1.35;
+				font-weight: 700;
+				color: #f8fafc;
+				letter-spacing: 0.01em;
+			}
+			h1 em {
+				font-style: normal;
+				background: linear-gradient(90deg, #60a5fa, #818cf8);
+				-webkit-background-clip: text;
+				background-clip: text;
+				color: transparent;
+			}
+			p {
+				margin-top: 12px;
+				color: #aab8cc;
+				font-size: 14.5px;
+				max-width: 400px;
 			}
 		}
-		.login-left-waves {
-			position: absolute;
-			top: 0;
-			right: -100px;
+		// AI 对话示意卡（产品行为示意，非装饰）
+		.ai-demo {
+			margin-top: 36px;
+			max-width: 420px;
+			padding: 16px 18px;
+			background: rgba(15, 23, 42, 0.55);
+			border: 1px solid rgba(148, 163, 184, 0.18);
+			border-radius: 12px;
+			backdrop-filter: blur(6px);
+		}
+		.ai-demo-user {
+			margin-left: auto;
+			max-width: 78%;
+			padding: 8px 12px;
+			background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+			color: #fff;
+			font-size: 13px;
+			border-radius: 10px 10px 2px 10px;
+		}
+		.ai-demo-ai {
+			margin-top: 12px;
+			display: flex;
+			gap: 10px;
+			.dot {
+				flex: none;
+				width: 24px;
+				height: 24px;
+				border-radius: 7px;
+				background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+				display: grid;
+				place-items: center;
+				font-size: 12px;
+				font-weight: 700;
+				color: #fff;
+			}
+			.body {
+				padding: 9px 12px;
+				background: rgba(30, 41, 59, 0.8);
+				border: 1px solid rgba(148, 163, 184, 0.15);
+				border-radius: 2px 10px 10px 10px;
+				font-size: 12.5px;
+				color: #cbd5e1;
+				b {
+					color: #93c5fd;
+					font-weight: 600;
+				}
+			}
+			.bar {
+				margin-top: 8px;
+				height: 4px;
+				border-radius: 2px;
+				background: rgba(148, 163, 184, 0.15);
+				overflow: hidden;
+				i {
+					display: block;
+					height: 100%;
+					border-radius: 2px;
+					background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+					animation: loginGenBar 2.4s ease-in-out infinite;
+				}
+			}
+			.tip {
+				margin-top: 6px;
+				font-size: 11.5px;
+				color: #64748b;
+			}
 		}
 	}
 	.login-right {
-		width: 700px;
-		.login-right-warp {
-			border: 1px solid var(--el-color-primary-light-3);
-			border-radius: 3px;
-			width: 500px;
-			height: 500px;
-			position: relative;
-			overflow: hidden;
-			background-color: var(--el-color-white);
-			.login-right-warp-one,
-			.login-right-warp-two {
-				position: absolute;
-				display: block;
-				width: inherit;
-				height: inherit;
-				&::before,
-				&::after {
-					content: '';
-					position: absolute;
-					z-index: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 48px 44px;
+		overflow: auto;
+		background: #fff;
+		.login-box {
+			width: 100%;
+			max-width: 340px;
+			h2 {
+				font-size: 22px;
+				font-weight: 700;
+				color: #0f172a;
+			}
+			.sub {
+				margin-top: 6px;
+				margin-bottom: 0;
+				color: #94a3b8;
+				font-size: 13px;
+			}
+		}
+		.login-right-warp-mian {
+			margin-top: 26px;
+		}
+		// 原型 login-tabs：下划线风（未选中 #94a3b8 14px，选中 #0f172a 600 + 2px 蓝条）
+		:deep(.el-tabs) {
+			.el-tabs__header {
+				margin-bottom: 0;
+			}
+			.el-tabs__nav-wrap::after {
+				height: 1px;
+				background-color: #e2e8f0;
+			}
+			.el-tabs__active-bar {
+				height: 2px;
+				background-color: #3b82f6;
+			}
+			.el-tabs__item {
+				height: auto;
+				line-height: inherit;
+				padding: 0 2px 10px;
+				margin-right: 24px;
+				font-size: 14px;
+				color: #94a3b8;
+				&.is-active {
+					color: #0f172a;
+					font-weight: 600;
+				}
+				&:hover {
+					color: #0f172a;
 				}
 			}
-			.login-right-warp-one {
-				&::before {
-					filter: hue-rotate(0deg);
-					top: 0px;
-					left: 0;
-					width: 100%;
-					height: 3px;
-					background: linear-gradient(90deg, transparent, var(--el-color-primary));
-					animation: loginLeft 3s linear infinite;
-				}
-				&::after {
-					filter: hue-rotate(60deg);
-					top: -100%;
-					right: 2px;
-					width: 3px;
-					height: 100%;
-					background: linear-gradient(180deg, transparent, var(--el-color-primary));
-					animation: loginTop 3s linear infinite;
-					animation-delay: 0.7s;
+		}
+		// 原型 field input：44px 高 / 14px 字 / 8px 圆角 / #e2e8f0 边框 / focus 蓝边 + 3px 浅蓝光晕
+		:deep(.el-input__wrapper) {
+			height: 44px;
+			border-radius: 8px;
+			background: #fff;
+			box-shadow: 0 0 0 1px #e2e8f0 inset;
+			transition: box-shadow 0.2s;
+			&:hover {
+				box-shadow: 0 0 0 1px #e2e8f0 inset;
+			}
+			&.is-focus {
+				box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.12);
+			}
+		}
+		:deep(.el-input__inner) {
+			height: 44px;
+			font-size: 14px;
+			color: #0f172a;
+		}
+		// 原型 login-btn：44px 高 / 8px 圆角 / 渐变底 / 15px 600 / letter-spacing .1em（穿透 account/mobile 子组件）
+		:deep(.login-content-submit) {
+			width: 100%;
+			height: 44px;
+			margin-top: 24px;
+			border: none;
+			border-radius: 8px;
+			background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+			color: #fff;
+			font-size: 15px;
+			font-weight: 600;
+			letter-spacing: 0.1em;
+			box-shadow: 0 6px 18px rgba(37, 99, 235, 0.3);
+			transition: all 0.2s;
+			&:hover,
+			&:focus {
+				transform: translateY(-1px);
+				box-shadow: 0 10px 24px rgba(37, 99, 235, 0.4);
+			}
+		}
+		// 原型 login-links：两端对齐 / 13px / #94a3b8
+		.login-links {
+			margin-top: 18px;
+			display: flex;
+			justify-content: space-between;
+			font-size: 13px;
+			:deep(.el-button) {
+				padding: 0;
+				font-size: 13px;
+				color: #94a3b8;
+				transition: color 0.15s;
+				&:hover {
+					color: #3b82f6;
 				}
 			}
-			.login-right-warp-two {
-				&::before {
-					filter: hue-rotate(120deg);
-					bottom: 2px;
-					right: -100%;
-					width: 100%;
-					height: 3px;
-					background: linear-gradient(270deg, transparent, var(--el-color-primary));
-					animation: loginRight 3s linear infinite;
-					animation-delay: 1.4s;
-				}
-				&::after {
-					filter: hue-rotate(300deg);
-					bottom: -100%;
-					left: 0px;
-					width: 3px;
-					height: 100%;
-					background: linear-gradient(360deg, transparent, var(--el-color-primary));
-					animation: loginBottom 3s linear infinite;
-					animation-delay: 2.1s;
-				}
+		}
+		// 原型 login-scan：两侧分割线 + 白底圆角按钮
+		.login-scan {
+			margin-top: 26px;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			color: #94a3b8;
+			font-size: 12px;
+			&::before,
+			&::after {
+				content: '';
+				flex: 1;
+				height: 1px;
+				background: #e2e8f0;
 			}
-			.login-right-warp-mian {
-				display: flex;
-				flex-direction: column;
-				height: 100%;
-				.login-right-warp-main-title {
-					height: 130px;
-					line-height: 130px;
-					font-size: 27px;
-					text-align: center;
-					letter-spacing: 3px;
-					animation: logoAnimation 0.3s ease;
-					animation-delay: 0.3s;
-					color: var(--el-text-color-primary);
-				}
-				.login-right-warp-main-form {
-					flex: 1;
-					padding: 0 50px 50px;
-					.login-content-main-sacn {
-						position: absolute;
-						top: 0;
-						right: 0;
-						width: 50px;
-						height: 50px;
-						overflow: hidden;
-						cursor: pointer;
-						transition: all ease 0.3s;
-						color: var(--el-color-primary);
-						&-delta {
-							position: absolute;
-							width: 35px;
-							height: 70px;
-							z-index: 2;
-							top: 2px;
-							right: 21px;
-							background: var(--el-color-white);
-							transform: rotate(-45deg);
-						}
-						&:hover {
-							opacity: 1;
-							transition: all ease 0.3s;
-							color: var(--el-color-primary) !important;
-						}
-						i {
-							width: 47px;
-							height: 50px;
-							display: inline-block;
-							font-size: 48px;
-							position: absolute;
-							right: 1px;
-							top: 0px;
-						}
-					}
+			button {
+				border: 1px solid #e2e8f0;
+				background: #fff;
+				border-radius: 99px;
+				padding: 5px 14px;
+				font-size: 12.5px;
+				color: #475569;
+				cursor: pointer;
+				transition: all 0.15s;
+				&:hover {
+					border-color: #3b82f6;
+					color: #3b82f6;
 				}
 			}
 		}
 	}
-	.login_likn_menu{
-		z-index: 999;
+}
+.login_likn_menu {
+	z-index: 999;
+}
+@keyframes loginOrbDrift {
+	from {
+		transform: translate(0, 0);
+	}
+	to {
+		transform: translate(40px, 28px);
+	}
+}
+@keyframes loginGenBar {
+	0% {
+		width: 12%;
+	}
+	55% {
+		width: 82%;
+	}
+	100% {
+		width: 64%;
+	}
+}
+@media (max-width: 960px) {
+	// 原型响应式：单列堆叠、左侧保留（padding 收窄、标题上移）
+	.login-container .login-panel {
+		grid-template-columns: 1fr;
+		min-height: 0;
+	}
+	.login-container .login-left {
+		padding: 40px 32px;
+	}
+	.login-container .login-headline {
+		margin-top: 36px;
 	}
 }
 </style>

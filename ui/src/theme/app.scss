@@ -9,9 +9,9 @@
 
 :root {
 	--next-color-white: #ffffff;
-	--next-bg-main-color: #f8f8f8;
+	--next-bg-main-color: #f1f5f9;
 	--next-bg-color: #f5f5ff;
-	--next-border-color-light: #f1f2f3;
+	--next-border-color-light: #e2e8f0;
 	--next-color-primary-lighter: #ecf5ff;
 	--next-color-success-lighter: #f0f9eb;
 	--next-color-warning-lighter: #fdf6ec;
@@ -22,6 +22,8 @@
 	--next-color-seting-main: #e9eef3;
 	--next-color-seting-aside: #d3dce6;
 	--next-color-seting-header: #b3c0d1;
+	// 深空蓝品牌渐变（原型 --grad；主色自定义时由 setings.vue 的 onColorPickerChange 动态覆盖）
+	--grad: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
 }
 
 html,
@@ -31,8 +33,10 @@ body,
 	padding: 0;
 	width: 100%;
 	height: 100%;
-	font-family: Helvetica Neue, Helvetica, PingFang SC, Hiragino Sans GB, Microsoft YaHei, SimSun, sans-serif;
+	// 原型 body 字体族
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 	font-weight: 400;
+	line-height: 1.6;
 	-webkit-font-smoothing: antialiased;
 	-webkit-tap-highlight-color: transparent;
 	background-color: var(--next-bg-main-color);
@@ -47,7 +51,7 @@ body,
 	width: 100%;
 	height: 100%;
 	.layout-pd {
-		padding: 15px !important;
+		padding: 20px !important;
 	}
 	.layout-flex {
 		display: flex;
@@ -171,8 +175,9 @@ body,
 		z-index: 9999998;
 		animation: error-img 0.3s;
 	}
+	// classic 布局主区高度：顶栏 56px（原型 side-logo/topbar 高度）
 	.layout-mian-height-50 {
-		height: calc(100vh - 50px);
+		height: calc(100vh - 56px);
 	}
 	.layout-columns-warp {
 		flex: 1;

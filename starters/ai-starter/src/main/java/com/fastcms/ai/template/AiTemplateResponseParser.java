@@ -61,9 +61,11 @@ public class AiTemplateResponseParser {
 
     /**
      * 解析结果：reply（自然语言回复，可能为 null）+ files（文件列表，可能为空）
+     * + switchTo（页面切换声明，可能为 null：用户要求"切换/查看某页面"的纯导航轮次）
      */
     public static class ParseResult {
         private String reply;
+        private String switchTo;
         private List<AiTemplateFileDto> files = Collections.emptyList();
 
         public String getReply() {
@@ -72,6 +74,14 @@ public class AiTemplateResponseParser {
 
         public void setReply(String reply) {
             this.reply = reply;
+        }
+
+        public String getSwitchTo() {
+            return switchTo;
+        }
+
+        public void setSwitchTo(String switchTo) {
+            this.switchTo = switchTo;
         }
 
         public List<AiTemplateFileDto> getFiles() {
@@ -104,10 +114,14 @@ public class AiTemplateResponseParser {
         try {
             JsonNode root = MAPPER.readTree(json);
             if (root.isObject()) {
-                // 新格式：{"reply": "...", "files": [...]}
+                // 新格式：{"reply": "...", "files": [...], "switchTo": "..."}
                 JsonNode replyNode = root.get("reply");
                 if (replyNode != null && replyNode.isTextual()) {
                     result.setReply(replyNode.asString());
+                }
+                JsonNode switchNode = root.get("switchTo");
+                if (switchNode != null && switchNode.isTextual() && !switchNode.asString().isBlank()) {
+                    result.setSwitchTo(switchNode.asString().trim());
                 }
                 JsonNode filesNode = root.get("files");
                 if (filesNode != null && filesNode.isArray()) {

@@ -37,6 +37,9 @@ fastcms:
       /fastcms/api/admin/reset/password,\
       /fastcms/api/admin/config/public/list,\
       /fastcms/api/admin/captcha,\
+      /fastcms/api/install/status,\
+      /fastcms/api/install/test-connection,\
+      /fastcms/api/install/execute,\
       /fastcms/api/client/wechat/miniapp/user/code2session,\
       /fastcms/api/client/wechat/miniapp/user/login,\
       /fastcms/api/client/wechat/miniapp/user/login/phone,\
@@ -47,6 +50,16 @@ fastcms:
   mybatis:
     ignore:
       mappedStatementIds: "selectById, selectBatchIds, getArticleById, pageArticleZan, com.fastcms.cms.mapper.ArticleCategoryMapper.selectList"
+  ai:
+    template:
+      # 设计稿先行模式（design 模式）开关：开启后"AI 新建模板"对话框出现生成模式选择；
+      # 关闭（生产默认）时前端隐藏选项、后端拒绝 design 会话，等价于功能不存在
+      design:
+        enabled: true
+        # max-audit-runs: 2              # 审计→修正轮上限（仍失败进人工确认）
+        # max-format-rounds: 3           # 设计稿格式校验（V1~V6）轮上限
+        # design-max-tokens: 24000       # 单页设计稿输出 token 上限
+        # section-confidence-threshold: 0.7  # 组件映射置信阈值（低于→custom_macro）
 
 logging:
   config: classpath:META-INF/logback/fastcms.xml

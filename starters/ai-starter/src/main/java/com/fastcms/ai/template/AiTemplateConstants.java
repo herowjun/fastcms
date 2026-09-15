@@ -16,6 +16,8 @@
  */
 package com.fastcms.ai.template;
 
+import com.fastcms.entity.AiTemplateSession;
+
 /**
  * AI 模板生成相关常量
  *
@@ -28,6 +30,50 @@ public final class AiTemplateConstants {
 
     private AiTemplateConstants() {
     }
+
+    /**
+     * 会话创建模式——对外两种（见 doc/wiki/ai-template-two-mode-design.md §2.2）：
+     *
+     * <ul>
+     *     <li>pipeline（默认）：组件编排——PageSpec → 组件渲染，既有行为</li>
+     *     <li>design：AI 自主设计——AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板；
+     *         可选上传参考 HTML/zip（design 会话调 uploadReference 端点），AI 按其仿写</li>
+     * </ul>
+     *
+     * <p>{@code import} 为<b>血统标记</b>而非对外选项：design 会话上传参考文件 ingest 成功后
+     * create_mode 归一为 import（编排器 importMode 分支全量生效：页面来自 plan.json、
+     * 转化后 postConvertWiring、plan 丢失提示重传、FAILED 续传回 CONVERTING）。
+     * 兼容口径：新建接口白名单仍接受 import（旧客户端/脚本直传，行为与 design+上传等价），
+     * 存量 import 会话全部照常工作。</p>
+     */
+    public static final String CREATE_MODE_PIPELINE = "pipeline";
+    public static final String CREATE_MODE_DESIGN = "design";
+    public static final String CREATE_MODE_IMPORT = "import";
+
+    /**
+     * 判断会话是否为 AI 自主设计（design）模式。
+     *
+     * <p><b>全代码唯一出口</b>：create_mode 的判空逻辑（null/"pipeline"=管线模式）只允许出现在这里，
+     * 禁止各处散落 equals 判断（存量会话 create_mode=NULL 必须视为管线模式）。</p>
+     *
+     * @param session 会话实体（可空，null 视为管线模式）
+     */
+    public static boolean isDesignMode(AiTemplateSession session) {
+        return session != null && CREATE_MODE_DESIGN.equalsIgnoreCase(session.getCreateMode());
+    }
+
+    /**
+     * 判断会话是否为导入血统（import）——design 会话上传参考文件 ingest 后归一、
+     * 或旧客户端直传 import 创建。
+     *
+     * <p>与 {@link #isDesignMode} 同口径：全代码唯一出口，禁止散落 equals 判断。</p>
+     *
+     * @param session 会话实体（可空，null 视为非导入模式）
+     */
+    public static boolean isImportMode(AiTemplateSession session) {
+        return session != null && CREATE_MODE_IMPORT.equalsIgnoreCase(session.getCreateMode());
+    }
+
 
     /**
      * 会话状态
@@ -105,5 +151,26 @@ public final class AiTemplateConstants {
      * 区别于 message（正文内容）
      */
     public static final String SSE_EVENT_STATUS = "status";
+    /**
+     * 预览页面自动切换（调整/升级轮流式期间识别到 AI 正在处理的首个可路由 HTML 即推送，
+     * 前端实时预览立即切到该页面，无需等文件写盘）
+     */
+    public static final String SSE_EVENT_SWITCH_FILE = "switch-file";
+    /**
+     * 本轮 token 用量（done 之后推送，跨轮次聚合：含工具调用/修复轮），
+     * 前端挂在最后一条 assistant 消息上 hover 展示
+     */
+    public static final String SSE_EVENT_USAGE = "usage";
+    /**
+     * 设计稿模式：等待人工确认（data 结构 {state:"AWAITING_CONFIRM", issues:[...], previewUrl:...}）。
+     * 仅 design 会话会推送；旧前端按"未知事件忽略"原则处理（SSE 事件按名字分发）
+     */
+    public static final String SSE_EVENT_CONFIRM_REQUEST = "confirm_request";
+
+    /**
+     * 会话运行态通知（data 结构 {running:false}）：stream 续连端点发现无运行任务时推送，
+     * 前端据此走终态恢复（loadMessages / refreshFiles）——区别于直接断流（可能是网络问题）
+     */
+    public static final String SSE_EVENT_RUN_STATUS = "run-status";
 
 }

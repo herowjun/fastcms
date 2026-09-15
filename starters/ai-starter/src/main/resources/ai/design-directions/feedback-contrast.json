@@ -1,0 +1,25 @@
+{
+  "key": "feedback-contrast",
+  "name": "强对比层次",
+  "summary": "强化视觉层次——加大标题与正文的字号/字重对比、主色强调关键信息、区块之间拉开节奏差异，让页面有重点有起伏",
+  "tokensOverride": {
+    "stylePreset": "bold"
+  },
+  "referenceBlocks": [
+    "<section class=\"py-20 md:py-28\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <h2 class=\"text-4xl md:text-6xl font-bold text-slate-900 leading-none mb-8\">超大标题<small class=\"block text-base font-normal text-slate-500 mt-4 tracking-wide\">与常规正文字号拉开 3 倍以上差距</small></h2>\n    <p class=\"text-slate-600 text-base leading-relaxed max-w-2xl mb-10\">大与小、粗与细、深与浅——靠对比度建立阅读顺序，而不是靠分隔线。</p>\n    <a href=\"#\" class=\"inline-block bg-primary-600 text-white font-bold px-10 py-4 rounded-md hover:bg-primary-700 transition\">主色强按钮</a>\n  </div>\n</section>",
+    "<section class=\"bg-slate-900 py-20 md:py-24\">\n  <div class=\"max-w-6xl mx-auto px-4 text-center\">\n    <p class=\"text-primary-400 text-sm font-bold tracking-widest mb-5\">深浅交替制造节奏</p>\n    <h2 class=\"text-white text-3xl md:text-5xl font-bold leading-tight mb-8\">深色强调分区<br/>只放最重要的一句话</h2>\n    <a href=\"#\" class=\"inline-block bg-primary-500 text-white font-bold px-10 py-4 rounded-md hover:bg-primary-400 transition\">立即行动</a>\n  </div>\n</section>"
+  ],
+  "do": [
+    "标题字号 text-4xl 以上，正文 text-base，差距 3 倍起步",
+    "标题 font-bold，正文 font-normal，字重对比明显",
+    "关键信息用主色强调（text-primary-600 / 主色按钮 / 主色徽章）",
+    "深浅分区交替（白底区 → 深色强调区 → 白底区）制造节奏起伏",
+    "深色强调区一页最多 1-2 个，只放核心信息与行动点"
+  ],
+  "dont": [
+    "通篇同字号同字重的平铺排版",
+    "全文灰色调无重点（所有文字都是 text-slate-500/600）",
+    "到处都是主色（强调失效）",
+    "每行多于一个视觉焦点"
+  ]
+}

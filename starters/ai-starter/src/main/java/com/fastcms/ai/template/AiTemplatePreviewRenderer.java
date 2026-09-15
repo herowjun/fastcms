@@ -101,6 +101,8 @@ public class AiTemplatePreviewRenderer {
     public List<String> checkRenderedFiles(Path workDir, List<String> relPaths) {
         List<String> errors = new ArrayList<>();
         int checked = 0;
+        // _ 前缀文件的纯解析配置（惰性创建）：片段文件不完整渲染，但必须过 FreeMarker 语法解析
+        Configuration parseCfg = null;
         for (String relPath : relPaths) {
             if (checked >= CHECK_MAX_FILES) {
                 break;
@@ -108,10 +110,27 @@ public class AiTemplatePreviewRenderer {
             if (relPath == null || !relPath.toLowerCase().endsWith(".html")) {
                 continue;
             }
-            // _ 前缀文件（_layout.html 布局宏等）为片段文件，由页面 import/include 间接校验，
-            // 不直接渲染（渲染宏定义文件输出为空，且占用校验文件数额度）
             String name = relPath.substring(relPath.lastIndexOf('/') + 1);
             if (name.startsWith("_")) {
+                // _ 前缀文件（_layout.html 布局宏等）为片段文件，不做完整渲染（输出为空且占校验额度），
+                // 但必须做 FreeMarker 语法解析校验——布局是全站渲染依赖，语法错误（如 "gt 0" 缺空格
+                // 写成 "gt0"）若不在此拦下，会带病写盘并拖垮后续所有页面的渲染
+                checked++;
+                try {
+                    if (parseCfg == null) {
+                        parseCfg = new Configuration(Configuration.DEFAULT_INCOMPATIBLE_IMPROVEMENTS);
+                        parseCfg.setDirectoryForTemplateLoading(workDir.toFile());
+                        parseCfg.setDefaultEncoding(StandardCharsets.UTF_8.name());
+                        parseCfg.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+                        parseCfg.setNumberFormat("0");
+                        parseCfg.setTemplateUpdateDelay(0);
+                    }
+                    // getTemplate 内部完成模板解析，语法错误（parse 阶段）在此抛出
+                    parseCfg.getTemplate(relPath);
+                } catch (Exception e) {
+                    errors.add(relPath + ": " + summarizeError(e));
+                    log.warn("片段文件语法校验失败: {}/{}", workDir, relPath, e);
+                }
                 continue;
             }
             checked++;

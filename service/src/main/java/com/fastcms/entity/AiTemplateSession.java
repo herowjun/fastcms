@@ -97,6 +97,23 @@ public class AiTemplateSession implements Serializable {
      */
     private Boolean mobileAdaptive;
 
+    /**
+     * 创建模式: null/pipeline=组件管线（默认，行为与旧版一致） design=设计稿先行
+     *
+     * <p>设计稿先行：AI 自主设计 HTML 设计稿 → 机器审计 → 确定性转化为组件化模板。</p>
+     */
+    private String createMode;
+
+    /**
+     * 设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）
+     */
+    private String designDirection;
+
+    /**
+     * 设计模式：机器审计通过后是否自动转化（null 视为 true；false=等用户确认后再转化）
+     */
+    private Boolean confirmAuto;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime created;
 
@@ -135,6 +152,15 @@ public class AiTemplateSession implements Serializable {
 
     public Boolean getMobileAdaptive() { return mobileAdaptive; }
     public void setMobileAdaptive(Boolean mobileAdaptive) { this.mobileAdaptive = mobileAdaptive; }
+
+    public String getCreateMode() { return createMode; }
+    public void setCreateMode(String createMode) { this.createMode = createMode; }
+
+    public String getDesignDirection() { return designDirection; }
+    public void setDesignDirection(String designDirection) { this.designDirection = designDirection; }
+
+    public Boolean getConfirmAuto() { return confirmAuto; }
+    public void setConfirmAuto(Boolean confirmAuto) { this.confirmAuto = confirmAuto; }
 
     public LocalDateTime getCreated() { return created; }
     public void setCreated(LocalDateTime created) { this.created = created; }

@@ -60,6 +60,39 @@ public class AiTemplateChatRequest implements Serializable {
      */
     private Boolean styleUpgrade;
 
+    /**
+     * 深度焕新标志（配合 styleUpgrade=true）：升级已完成时重置升级计划再改造一轮。
+     * 默认为智能焕新（AI 规划调用判定最小重做范围，只重做方向耦合的页面）。
+     */
+    private Boolean deepRefresh;
+
+    /**
+     * 全量焕新标志（配合 deepRefresh=true）：跳过范围评估，全部计划文件（含 _layout.html）
+     * 恢复备份底稿重做。整体换设计方向时的兜底选项。
+     */
+    private Boolean fullRefresh;
+
+    /**
+     * 全量注入标志（调整型会话，默认 false 聚焦注入）：true 时跳过按需检索，
+     * 预算内全部模板文件直接注入提示词（旧行为）。token 消耗与耗时大幅增加，
+     * 仅在用户反馈 AI 自动检索效果不佳时由前端开关开启。
+     */
+    private Boolean fullInject;
+
+    /**
+     * 用户焕新意见（可空；配合 deepRefresh）：对当前样式的具体不满
+     * （如「配色太暗，卡片太密」），AI 焕新时作为定向修正目标注入提示词；
+     * 命中关键词（暗/密/素/乱等）时设计方向优先按反馈定向而非轮换。
+     */
+    private String feedback;
+
+    /**
+     * 设计稿模式确认动作（可空；仅 design 会话生效，管线会话忽略）：
+     * APPROVE（审计通过稿放行转化）/ REJECT（附 input 作为修改意见重出设计稿）。
+     * 见 doc/wiki/ai-template-two-mode-design.md §6.2。
+     */
+    private String confirmAction;
+
     public String getInput() {
         return input;
     }
@@ -98,6 +131,46 @@ public class AiTemplateChatRequest implements Serializable {
 
     public void setStyleUpgrade(Boolean styleUpgrade) {
         this.styleUpgrade = styleUpgrade;
+    }
+
+    public Boolean getDeepRefresh() {
+        return deepRefresh;
+    }
+
+    public void setDeepRefresh(Boolean deepRefresh) {
+        this.deepRefresh = deepRefresh;
+    }
+
+    public Boolean getFullRefresh() {
+        return fullRefresh;
+    }
+
+    public void setFullRefresh(Boolean fullRefresh) {
+        this.fullRefresh = fullRefresh;
+    }
+
+    public Boolean getFullInject() {
+        return fullInject;
+    }
+
+    public void setFullInject(Boolean fullInject) {
+        this.fullInject = fullInject;
+    }
+
+    public String getFeedback() {
+        return feedback;
+    }
+
+    public void setFeedback(String feedback) {
+        this.feedback = feedback;
+    }
+
+    public String getConfirmAction() {
+        return confirmAction;
+    }
+
+    public void setConfirmAction(String confirmAction) {
+        this.confirmAction = confirmAction;
     }
 
 }

@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,6 +54,33 @@ public class AiUsageLogServiceImpl extends ServiceImpl<AiUsageLogMapper, AiUsage
         LocalDateTime endTime = startTime.plusDays(1);
         Long tokens = baseMapper.sumTodayTokens(userId, startTime, endTime);
         return tokens == null ? 0L : tokens;
+    }
+
+    @Override
+    public long getTodayUsedTokensByAgent(String agentId) {
+        if (agentId == null || agentId.isBlank()) {
+            return 0L;
+        }
+        LocalDateTime startTime = LocalDate.now().atStartOfDay();
+        LocalDateTime endTime = startTime.plusDays(1);
+        Long tokens = baseMapper.sumTodayTokensByAgent(agentId, startTime, endTime);
+        return tokens == null ? 0L : tokens;
+    }
+
+    @Override
+    public Map<String, Long> getTodayAgentUsage() {
+        LocalDateTime startTime = LocalDate.now().atStartOfDay();
+        LocalDateTime endTime = startTime.plusDays(1);
+        List<Map<String, Object>> rows = baseMapper.sumTodayTokensGroupByAgent(startTime, endTime);
+        Map<String, Long> result = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            Object agentId = row.get("agentId");
+            Object tokens = row.get("tokens");
+            if (agentId != null && tokens instanceof Number n) {
+                result.put(agentId.toString(), n.longValue());
+            }
+        }
+        return result;
     }
 
     @Override

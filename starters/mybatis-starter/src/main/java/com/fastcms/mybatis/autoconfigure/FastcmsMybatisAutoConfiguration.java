@@ -16,6 +16,7 @@
  */
 package com.fastcms.mybatis.autoconfigure;
 
+import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.autoconfigure.ConfigurationCustomizer;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
@@ -43,7 +44,8 @@ public class FastcmsMybatisAutoConfiguration {
 
         MybatisPlusInterceptor mybatisPlusInterceptor = new MybatisPlusInterceptor();
 
-        mybatisPlusInterceptor.addInnerInterceptor(new PaginationInnerInterceptor());
+        // 显式指定方言：未安装模式下数据源为哑数据源，无法通过连接探测方言
+        mybatisPlusInterceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         mybatisPlusInterceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         mybatisPlusInterceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
 

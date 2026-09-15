@@ -1,0 +1,14 @@
+{
+  "id": "custom-html",
+  "name": "自定义HTML",
+  "description": "逃生舱组件：集成插件能力（支付/下载/登录等超出标准组件的场景）。优先用 snippetId 引用官方 snippet（只填 snippetParams），snippet 满足不了需求时才在 data.html 手写完整 HTML+JS（必须严格按 get_capability_detail 工具返回的接口契约）",
+  "category": "conversion",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "default", "description": "原样输出 HTML 片段（含 script）" }
+  ],
+  "slots": [
+    { "name": "html", "type": "string", "required": false, "desc": "完整 HTML 片段（含 script）。手写逃生舱时必填；引用 snippetId 时不要填" }
+  ],
+  "cmsBindings": ["article"]
+}

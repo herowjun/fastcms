@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FastCMS 安装向导</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif; background: #f0f2f5; color: #1f2937; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .wizard { width: 640px; max-width: 100%; background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.08); overflow: hidden; }
+  .wizard-header { padding: 32px 40px 24px; border-bottom: 1px solid #eef0f4; }
+  .wizard-header h1 { font-size: 22px; font-weight: 600; }
+  .wizard-header p { margin-top: 6px; font-size: 13px; color: #6b7280; }
+  .steps { display: flex; padding: 20px 40px 0; }
+  .step { flex: 1; text-align: center; font-size: 13px; color: #9ca3af; position: relative; }
+  .step .dot { width: 26px; height: 26px; line-height: 26px; border-radius: 50%; background: #e5e7eb; color: #9ca3af; margin: 0 auto 6px; font-size: 13px; }
+  .step.active .dot { background: #2563eb; color: #fff; }
+  .step.active { color: #2563eb; font-weight: 600; }
+  .step.done .dot { background: #10b981; color: #fff; }
+  .step.done { color: #10b981; }
+  .wizard-body { padding: 28px 40px 32px; }
+  .panel { display: none; }
+  .panel.visible { display: block; }
+  .form-item { margin-bottom: 18px; }
+  .form-item label { display: block; font-size: 13px; color: #374151; margin-bottom: 6px; font-weight: 500; }
+  .form-item label .req { color: #ef4444; margin-left: 2px; }
+  .form-item input, .form-item select { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; transition: border-color .15s; }
+  .form-item input:focus, .form-item select:focus { border-color: #2563eb; }
+  .form-row { display: flex; gap: 16px; }
+  .form-row .form-item { flex: 1; }
+  .tip { font-size: 12px; color: #9ca3af; margin-top: 4px; line-height: 1.6; }
+  .msg { display: none; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; line-height: 1.6; }
+  .msg.error { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .msg.ok { display: block; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .msg.info { display: block; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .env-list { border: 1px solid #eef0f4; border-radius: 8px; }
+  .env-item { display: flex; justify-content: space-between; padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f3f4f6; }
+  .env-item:last-child { border-bottom: none; }
+  .env-item .status { font-weight: 500; }
+  .status.ok { color: #10b981; }
+  .status.bad { color: #ef4444; }
+  .wizard-footer { display: flex; justify-content: space-between; padding: 20px 40px; border-top: 1px solid #eef0f4; background: #fafbfc; }
+  .btn { height: 40px; padding: 0 24px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all .15s; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+  .btn-secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+  .btn-secondary:hover:not(:disabled) { border-color: #9ca3af; }
+  .btn-success { background: #10b981; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #059669; }
+  .result-box { text-align: center; padding: 16px 0; }
+  .result-box .icon { font-size: 52px; }
+  .result-box h2 { font-size: 20px; margin: 12px 0 8px; }
+  .result-box p { font-size: 14px; color: #6b7280; line-height: 1.8; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  .spinner.dark { border-color: rgba(37,99,235,.25); border-top-color: #2563eb; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-wrap { margin-top: 20px; }
+  .progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+  .progress-bar .fill { height: 100%; width: 0; background: #2563eb; border-radius: 4px; transition: width .4s; }
+  .progress-text { font-size: 12px; color: #9ca3af; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wizard">
+  <div class="wizard-header">
+    <h1>FastCMS 安装向导</h1>
+    <p>只需三步即可完成安装，全程约 1 分钟</p>
+  </div>
+  <div class="steps">
+    <div class="step active" data-step="1"><div class="dot">1</div>环境检查</div>
+    <div class="step" data-step="2"><div class="dot">2</div>数据库配置</div>
+    <div class="step" data-step="3"><div class="dot">3</div>管理员设置</div>
+    <div class="step" data-step="4"><div class="dot">4</div>完成</div>
+  </div>
+  <div class="wizard-body">
+
+    <div class="msg" id="globalMsg"></div>
+
+    <div class="panel visible" id="panel1">
+      <div class="env-list" id="envList"></div>
+      <div class="tip" style="margin-top:12px">安装配置将写入 <b>~/fastcms/config/application.yml</b>，数据库名默认 fastcms（不存在时自动创建）。</div>
+    </div>
+
+    <div class="panel" id="panel2">
+      <div class="form-item">
+        <label>数据库类型<span class="req">*</span></label>
+        <select id="dbType"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-item">
+          <label>数据库地址<span class="req">*</span></label>
+          <input id="dbHost" placeholder="127.0.0.1" value="127.0.0.1">
+        </div>
+        <div class="form-item" style="max-width:140px">
+          <label>端口<span class="req">*</span></label>
+          <input id="dbPort" placeholder="3306" value="3306" type="number">
+        </div>
+      </div>
+      <div class="form-item">
+        <label>数据库名<span class="req">*</span></label>
+        <input id="dbName" placeholder="fastcms" value="fastcms">
+      </div>
+      <div class="form-row">
+        <div class="form-item">
+          <label>账号<span class="req">*</span></label>
+          <input id="dbUser" placeholder="root" value="root">
+        </div>
+        <div class="form-item">
+          <label>密码</label>
+          <input id="dbPassword" type="password" placeholder="数据库密码">
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="btnTestConn" style="width:100%" onclick="testConnection()">
+        测试数据库连接
+      </button>
+    </div>
+
+    <div class="panel" id="panel3">
+      <div class="form-item">
+        <label>管理员账号<span class="req">*</span></label>
+        <input id="adminUser" placeholder="字母、数字、下划线或横线，至少 3 位" autocomplete="off">
+        <div class="tip">用于登录管理后台，替换脚本中的默认账号 admin</div>
+      </div>
+      <div class="form-row">
+        <div class="form-item">
+          <label>管理员密码<span class="req">*</span></label>
+          <input id="adminPassword" type="password" placeholder="至少 8 位" autocomplete="new-password">
+        </div>
+        <div class="form-item">
+          <label>确认密码<span class="req">*</span></label>
+          <input id="adminPassword2" type="password" placeholder="再次输入密码" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="form-item">
+        <label>邮箱（选填）</label>
+        <input id="adminEmail" placeholder="admin@example.com">
+      </div>
+    </div>
+
+    <div class="panel" id="panel4">
+      <div class="result-box" id="resultBox"></div>
+      <div class="progress-wrap" id="progressWrap" style="display:none">
+        <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">正在安装...</div>
+      </div>
+    </div>
+
+  </div>
+  <div class="wizard-footer">
+    <button class="btn btn-secondary" id="btnPrev" style="visibility:hidden" onclick="prevStep()">上一步</button>
+    <button class="btn btn-primary" id="btnNext" onclick="nextStep()">下一步</button>
+  </div>
+</div>
+
+<script>
+var currentStep = 1;
+var installMode = true;
+var supportedDatabases = [];
+var API = {
+  status: '/fastcms/api/install/status',
+  testConnection: '/fastcms/api/install/test-connection',
+  execute: '/fastcms/api/install/execute'
+};
+
+function $(id) { return document.getElementById(id); }
+
+function showMsg(type, text) {
+  var el = $('globalMsg');
+  el.className = 'msg ' + type;
+  el.textContent = text;
+}
+
+function clearMsg() {
+  var el = $('globalMsg');
+  el.className = 'msg';
+  el.textContent = '';
+}
+
+function setStep(step) {
+  currentStep = step;
+  for (var i = 1; i <= 4; i++) {
+    var el = document.querySelector('.step[data-step="' + i + '"]');
+    el.className = 'step' + (i < step ? ' done' : (i === step ? ' active' : ''));
+    $('panel' + i).className = 'panel' + (i === step ? ' visible' : '');
+  }
+  $('btnPrev').style.visibility = step > 1 && step < 4 ? 'visible' : 'hidden';
+  $('btnNext').style.display = step === 4 ? 'none' : 'inline-block';
+  $('btnNext').textContent = step === 3 ? '开始安装' : '下一步';
+  $('btnNext').className = step === 3 ? 'btn btn-success' : 'btn btn-primary';
+  clearMsg();
+}
+
+function prevStep() { if (currentStep > 1) setStep(currentStep - 1); }
+
+function nextStep() {
+  if (currentStep === 1) { setStep(2); return; }
+  if (currentStep === 2) {
+    if (!validateDbForm()) return;
+    setStep(3);
+    return;
+  }
+  if (currentStep === 3) {
+    if (!validateAdminForm()) return;
+    executeInstall();
+  }
+}
+
+function validateDbForm() {
+  if (!$('dbHost').value.trim()) { showMsg('error', '请填写数据库地址'); return false; }
+  var port = parseInt($('dbPort').value, 10);
+  if (!port || port <= 0 || port > 65535) { showMsg('error', '请填写有效的数据库端口'); return false; }
+  var name = $('dbName').value.trim();
+  if (!name) { showMsg('error', '请填写数据库名'); return false; }
+  if (!/^[A-Za-z0-9_\-]+$/.test(name)) { showMsg('error', '数据库名仅支持字母、数字、下划线和横线'); return false; }
+  if (!$('dbUser').value.trim()) { showMsg('error', '请填写数据库账号'); return false; }
+  return true;
+}
+
+function validateAdminForm() {
+  var username = $('adminUser').value.trim();
+  if (!username) { showMsg('error', '请填写管理员账号'); return false; }
+  if (username.length < 3 || !/^[A-Za-z0-9_\-]+$/.test(username)) {
+    showMsg('error', '管理员账号仅支持字母、数字、下划线和横线，且长度不小于 3 位'); return false;
+  }
+  var password = $('adminPassword').value;
+  if (!password || password.length < 8) { showMsg('error', '管理员密码长度不能少于 8 位'); return false; }
+  if (password !== $('adminPassword2').value) { showMsg('error', '两次输入的管理员密码不一致'); return false; }
+  return true;
+}
+
+function buildRequest() {
+  return {
+    dbType: $('dbType').value,
+    db: {
+      host: $('dbHost').value.trim(),
+      port: parseInt($('dbPort').value, 10),
+      database: $('dbName').value.trim(),
+      username: $('dbUser').value.trim(),
+      password: $('dbPassword').value
+    },
+    admin: {
+      username: $('adminUser').value.trim(),
+      password: $('adminPassword').value,
+      confirmPassword: $('adminPassword2').value,
+      email: $('adminEmail').value.trim()
+    }
+  };
+}
+
+function post(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (res) { return res.json(); });
+}
+
+function testConnection() {
+  if (!validateDbForm()) return;
+  var btn = $('btnTestConn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner dark"></span>正在连接...';
+  clearMsg();
+  post(API.testConnection, buildRequest()).then(function (res) {
+    btn.disabled = false;
+    btn.textContent = '测试数据库连接';
+    if (res.code === 200) { showMsg('ok', '数据库连接成功'); }
+    else { showMsg('error', res.message || '数据库连接失败'); }
+  }).catch(function () {
+    btn.disabled = false;
+    btn.textContent = '测试数据库连接';
+    showMsg('error', '请求失败，请检查应用是否正常运行');
+  });
+}
+
+function simulateProgress() {
+  var wrap = $('progressWrap');
+  var fill = $('progressFill');
+  var text = $('progressText');
+  wrap.style.display = 'block';
+  var stages = [
+    [15, '正在创建数据库...'],
+    [35, '正在初始化数据表...'],
+    [60, '正在创建管理员账号...'],
+    [80, '正在写入安装配置...'],
+    [92, '即将完成...']
+  ];
+  var index = 0;
+  return setInterval(function () {
+    if (index < stages.length) {
+      fill.style.width = stages[index][0] + '%';
+      text.textContent = stages[index][1];
+      index++;
+    }
+  }, 700);
+}
+
+function executeInstall() {
+  var btn = $('btnNext');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>安装中';
+  $('btnPrev').style.visibility = 'hidden';
+  setStep(4);
+  var timer = simulateProgress();
+  var request = buildRequest();
+  post(API.execute, request).then(function (res) {
+    clearInterval(timer);
+    btn.style.display = 'none';
+    renderResult(res.code === 200, res.message || res.data || '');
+  }).catch(function () {
+    clearInterval(timer);
+    btn.disabled = false;
+    btn.style.display = 'inline-block';
+    renderResult(false, '请求失败，请检查应用是否正常运行');
+  });
+}
+
+function renderResult(success, message) {
+  var box = $('resultBox');
+  $('progressWrap').style.display = 'none';
+  if (success) {
+    $('progressFill').style.width = '100%';
+    box.innerHTML =
+      '<div class="icon">&#10004;&#65039;</div>' +
+      '<h2>安装成功</h2>' +
+      '<p>' + message + '</p>' +
+      '<p id="restartTip">应用正在自动重启（预计 15~30 秒），完成后将自动前往登录页...</p>';
+    waitForRestart();
+  } else {
+    box.innerHTML =
+      '<div class="icon">&#10060;</div>' +
+      '<h2>安装失败</h2>' +
+      '<p style="color:#b91c1c">' + message + '</p>' +
+      '<p><button class="btn btn-primary" onclick="retryInstall()">返回重新安装</button></p>';
+  }
+}
+
+/**
+ * 等待应用完成自动重启：
+ * - 安装器在重启开始前就会把 installMode 置为 false，旧实例对 status 接口也可能返回 403，
+ *   因此必须先观察到"连接拒绝窗口"（证明旧上下文已关闭、重启进行中），
+ *   之后收到的任何响应才代表新实例已就绪，此时跳转登录页
+ * - 超过 60 秒仍未恢复则提示手动重启
+ */
+function waitForRestart() {
+  var start = Date.now();
+  var sawDown = false;
+  var tip = document.getElementById('restartTip');
+  var timer = setInterval(function () {
+    fetch(API.status, { cache: 'no-store' }).then(function (res) {
+      if (sawDown) {
+        clearInterval(timer);
+        window.location.href = '/fastcms.html';
+      } else if (Date.now() - start > 60000) {
+        clearInterval(timer);
+        failRestartWait(tip);
+      }
+    }).catch(function () {
+      sawDown = true; // 连接被拒绝 = 旧上下文已停，重启窗口期
+      if (Date.now() - start > 60000) {
+        clearInterval(timer);
+        failRestartWait(tip);
+      }
+    });
+  }, 2000);
+}
+
+function failRestartWait(tip) {
+  tip.textContent = '自动重启超时，请手动重启应用后访问 /fastcms.html 登录';
+  tip.style.color = '#b91c1c';
+}
+
+function retryInstall() {
+  $('btnNext').disabled = false;
+  $('btnNext').innerHTML = '开始安装';
+  $('btnNext').style.display = 'inline-block';
+  setStep(2);
+}
+
+function initWizard() {
+  fetch(API.status).then(function (res) { return res.json(); }).then(function (res) {
+    if (res.code !== 200) { renderEnvError(); return; }
+    var data = res.data || {};
+    installMode = data.installMode !== false;
+    supportedDatabases = data.databases || [];
+    renderEnvList();
+    renderDbTypeOptions();
+    if (!installMode) {
+      showMsg('info', '检测到系统已完成安装。如需重新安装，请先停止应用、清空数据库并删除 ~/fastcms/config/application.yml');
+      $('btnNext').style.display = 'none';
+    }
+  }).catch(renderEnvError);
+}
+
+function renderEnvError() {
+  $('envList').innerHTML =
+    '<div class="env-item"><span>安装接口状态</span><span class="status bad">无法访问</span></div>' +
+    '<div class="env-item"><span>说明</span><span class="status bad">请确认应用已启动且处于未安装状态</span></div>';
+  $('btnNext').style.display = 'none';
+}
+
+function renderEnvList() {
+  $('envList').innerHTML =
+    '<div class="env-item"><span>应用运行环境</span><span class="status ok">正常</span></div>' +
+    '<div class="env-item"><span>数据库类型</span><span class="status ok">' +
+    (supportedDatabases.map(function (db) { return db.name; }).join(' / ') || 'MySQL') + '</span></div>' +
+    '<div class="env-item"><span>配置目录（~/fastcms/config）</span><span class="status ok">可写（安装时自动创建）</span></div>';
+}
+
+function renderDbTypeOptions() {
+  var select = $('dbType');
+  select.innerHTML = '';
+  var list = supportedDatabases.length ? supportedDatabases : [{ type: 'mysql', name: 'MySQL', defaultPort: 3306 }];
+  list.forEach(function (db) {
+    var option = document.createElement('option');
+    option.value = db.type;
+    option.textContent = db.name;
+    select.appendChild(option);
+  });
+  var first = list[0];
+  if (first && first.defaultPort) { $('dbPort').value = first.defaultPort; }
+}
+
+initWizard();
+</script>
+</body>
+</html>

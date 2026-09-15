@@ -98,7 +98,7 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .layout-navbars-breadcrumb-index {
-	height: 50px;
+	height: 56px;
 	display: flex;
 	align-items: center;
 	background: var(--next-bg-topBar);

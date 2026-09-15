@@ -1,14 +1,14 @@
 // 定义内容
 export default {
 	label: {
-		one1: '账号密码登录',
-		two2: '手机号登录',
+		one1: '账号密码',
+		two2: '手机登录',
 	},
 	link: {
-		one3: '新用户注册',
+		one3: '注册账号',
 		two4: '友情链接',
 		two5: '已有账号?现在登录',
-		two6: '找回密码',
+		two6: '忘记密码？',
 		two7: '微信授权登录',
 	},
 	copyright: {
@@ -16,7 +16,7 @@ export default {
 		two6: 'Copyright: Guangzhou xiaojuedeng Software Technology 粤ICP备20053122号',
 	},
 	account: {
-		accountPlaceholder1: '账号',
+		accountPlaceholder1: '账号 / 邮箱 / 手机号',
 		accountPlaceholder2: '密码',
 		accountPlaceholder3: '请输入验证码',
 		accountPlaceholder4: '确认密码',

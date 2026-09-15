@@ -28,24 +28,46 @@
 
 		<!-- 旧模板「样式组件化升级」横幅（面板顶部）：保留网站功能（JS/元素锚点/FreeMarker），组件库 CSS 焕新视觉。
 		     升级走 AI 改造管线（分批重写页面 HTML，写盘前校验 JS 锚点存活），进度在对话流实时展示；
-		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传 -->
-		<div v-if="state.legacyUpgradable && !state.chatting && !isApplied" class="legacy-upgrade-bar">
+		     中断后横幅变为"继续升级"形态（带剩余进度），断点续传；
+		     升级完成后横幅变为"深度焕新"形态（重置计划，全部文件含 _layout.html 再改造一轮） -->
+		<div v-if="(state.legacyUpgradable || state.legacyRefinable) && !state.chatting && !isApplied" class="legacy-upgrade-bar">
 			<span class="legacy-upgrade-tip">
-				<template v-if="state.legacyTotal > 0 && state.legacyDone > 0">
+				<template v-if="state.legacyRefinable && !state.legacyUpgradable">
+					<template v-if="state.legacyRefreshCount >= 2">
+						已深度焕新 {{ state.legacyRefreshCount }} 次。仍不满意？建议直接对话描述具体问题（如「首页 banner 太单调，加强视觉层次」），AI 只改相关页面，更快更准；或再次焕新（将自动换用新的设计方向）
+					</template>
+					<template v-else>
+						样式组件化升级已完成。对效果不满意？智能焕新：AI 评估哪些页面与新方向强耦合，只重做这些页面（必含公共布局），其余保留并自动换肤，速度快
+					</template>
+				</template>
+				<template v-else-if="state.legacyTotal > 0 && state.legacyDone > 0">
 					上次升级未完成（已完成 {{ state.legacyDone }}/{{ state.legacyTotal }} 个页面），点击继续将从剩余 {{ state.legacyPending }} 个页面断点续传
 				</template>
 				<template v-else>
 					检测到旧版模板，可升级为组件化样式：保留全部 JS 功能与元素结构锚点，引入组件库 CSS 焕新视觉，原文件自动备份
 				</template>
 			</span>
-			<el-button type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
+			<template v-if="state.legacyRefinable && !state.legacyUpgradable">
+				<el-button type="warning" size="small" :loading="state.upgrading" @click="onDeepRefresh">
+					<el-icon><ele-MagicStick /></el-icon>{{ state.legacyRefreshCount > 0 ? '再次智能焕新' : '智能焕新' }}
+				</el-button>
+				<el-button size="small" :loading="state.upgrading" @click="onFullRefresh" title="跳过范围评估，全部页面恢复原始底稿整体重做（适合彻底换风格，耗时数倍）">
+					全量焕新
+				</el-button>
+			</template>
+			<el-button v-else type="warning" size="small" :loading="state.upgrading" @click="onUpgradeLegacy">
 				<el-icon><ele-MagicStick /></el-icon>{{ state.legacyTotal > 0 && state.legacyDone > 0 ? '继续升级' : '样式组件化升级' }}
 			</el-button>
 		</div>
 
 		<!-- 对话区域 -->
 		<div class="chat-area" ref="chatAreaRef" @scroll="onChatAreaScroll">
-			<div v-for="(msg, msgIndex) in state.messages" :key="msgIndex" class="chat-message" :class="msg.role">
+			<!-- 渲染窗口：仅渲染最近 N 条（超长升级会话历史几十轮 × 每轮 KB 级 reasoning，
+				全量渲染 DOM + v-html 会把渲染进程内存推到 GB 级；点此增量展开更早消息 -->
+			<div v-if="renderLimit < state.messages.length" class="load-earlier" @click="renderLimit += 50">
+				加载更早的 {{ state.messages.length - renderLimit }} 条消息
+			</div>
+			<div v-for="(msg, msgIndex) in visibleMessages" :key="msgIndex" class="chat-message" :class="msg.role">
 				<div class="message-role">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
 				<div class="message-content">
 					<!-- 分批流水线进度卡：规划完成后逐文件点亮（后端 progress 事件全量快照） -->
@@ -53,8 +75,8 @@
 						<div class="progress-header">
 							<span>文件生成进度（{{ progressDoneCount(msg) }}/{{ msg.progress.length }}）</span>
 							<el-button
-							v-if="mode === 'generate' && !isApplied && !state.chatting && msgIndex === state.messages.length - 1
-								&& progressDoneCount(msg) < msg.progress.length"
+								v-if="mode === 'generate' && !isApplied && !state.chatting && isLastMessage(msg)
+									&& progressDoneCount(msg) < msg.progress.length"
 								size="small" text type="primary" style="margin-left: auto" @click="onResumeMissing">
 								<el-icon><ele-MagicStick /></el-icon>补齐缺失文件
 							</el-button>
@@ -67,23 +89,67 @@
 								<span class="pi-path">{{ f.path }}</span>
 							</div>
 						</div>
-					</div>
-					<!-- 推理模型思考过程（可折叠，思考中默认展开） -->
+						</div>
+						<!-- 设计稿先行模式：审计通过后的确认卡片（问题清单 + 预览 + 确认转化/驳回修改）；
+						数据来自 confirm_request 事件或刷新恢复（design-status 端点），handled 后只读保留 -->
+						<div v-if="msg.confirmCard" class="confirm-box">
+						<div class="confirm-header">
+							<el-icon class="ci-done"><ele-Check /></el-icon>
+							<span>设计稿已完成，请确认</span>
+							<el-link v-if="msg.confirmCard.previewUrl" type="primary" :href="msg.confirmCard.previewUrl"
+							           target="_blank" class="confirm-preview">
+								<el-icon><ele-View /></el-icon>预览设计稿
+							</el-link>
+						</div>
+						<div v-if="msg.confirmCard.issues && msg.confirmCard.issues.length" class="confirm-issues">
+							<div class="ci-title">审计提示（{{ msg.confirmCard.issues.length }} 项，可确认后继续或驳回修改）</div>
+							<div v-for="(it, i) in msg.confirmCard.issues" :key="i" class="ci-item">
+								<el-tag size="small" type="warning" class="ci-code">{{ it.code }}</el-tag>
+								<span class="ci-text">{{ it.page }}：{{ it.message }}</span>
+							</div>
+						</div>
+						<div v-if="!msg.confirmCard.handled" class="confirm-actions">
+							<el-button type="primary" size="small" :loading="state.chatting" @click="onConfirmApprove(msg)">
+								<el-icon><ele-Check /></el-icon>确认设计稿，开始转化为模板
+							</el-button>
+							<el-button size="small" :disabled="state.chatting" @click="onConfirmReject(msg)">
+								<el-icon><ele-RefreshLeft /></el-icon>驳回修改
+							</el-button>
+							<span v-if="msg.confirmCard.confirmAuto" class="ci-auto-note">已开启自动转化（审计通过即转化）</span>
+						</div>
+						<div v-else class="confirm-done-note">已处理（确认转化 / 驳回重设计），等待流程推进</div>
+						</div>
+						<!-- 推理模型思考过程（可折叠，思考中默认展开） -->
 					<div v-if="msg.reasoning" class="reasoning-box">
 						<div class="reasoning-header" @click="msg.reasoningExpanded = !msg.reasoningExpanded">
 							<el-icon class="reasoning-arrow" :class="{ collapsed: !msg.reasoningExpanded }"><ele-ArrowRight /></el-icon>
-							<span>{{ reasoningThinking(msg, msgIndex) ? '思考中...' : '已深度思考' }}</span>
+							<span>{{ reasoningThinking(msg) ? '思考中...' : '已深度思考' }}</span>
 						</div>
+						<!-- v-if 而非 v-show：收起状态不创建 DOM（KB 级思考文本 → 数万节点/条，
+							几十轮历史全量常驻是渲染进程内存飙升的主因之一） -->
 						<div
-							v-show="msg.reasoningExpanded"
+							v-if="msg.reasoningExpanded"
 							class="reasoning-text"
-							v-html="renderReasoning(msg.reasoning, reasoningThinking(msg, msgIndex))"
+							v-html="renderReasoning(msg)"
 						></div>
 					</div>
 					<pre class="message-text" :class="{ failed: isFailMessage(msg) }">{{ msg.content }}<span
-						v-if="state.chatting && msgIndex === state.messages.length - 1 && !msg.reasoning"
+						v-if="state.chatting && isLastMessage(msg) && !msg.reasoning"
 						class="typing-cursor"
 					>▌</span></pre>
+					<!-- AI 消息底部元信息条：hover 浮出（token 消耗 + 复制按钮） -->
+					<div v-if="msg.role === 'assistant'" class="message-meta">
+						<span v-if="msg.totalTokens > 0 || msg.promptTokens > 0 || msg.completionTokens > 0"
+							class="meta-tokens"
+							:title="`输入 ${msg.promptTokens ?? 0} tokens + 输出 ${msg.completionTokens ?? 0} tokens。\n输入包含系统提示词、对话历史及注入的模板文件内容（并非只有你输入的那句话），故数值通常远大于输出；输出为 AI 本轮生成的回复。跨轮次聚合：含思考与工具调用轮`">
+							<el-icon><ele-Coin /></el-icon>
+							token {{ formatTokenCount(msg.totalTokens || ((msg.promptTokens || 0) + (msg.completionTokens || 0))) }}
+							（输入 {{ formatTokenCount(msg.promptTokens || 0) }} / 输出 {{ formatTokenCount(msg.completionTokens || 0) }}）
+						</span>
+						<span class="meta-copy" title="复制本条回复内容" @click="copyMessage(msg)">
+							<el-icon><ele-CopyDocument /></el-icon>复制
+						</span>
+					</div>
 				</div>
 			</div>
 			<el-empty v-if="!state.loading && state.messages.length === 0"
@@ -122,6 +188,11 @@
 						: '描述你的需求，例如：生成一个企业官网模板，蓝色调，响应式设计'))"
 				:disabled="state.chatting || isApplied"
 			/>
+			<!-- 全量注入开启时常驻警示（输入框正下方，随开关显隐，不用弹出框） -->
+			<div v-if="mode === 'adjust' && state.fullInject" class="full-inject-tip">
+				<el-icon><ele-WarningFilled /></el-icon>
+				<span>全量注入已开启：每轮对话会把全部模板文件提交给 AI，token 消耗大幅增加、耗时明显变长，建议仅在 AI 自动检索效果不佳时使用，问题解决后及时关闭</span>
+			</div>
 			<div class="chat-actions">
 				<!-- 点选工具（换图/选区）：与发送按钮同排靠左；模式开关与预览 iframe 钩子注入由父组件处理 -->
 				<div v-if="pickToolsVisible" class="chat-tools">
@@ -135,12 +206,21 @@
 					@click="emit('toggle-section-select')">
 					<el-icon><ele-Position /></el-icon>{{ sectionSelectMode ? '退出选区模式' : '选区' }}
 				</el-button>
+				<!-- 全量注入开关（仅调整型会话）：默认关闭走聚焦注入（AI 按需检索，省 token）；
+				     开启后每轮把全部模板文件提交给 AI（旧全量行为），token 消耗与耗时大幅增加 -->
+				<div v-if="mode === 'adjust'" class="full-inject-toggle"
+					:title="state.fullInject
+						? '已开启全量注入：每轮对话把全部模板文件提交给 AI，token 消耗大、耗时长，建议问题解决后关闭'
+						: '默认 AI 按需检索：只注入当前页面的依赖文件，AI 需要时自行查看其他文件（省 token、更快）。若 AI 找不到相关文件可开启全量注入'">
+					<el-switch v-model="state.fullInject" size="small" :disabled="state.chatting" @change="onFullInjectChange" />
+					<span class="full-inject-label">全量注入</span>
+				</div>
 				</div>
 				<div class="chat-send">
 					<el-button type="primary" @click="onSend" :loading="state.chatting" :disabled="!state.inputText.trim() || isApplied">
 						<el-icon><ele-Promotion /></el-icon>{{ state.chatting ? '生成中...' : '发送' }}
 					</el-button>
-					<el-button v-if="state.chatting" type="danger" @click="onStop">
+					<el-button v-if="state.chatting" type="danger" :loading="state.stopping" @click="onStop">
 						<el-icon><ele-VideoPause /></el-icon>停止
 					</el-button>
 				</div>
@@ -197,7 +277,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { AiTemplateApi } from '/@/api/ai/index';
-import { Local } from '/@/utils/storage';
+import { Local, Session } from '/@/utils/storage';
 
 /**
  * AI 模板对话面板（模板编辑页内嵌组件）
@@ -236,6 +316,8 @@ const emit = defineEmits<{
 	(e: 'files-changed'): void;
 	/** AI 每写完一个文件的实时通知（SSE file 事件，父组件用于刷新实时预览） */
 	(e: 'file-written', path: string): void;
+	/** AI 页面自动切换（SSE switch-file 事件，调整对话流式期间识别到目标 HTML 即推送，父组件切换实时预览页面） */
+	(e: 'switch-file', path: string): void;
 	/** 生成型会话应用模板成功（templateId：应用后的正式模板 ID，父组件据此无缝切换编辑目标） */
 	(e: 'applied', templateId: string): void;
 	/** 进入会话编辑模式（父组件把文件树/编辑器/预览切到会话工作目录） */
@@ -271,6 +353,23 @@ const isFailed = computed(() => {
 /** 单条消息是否为失败消息（红色样式渲染） */
 const isFailMessage = (msg: any) => {
 	return msg?.role === 'assistant' && String(msg.content || '').startsWith(FAIL_MSG_PREFIX);
+};
+
+/** token 数量格式化：原样输出完整数字，不用 w 等缩写 */
+const formatTokenCount = (n: any): string => {
+	return String(Number(n) || 0);
+};
+
+/** 复制 AI 回复内容（所见即所得：复制清洗后的正文，非原始 JSON） */
+const copyMessage = async (msg: any) => {
+	const text = String(msg?.content || '');
+	if (!text) return;
+	try {
+		await navigator.clipboard.writeText(text);
+		ElMessage.success('已复制回复内容');
+	} catch {
+		ElMessage.error('复制失败，请手动选择文本复制');
+	}
 };
 
 /**
@@ -319,6 +418,11 @@ const state = reactive({
 	// SSE status 事件文本（"正在接收文件内容…"等阶段性状态，done/error/结束时清空）
 	statusText: '',
 	abortController: null as AbortController | null,
+	// 续连游标：最新已收事件 seq（SSE id 字段，RunChannel 单调递增）。断线重连/重开续看时
+	// 作为 stream 端点 since 参数增量回放（不重播已收事件）；新一轮任务开始时归零（新 run 重新计数）
+	lastSeq: 0,
+	// 显式停止请求进行中（停止按钮 loading；停止走 stop 端点，断开连接不再取消任务）
+	stopping: false,
 	files: [] as any[],
 	loadingFiles: false,
 	applying: false,
@@ -330,14 +434,36 @@ const state = reactive({
 	legacyPending: 0,
 	legacyDone: 0,
 	legacyTotal: 0,
+	// 升级已完成且可深度焕新（计划存在 + 无待改造文件）：横幅变为"深度焕新"形态
+	legacyRefinable: false,
+	// 已完成的深度焕新轮次（后端计划文件记录；用于横幅文案与焕新引导）
+	legacyRefreshCount: 0,
+	// 上次升级/焕新后的对话修改轮数（后端计划文件记录）：焕新确认框据此提示
+	// "N 轮微调将整合进新基线"，让用户放心焕新不会丢掉对话劳动
+	legacyAdjustCount: 0,
 	// 本轮 chat 请求是否为样式组件化升级（onUpgradeLegacy 设置，onSend 发出后复位）
 	pendingStyleUpgrade: false,
+	// 本轮 chat 请求是否为深度焕新（配合 styleUpgrade：升级完成后重置计划再改造一轮）
+	pendingDeepRefresh: false,
+	// 本轮 chat 请求是否为全量焕新（配合 deepRefresh：跳过 AI 范围评估，全部计划文件重做）
+	pendingFullRefresh: false,
+	// 本轮焕新用户填写的意见（可空；onSend 发出后复位）：对当前样式的具体不满，
+	// 后端作为定向修正目标注入提示词 + 命中关键词（暗/密/素/乱）时方向按反馈定向
+	pendingFeedback: '',
+	// 全量注入开关（调整型会话）：默认 false 走聚焦注入（AI 按需检索），true 时全部模板文件注入提示词。
+	// localStorage 持久化（跨会话记忆），发送消息时随请求体传给后端
+	fullInject: Local.get('ai-template-full-inject') === true,
 	fileDialogVisible: false,
 	viewingFile: null as any,
 });
 
 /** 点选工具（换图/选区）可见：仅预览列存在的模式（adjust / 会话编辑视图）下才有可点选的预览页 */
 const pickToolsVisible = computed(() => props.mode === 'adjust' || !!props.sessionActive);
+
+/** 全量注入开关切换：持久化；开启时的警示常驻输入框下方提示行（不走弹出框） */
+const onFullInjectChange = (val: any) => {
+	Local.set('ai-template-full-inject', val === true);
+};
 
 /** 点选工具禁用：对话进行中（避免与 AI 写盘冲突）/ 已应用会话（仅回看）/ 无会话 */
 const pickDisabled = computed(() => state.chatting || isApplied.value || !props.session?.sessionId);
@@ -379,15 +505,21 @@ const cleanHistoryContent = (m: any): string => {
 const applyLegacyStatus = (data: any) => {
 	if (data && typeof data === 'object') {
 		state.legacyUpgradable = data.upgradable === true;
+		state.legacyRefinable = data.refinable === true;
 		state.legacyPending = data.pendingCount || 0;
 		state.legacyDone = data.doneCount || 0;
 		state.legacyTotal = data.totalFiles || 0;
+		state.legacyRefreshCount = data.refreshCount || 0;
+		state.legacyAdjustCount = data.adjustCount || 0;
 	} else {
 		// 旧版布尔返回或异常空值：仅控制横幅显隐
 		state.legacyUpgradable = data === true;
+		state.legacyRefinable = false;
 		state.legacyPending = 0;
 		state.legacyDone = 0;
 		state.legacyTotal = 0;
+		state.legacyRefreshCount = 0;
+		state.legacyAdjustCount = 0;
 	}
 };
 
@@ -402,11 +534,14 @@ const loadSessionData = async () => {
 	if (!props.session?.sessionId) return;
 	state.loading = true;
 	try {
-		const [messagesRes, filesRes, legacyRes] = await Promise.all([
+		const [messagesRes, filesRes, legacyRes, designRes] = await Promise.all([
 			templateApi.listMessages(props.session.sessionId),
 			templateApi.listFiles(props.session.sessionId),
 			// 旧模板探测：决定文件区"升级为组件版"按钮显隐；接口异常时静默降级为不显示
 			templateApi.legacyStatus(props.session.sessionId).catch(() => null),
+			// 设计稿先行模式确认状态：plan 处于 AWAITING_CONFIRM 时返回卡片数据
+			// （非 design 会话返回 null，接口异常静默降级为不恢复）
+			templateApi.designStatus(props.session.sessionId).catch(() => null),
 		]);
 		applyLegacyStatus(legacyRes?.data);
 		// 历史消息：思考面板默认收起（reasoning 落库后刷新仍可回看）；
@@ -424,7 +559,20 @@ const loadSessionData = async () => {
 		// 进度卡恢复：plan 已持久化（会话对象携带），刷新页面后用 plan + 已生成文件重算全量进度，
 		// 挂到最后一条 assistant 消息上，与生成过程中的进度卡视觉一致
 		restoreProgressCard();
+		// 确认卡片恢复：设计稿等待人工确认时刷新页面，卡片从 design-status 重建
+		restoreConfirmCard(designRes?.data);
 		scrollToBottom();
+		// 任务运行态探测：关页后台续跑的任务在重开/刷新时自动续看——回放已发生的
+		// 思考过程（journal 事件）到新 assistant 占位消息，再实时续接。探测失败静默
+		// 降级（不续看，任务仍在后台跑，重新打开页面可再次续看）
+		try {
+			const runRes: any = await templateApi.runStatus(props.session.sessionId);
+			if (runRes?.data?.running === true) {
+				observeRunning(0);
+			}
+		} catch (e) {
+			/* 运行态探测失败：静默降级 */
+		}
 	} catch (e) {
 		console.error(e);
 		ElMessage.error('加载会话数据失败');
@@ -459,13 +607,35 @@ const restoreProgressCard = () => {
 	}
 };
 
-// 切换会话时加载消息与文件
+/**
+ * 刷新页面后恢复设计稿确认卡片：
+ * design-status 返回 AWAITING_CONFIRM 卡片数据时，挂到最后一条 assistant 消息
+ * （与实时 confirm_request 事件挂载位置一致），approve/reject 按钮可用——
+ * 状态以 plan.json 落盘为单一事实源，刷新不丢确认上下文
+ */
+const restoreConfirmCard = (data: any) => {
+	if (!data || data.state !== 'AWAITING_CONFIRM') return;
+	for (let i = state.messages.length - 1; i >= 0; i--) {
+		if (state.messages[i].role === 'assistant') {
+			state.messages[i].confirmCard = {
+				issues: Array.isArray(data.issues) ? data.issues : [],
+				previewUrl: data.previewUrl || '',
+				confirmAuto: data.confirmAuto === true,
+			};
+			break;
+		}
+	}
+};
+
+// 切换会话时加载消息与文件（断开连接不取消任务：后台任务照常运行，切回可续看）
 watch(() => props.session, (val) => {
 	if (state.abortController) {
 		state.abortController.abort();
 		state.abortController = null;
 	}
 	state.chatting = false;
+	state.lastSeq = 0;
+	state.stopping = false;
 	state.messages = [];
 	state.files = [];
 	state.inputText = '';
@@ -497,32 +667,25 @@ const autoSend = async (input: string) => {
 	onSend();
 };
 
-defineExpose({ autoSend });
+defineExpose({ autoSend, isChatting: () => state.chatting });
 
-const onSend = async () => {
-	if (!state.inputText.trim() || !props.session?.sessionId) return;
+/**
+ * 确认动作参数形状校验：模板 @click="onSend" 会把 MouseEvent 传进来
+ * （opts 参数化后必须防事件对象误判为确认动作），只有携带字符串 confirmAction
+ * 的对象才是设计稿确认调用（APPROVE/REJECT）
+ */
+const isConfirmOpts = (o: any): o is { confirmAction: string; input: string; displayText: string } => {
+	return !!o && typeof o === 'object' && typeof o.confirmAction === 'string' && o.confirmAction;
+};
 
-	// 新一轮对话回到自动跟随模式
-	userScrolledUp.value = false;
-
-	// 先把用户输入加入消息列表（UI 即时反馈）
-	state.messages.push({
-		role: 'user',
-		content: state.inputText,
-		created: new Date().toISOString(),
-	});
-
-	const userInput = state.inputText;
-	const styleUpgrade = state.pendingStyleUpgrade;
-	state.inputText = '';
-	state.chatting = true;
-
-	if (state.abortController) {
-		state.abortController.abort();
-	}
-	const controller = new AbortController();
-	state.abortController = controller;
-
+/**
+ * 单轮流式处理上下文：assistant 占位消息 + 事件分发 + 节流渲染
+ *
+ * onSend（页面内主动发送）与 observeRunning（重开页面续看后台任务）共用——
+ * 续看回放的历史事件（reasoning/message/file/progress/...）与实时事件走同一套
+ * 分发逻辑，视觉与现场直播一致
+ */
+const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
 	// 累积 AI 响应文本（后端流式推送 message 事件为高频小增量，逐段拼接即打字机效果）
 	let assistantContent = '';
 	let reasoningContent = '';
@@ -536,7 +699,58 @@ const onSend = async () => {
 	});
 	const assistantIndex = state.messages.length - 1;
 
+	// ===== 流式渲染节流 =====
+	// SSE chunk 高频到达（推理模型长思考期间每秒可达上百个），若每个 chunk 都把
+	// 全量 reasoning/content 写入响应式状态，会触发 renderReasoning 全量重算 +
+	// v-html 整棵 DOM 子树销毁重建，分配速率远超 GC 回收（实测长思考轮次
+	// Chrome 内存飙升 4GB+ 直至回复结束）。双管齐下：
+	// - 攒批降频：STREAM_FLUSH_MS 内的增量合并为一次渲染
+	// - 渲染窗口：流式期间 reasoning 仅渲染尾部窗口（思考面板滚动本就跟随尾部），
+	//   单次渲染成本恒定；结束（done/error/停止/异常）时 flushStream 全量展示
+	const STREAM_FLUSH_MS = 150;
+	const REASONING_RENDER_WINDOW = 6000;
+	// ===== 流式累积硬上限（前端防爆保险丝） =====
+	// 后端思考失控保险丝（单轮 256KB）已从源头截断，此处为纵深防御：任何原因
+	// （多轮累积、后端行为异常、旧版本实例）导致累积超限时丢弃后续增量并标注一次，
+	// 保证 V8 字符串上限（~512MB）永不可达——失控会话实测案例中无界累积曾触发
+	// "RangeError: Invalid string length" 使整个对话面板崩溃
+	const REASONING_ACCUM_MAX = 1024 * 1024;
+	const CONTENT_ACCUM_MAX = 4 * 1024 * 1024;
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastFlushAt = 0;
+
+	const applyStream = (full: boolean) => {
+		const msg = state.messages[assistantIndex];
+		if (!msg) return;
+		msg.content = assistantContent;
+		msg.reasoning = !full && reasoningContent.length > REASONING_RENDER_WINDOW
+			? '…（思考过长，流式期间仅显示尾部，完成后可查看全文）\n' + reasoningContent.slice(-REASONING_RENDER_WINDOW)
+			: reasoningContent;
+		scrollToBottom();
+	};
+
+	const scheduleFlush = () => {
+		if (flushTimer !== null) return;
+		const wait = Math.max(0, STREAM_FLUSH_MS - (Date.now() - lastFlushAt));
+		flushTimer = setTimeout(() => {
+			flushTimer = null;
+			lastFlushAt = Date.now();
+			applyStream(false);
+		}, wait);
+	};
+
+	const flushStream = () => {
+		if (flushTimer !== null) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		lastFlushAt = 0;
+		applyStream(true);
+	};
+
 	const finish = () => {
+		// 结束路径统一收口：清掉挂起的节流定时器并把完整内容一次落库展示
+		flushStream();
 		state.abortController = null;
 		state.chatting = false;
 		state.statusText = '';
@@ -569,8 +783,9 @@ const onSend = async () => {
 		}
 		finish();
 		refreshFiles();
-		// 升级轮结束后刷新升级状态（升级完成则横幅消失；中断续传则横幅显示剩余进度）
-		if (styleUpgrade && props.session?.sessionId) {
+		// 升级轮结束后刷新升级状态（升级完成则横幅消失；中断续传则横幅显示剩余进度）；
+		// 续看模式下本轮任务类型未知，一并刷新（探测便宜，避免升级轮横幅滞留旧态）
+		if ((styleUpgrade || resume) && props.session?.sessionId) {
 			templateApi.legacyStatus(props.session.sessionId).then((res: any) => {
 				applyLegacyStatus(res?.data);
 			}).catch(() => {});
@@ -597,6 +812,10 @@ const onSend = async () => {
 		}
 		ElMessage.error(msg);
 		finish();
+		// 失败前可能已有部分文件落盘（如设计稿逐页产物）：文件表与父组件的
+		// 会话文件树须与服务器对齐，否则下拉列表停留在失败前的旧快照
+		refreshFiles();
+		emit('files-changed');
 		// 升级轮失败（如某文件改造解析失败中断）：刷新升级状态，
 		// 横幅转为"继续升级"形态展示剩余进度（用户可一键续传）
 		if (styleUpgrade && props.session?.sessionId) {
@@ -606,81 +825,74 @@ const onSend = async () => {
 		}
 	};
 
-	try {
-		const token = Local.get('token') as string | undefined;
-		const resp = await fetch(templateApi.chatUrl(props.session.sessionId), {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				...(token ? { Authorization: 'Bearer ' + token } : {})
-			},
-			body: JSON.stringify({
-				input: userInput,
-				currentFile: props.currentFile || '',
-				focusSectionId: props.focusSection || '',
-				focusElementHint: props.focusElementHint || '',
-				styleUpgrade
-			}),
-			signal: controller.signal
-		});
-		// 请求已发出，升级标志复位（下一轮普通对话不带该标志）
-		state.pendingStyleUpgrade = false;
-
-		if (!resp.ok || !resp.body) {
-			let msg = '请求失败（' + resp.status + '）';
-			try {
-				const errRes = await resp.json();
-				if (errRes && errRes.msg) msg = errRes.msg;
-			} catch (err) {
-				/* ignore */
-			}
-			// HTTP 层失败同样写入占位消息触发失败态 UI
-			const last = state.messages[assistantIndex];
-			if (last && !last.content) {
-				last.content = FAIL_MSG_PREFIX + msg;
-			}
-			ElMessage.error(msg);
-			finish();
-			return;
-		}
-
-		const reader = resp.body.getReader();
-		const decoder = new TextDecoder('utf-8');
-		let buf = '';
-		let currentEvent = 'message';
-		let currentData: string[] = [];
-		let sawEvent = false;
-
-		const dispatch = () => {
-			if (currentData.length === 0) {
-				currentEvent = 'message';
-				return;
-			}
-			const data = currentData.join('\n');
-			switch (currentEvent) {
-				case 'message':
+	/**
+	 * 事件分发（实时事件与续看回放事件共用同一套逻辑）
+	 */
+	const dispatch = (currentEvent: string, data: string) => {
+		switch (currentEvent) {
+			case 'message':
+				// 累积上限防爆（reply 文本远达不到该量级，纯纵深防御）：超限丢弃增量并标注一次
+				if (assistantContent.length < CONTENT_ACCUM_MAX) {
 					assistantContent += data;
-					state.messages[assistantIndex].content = assistantContent;
-					scrollToBottom();
-					break;
-				case 'reasoning':
-					reasoningContent += data;
-					state.messages[assistantIndex].reasoning = reasoningContent;
-					scrollToBottom();
-					break;
-				case 'file':
-					// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
-					// 阶段状态条不在此清除：由后端状态链负责（新 status 覆盖旧文案，结束时发空 status 清除）
-					try {
-						const info = JSON.parse(data);
-						if (info.path) {
-							upsertFile(info.path, info.action || 'modify');
-							emit('file-written', info.path);
-						}
-					} catch (err) {
-						/* 忽略格式异常的 file 事件 */
+					if (assistantContent.length >= CONTENT_ACCUM_MAX) {
+						assistantContent += '\n…（内容超出展示上限，已停止接收后续流式内容）';
 					}
-					break;
+				}
+				// 节流渲染：不直接写响应式状态（每 chunk 全量重渲会打爆内存），攒批 150ms
+				scheduleFlush();
+				break;
+			case 'reasoning':
+				// 累积上限防爆：超限丢弃增量并标注一次（后端保险丝正常时单轮最多 256KB）
+				if (reasoningContent.length < REASONING_ACCUM_MAX) {
+					reasoningContent += data;
+					if (reasoningContent.length >= REASONING_ACCUM_MAX) {
+						reasoningContent += '\n…（思考过程超出展示上限，已停止接收；完整记录以对话历史为准）';
+					}
+				}
+				scheduleFlush();
+				break;
+			case 'file':
+				// AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
+				// 阶段状态条不在此清除：由后端状态链负责（新 status 覆盖旧文案，结束时发空 status 清除）
+				try {
+					const info = JSON.parse(data);
+					if (info.path) {
+						upsertFile(info.path, info.action || 'modify');
+						emit('file-written', info.path);
+					}
+				} catch (err) {
+					/* 忽略格式异常的 file 事件 */
+				}
+				break;
+			case 'switch-file':
+				// 调整/升级对话流式期间，后端识别到 AI 正在处理的首个可路由 HTML 即推送：
+				// 通知父组件把实时预览切到该页面（先看旧版本，写盘后经 file 事件刷新重载新内容）
+				try {
+					const info = JSON.parse(data);
+					if (info.path) {
+						emit('switch-file', info.path);
+					}
+				} catch (err) {
+					/* 忽略格式异常的 switch-file 事件 */
+				}
+				break;
+			case 'confirm_request':
+				// 设计稿先行模式等待人工确认：在当前 assistant 消息上挂确认卡片
+				// （问题清单 + 预览链接 + 确认转化/驳回修改按钮），随 done 一起收口
+				try {
+					const card = JSON.parse(data);
+					if (card.state === 'AWAITING_CONFIRM') {
+						state.messages[assistantIndex].confirmCard = {
+							issues: Array.isArray(card.issues) ? card.issues : [],
+							previewUrl: card.previewUrl || '',
+							confirmAuto: card.confirmAuto === true,
+						};
+						scrollToBottom();
+					}
+				} catch (err) {
+					/* 忽略格式异常的 confirm_request 事件 */
+				}
+				break;
 			case 'progress':
 				// 分批流水线进度快照（全量文件清单及状态），更新 AI 消息内的进度卡
 				try {
@@ -700,79 +912,317 @@ const onSend = async () => {
 					state.statusText = data;
 				}
 				break;
-				case 'done':
-					handleDone({ data });
-					break;
-				case 'error':
-					handleError({ data });
-					break;
-				default:
-					break;
-			}
-			currentEvent = 'message';
-			currentData = [];
-		};
+			case 'usage':
+				// 本轮 token 用量（done 之后到达）：挂到本条 assistant 消息，hover 底部展示
+				try {
+					const u = JSON.parse(data);
+					state.messages[assistantIndex].promptTokens = u.promptTokens ?? 0;
+					state.messages[assistantIndex].completionTokens = u.completionTokens ?? 0;
+					state.messages[assistantIndex].totalTokens = u.totalTokens ?? 0;
+				} catch (err) {
+					/* 忽略格式异常的 usage 事件 */
+				}
+				break;
+			case 'done':
+				handleDone({ data });
+				break;
+			case 'error':
+				handleError({ data });
+				break;
+			case 'run-status':
+				// stream 端点探测响应（{"running":false} 后服务端随即 complete）：
+				// 由流结束后的观察循环统一收口，此处无需处理
+				break;
+			default:
+				break;
+		}
+	};
 
-		// 逐块读取 SSE 流，按行解析（兼容 \r\n / \n）
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buf += decoder.decode(value, { stream: true });
-			let idx: number;
-			while ((idx = buf.indexOf('\n')) >= 0) {
-				const raw = buf.slice(0, idx);
-				buf = buf.slice(idx + 1);
-				const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+	return { assistantIndex, dispatch, finish };
+};
 
-				if (line === '') {
-					// 空行 = 事件结束
-					if (sawEvent) dispatch();
-					currentEvent = 'message';
-					currentData = [];
-					sawEvent = false;
-				} else if (line.startsWith('event:')) {
-					const name = line.slice(6).trim();
-					if (name) {
-						currentEvent = name;
-						sawEvent = true;
-					}
-				} else if (line.startsWith('data:')) {
-					currentData.push(line.slice(5).replace(/^ /, ''));
+/**
+ * 消费 SSE 响应流：按行解析（event:/data:/id:），空行处分发事件
+ *
+ * id 字段为 RunChannel 分配的单调递增事件 seq（chat 提交流与 stream 续看流均携带）：
+ * 记录进 state.lastSeq，断线重连时作为 stream 端点 since 参数增量回放（不重播已收事件）
+ */
+const consumeSse = async (resp: any, ctx: ReturnType<typeof createRunContext>) => {
+	const reader = resp.body.getReader();
+	const decoder = new TextDecoder('utf-8');
+	let buf = '';
+	let currentEvent = 'message';
+	let currentData: string[] = [];
+	let sawEvent = false;
+
+	// 逐块读取 SSE 流，按行解析（兼容 \r\n / \n）
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buf += decoder.decode(value, { stream: true });
+		let idx: number;
+		while ((idx = buf.indexOf('\n')) >= 0) {
+			const raw = buf.slice(0, idx);
+			buf = buf.slice(idx + 1);
+			const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+
+			if (line === '') {
+				// 空行 = 事件结束
+				if (sawEvent && currentData.length > 0) {
+					ctx.dispatch(currentEvent, currentData.join('\n'));
+				}
+				currentEvent = 'message';
+				currentData = [];
+				sawEvent = false;
+			} else if (line.startsWith('event:')) {
+				const name = line.slice(6).trim();
+				if (name) {
+					currentEvent = name;
 					sawEvent = true;
 				}
-				// 其余字段（id:/retry:/注释）忽略
+			} else if (line.startsWith('data:')) {
+				currentData.push(line.slice(5).replace(/^ /, ''));
+				sawEvent = true;
+			} else if (line.startsWith('id:')) {
+				// SSE id = 事件 seq（RunChannel 单调递增）：记录续连游标
+				const id = Number(line.slice(3).trim());
+				if (Number.isFinite(id) && id > state.lastSeq) {
+					state.lastSeq = id;
+				}
 			}
-		}
-		// 流结束但后端未发 done/error 时收尾
-		if (state.chatting) {
-			finish();
-			refreshFiles();
-			emit('files-changed');
-		}
-	} catch (e: any) {
-		if (e?.name === 'AbortError') {
-			// 用户主动停止，不提示错误
-			finish();
-		} else {
-			console.error(e);
-			const msg = e?.message || '网络错误';
-			// 网络异常同样写入占位消息触发失败态 UI
-			const last = state.messages[assistantIndex];
-			if (last && !last.content) {
-				last.content = FAIL_MSG_PREFIX + msg;
-			}
-			ElMessage.error('生成失败：' + msg);
-			finish();
+			// 其余字段（retry:/注释）忽略
 		}
 	}
 };
 
-const onStop = () => {
+/**
+ * 终态兜底重载：流结束但未收到 done/error（任务在断连窗口内被停止/异常终止）。
+ * 终态消息（停止原因含进度明细 / 失败原因）由后端在 complete 连接前先行落库，
+ * 重载消息与文件即与真实终态对齐（复用 loadSessionData 的全量恢复逻辑）
+ */
+const reloadRunTerminal = async () => {
+	if (!props.session?.sessionId) return;
+	try {
+		await loadSessionData();
+	} catch (e) {
+		console.error(e);
+	} finally {
+		emit('files-changed');
+	}
+};
+
+/**
+ * 观察循环：探测运行态 → 连接 stream 端点（回放 since 之后事件 + 实时续接）；
+ * 流结束仍未终态则指数退避重连（1s/2s/4s…上限 30s，共 8 次）。
+ * 终态判定：done/error 事件（dispatch 后 chatting=false）或探测 running=false
+ * （任务已结束，终态消息已落库 → 重载收口）
+ */
+const observeLoop = async (ctx: ReturnType<typeof createRunContext>) => {
+	const sessionId = props.session?.sessionId;
+	if (!sessionId) {
+		ctx.finish();
+		return;
+	}
+	for (let attempt = 0; attempt < 8; attempt++) {
+		if (!state.chatting) return; // 已收到 done/error 终态
+		// 探测运行态：探测请求本身失败时保守视为仍在跑，靠 stream 连接结果判定
+		let running = true;
+		try {
+			const res: any = await templateApi.runStatus(sessionId);
+			running = res?.data?.running === true;
+		} catch (e) {
+			/* 探测失败不阻断：继续走 stream 连接 */
+		}
+		if (!running) {
+			// 任务已在断连窗口内结束（终态消息已落库）：重载收口
+			ctx.finish();
+			await reloadRunTerminal();
+			return;
+		}
+		// 连接 stream 端点：回放 since 之后的历史事件 + 实时续接
+		const controller = new AbortController();
+		state.abortController = controller;
+		try {
+			const token = Local.get('token') as string | undefined;
+			const resp = await fetch(templateApi.streamUrl(sessionId, state.lastSeq), {
+				headers: token ? { Authorization: 'Bearer ' + token } : {},
+				signal: controller.signal,
+			});
+			if (!resp.ok || !resp.body) {
+				// 连接被拒（会话已删除/权限变化）：终止观察
+				ctx.finish();
+				return;
+			}
+			await consumeSse(resp, ctx);
+			if (!state.chatting) return; // done/error 已收口
+			// 流结束但未终态（服务端断开/任务仍在跑）：探测后重连
+		} catch (e: any) {
+			if (e?.name === 'AbortError') {
+				// 会话切换/组件卸载触发的主动断开：静默收口（后台任务不受影响）
+				ctx.finish();
+				return;
+			}
+			console.error(e);
+		}
+		// 网络异常/未终态断开：指数退避后重连
+		await new Promise((r) => setTimeout(r, Math.min(30000, 1000 * Math.pow(2, attempt))));
+	}
+	// 重连次数用尽（长时间断网）：收口并提示（任务仍在后台跑，重开页面可再次续看）
+	ctx.finish();
+	ElMessage.info('连接已断开，任务仍在后台处理，重新打开会话可继续查看进度');
+	await reloadRunTerminal();
+};
+
+/**
+ * 续看后台任务：页面重开/刷新时探测到任务运行中（loadSessionData 调用）——
+ * 回放 since 之后全部历史事件（含已发生的思考过程）到新 assistant 占位消息，
+ * 再实时续接。与 onSend 共用 createRunContext，视觉与现场直播一致
+ */
+const observeRunning = async (since: number) => {
+	if (!props.session?.sessionId || state.chatting) return;
+	state.chatting = true;
+	state.lastSeq = since;
+	const ctx = createRunContext(false, true);
+	await observeLoop(ctx);
+};
+
+const onSend = async (rawOpts?: any) => {
+	const opts = isConfirmOpts(rawOpts) ? rawOpts : null;
+	// 普通对话需有输入；确认动作（APPROVE 空输入）由卡片按钮触发，绕过空输入检查
+	if ((!opts && !state.inputText.trim()) || !props.session?.sessionId) return;
+
+	// 新一轮对话回到自动跟随模式
+	userScrolledUp.value = false;
+
+	// 先把用户输入加入消息列表（UI 即时反馈；确认动作用自然语言展示，历史可读）
+	state.messages.push({
+		role: 'user',
+		content: opts ? opts.displayText : state.inputText,
+		created: new Date().toISOString(),
+	});
+
+	const userInput = opts ? opts.input : state.inputText;
+	const confirmAction = opts ? opts.confirmAction : '';
+	const styleUpgrade = state.pendingStyleUpgrade;
+	const deepRefresh = state.pendingDeepRefresh;
+	const fullRefresh = state.pendingFullRefresh;
+	const feedback = state.pendingFeedback;
+	state.inputText = '';
+	state.chatting = true;
+	// 新任务 = 新事件序列（RunChannel seq 从 1 重新计数）：续连游标归零
+	state.lastSeq = 0;
+
 	if (state.abortController) {
 		state.abortController.abort();
-		state.abortController = null;
 	}
-	state.chatting = false;
+	const controller = new AbortController();
+	state.abortController = controller;
+
+	// 本轮流式上下文（占位消息 + 事件分发 + 节流渲染）
+	const ctx = createRunContext(styleUpgrade, false);
+
+	try {
+		const token = Local.get('token') as string | undefined;
+		const resp = await fetch(templateApi.chatUrl(props.session.sessionId), {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				...(token ? { Authorization: 'Bearer ' + token } : {})
+			},
+			body: JSON.stringify({
+				input: userInput,
+				currentFile: props.currentFile || '',
+				focusSectionId: props.focusSection || '',
+				focusElementHint: props.focusElementHint || '',
+				styleUpgrade,
+				deepRefresh,
+				fullRefresh,
+				// 焕新意见（可空）：后端注入焕新提示词做定向修正，未填时按轮换方向焕新
+				feedback: feedback || '',
+				fullInject: state.fullInject === true,
+				// 设计稿先行模式确认动作（APPROVE/REJECT，可空）：仅 design 会话的后端消费，
+				// 管线会话后端忽略（isDesignMode 前置判断），旧后端无此字段也不受影响
+				confirmAction: confirmAction || undefined
+			}),
+			signal: controller.signal
+		});
+		// 请求已发出，升级标志复位（下一轮普通对话不带该标志）
+		state.pendingStyleUpgrade = false;
+		state.pendingDeepRefresh = false;
+		state.pendingFullRefresh = false;
+		state.pendingFeedback = '';
+
+		if (!resp.ok || !resp.body) {
+			let msg = '请求失败（' + resp.status + '）';
+			try {
+				const errRes = await resp.json();
+				if (errRes && errRes.msg) msg = errRes.msg;
+			} catch (err) {
+				/* ignore */
+			}
+			// HTTP 层失败同样写入占位消息触发失败态 UI
+			const last = state.messages[ctx.assistantIndex];
+			if (last && !last.content) {
+				last.content = FAIL_MSG_PREFIX + msg;
+			}
+			// 401 = 登录过期/已在别处登录：AI 对话走原生 fetch，axios 的 401 拦截器不生效，
+			// 此处清缓存 + 弹窗提示 + 跳转管理后台入口（/fastcms → SPA 检测无 token 自动进登录页）
+			if (resp.status === 401) {
+				Session.clear();
+				Local.clear();
+				ctx.finish();
+				ElMessageBox.alert('你已被登出，请重新登录', '提示', {})
+					.then(() => { window.location.href = '/fastcms'; })
+					.catch(() => {});
+				return;
+			}
+			ElMessage.error(msg);
+			ctx.finish();
+			return;
+		}
+
+		await consumeSse(resp, ctx);
+		// 流结束但后端未发 done/error：任务在后台仍可能运行（连接中断/另一端停止/
+		// 服务端静默终止）——转观察循环：仍在跑则增量续连，已结束则重载终态消息收口
+		if (state.chatting) {
+			await observeLoop(ctx);
+		}
+	} catch (e: any) {
+		if (e?.name === 'AbortError') {
+			// 会话切换/组件卸载触发的主动断开（停止不再走本地 abort）：静默收口
+			ctx.finish();
+		} else {
+			console.error(e);
+			// 连接异常但任务与连接已解耦（断网/代理断开）：任务大概率仍在后台跑——
+			// 转 stream 端点续连；确认无运行任务时由观察循环重载终态收口
+			await observeLoop(ctx);
+		}
+	}
+};
+
+/**
+ * 显式停止：调用 stop 端点（断开连接不取消任务——停止只能显式点击）。
+ * 停止后任务线程优雅中断并落一条"已停止"消息（含进度明细 + 本轮思考过程），
+ * 随后服务端 complete 流连接 → 前端流结束兜底自动重载终态消息；本地不主动
+ * abort（abort 会跳过该重载路径，丢失停止反馈）
+ */
+const onStop = async () => {
+	if (!props.session?.sessionId || state.stopping || !state.chatting) return;
+	state.stopping = true;
+	try {
+		await templateApi.stopSession(props.session.sessionId);
+	} catch (e: any) {
+		console.error(e);
+		ElMessage.error('停止请求失败：' + (e?.message || '网络错误'));
+		// 停止请求失败兜底：仅断开本地连接（任务仍在后台跑，重开页面可续看）
+		if (state.abortController) {
+			state.abortController.abort();
+			state.abortController = null;
+		}
+		state.chatting = false;
+	} finally {
+		state.stopping = false;
+	}
 };
 
 /**
@@ -783,6 +1233,58 @@ const onResumeMissing = () => {
 	if (state.chatting || !props.session?.sessionId) return;
 	state.inputText = '请补齐缺失的文件';
 	onSend();
+};
+
+// ==================== 设计稿先行模式：确认卡片动作 ====================
+
+/**
+ * 清除待确认卡片（按钮点击后立即置 handled 防重复提交；重开卡片由后端
+ * 下一次 confirm_request 事件或刷新恢复重建，历史卡片只读展示）
+ */
+const markConfirmHandled = (msg: any) => {
+	if (msg?.confirmCard) {
+		msg.confirmCard.handled = true;
+	}
+};
+
+/**
+ * 确认转化：APPROVE 空输入（后端从 plan.json 恢复 CONVERTING 推进），
+ * 转化过程仍走 SSE 流水（进度/降级/结果播报与设计段一致）
+ */
+const onConfirmApprove = (msg: any) => {
+	if (state.chatting || isApplied.value) return;
+	markConfirmHandled(msg);
+	onSend({ confirmAction: 'APPROVE', input: '', displayText: '确认设计稿，开始转化为模板' });
+};
+
+/**
+ * 驳回修改：弹窗收集修改意见（REJECT + input=意见文本，后端注入下一轮设计提示词
+ * "用户具体不满"段），取消弹窗则卡片保留不动
+ */
+const onConfirmReject = async (msg: any) => {
+	if (state.chatting || isApplied.value) return;
+	let input = '';
+	try {
+		const { value } = await ElMessageBox.prompt(
+			'请描述对设计稿的修改意见，AI 将按意见重新设计（留空则直接重新设计）',
+			'驳回设计稿',
+			{
+				confirmButtonText: '重新设计',
+				cancelButtonText: '取 消',
+				inputType: 'textarea',
+				inputPlaceholder: '例如：主色换成暖色调，首页 banner 改成轮播图，导航改为深色底',
+			}
+		);
+		input = (value || '').trim();
+	} catch {
+		return;
+	}
+	markConfirmHandled(msg);
+	onSend({
+		confirmAction: 'REJECT',
+		input,
+		displayText: input ? `驳回设计稿：${input}` : '驳回设计稿，重新设计',
+	});
 };
 
 const onRollback = () => {
@@ -859,6 +1361,77 @@ const onUpgradeLegacy = () => {
 		onSend();
 	}).catch(() => {});
 };
+
+/**
+ * 「智能焕新」（升级完成后的精准重刷，默认推荐）
+ *
+ * 先由 AI 评估各页面的方向耦合度，判定最小重做集合（必含 _layout.html 公共布局，
+ * 通常还有首页等含 hero/深色区的页面）；未选中的页面保留当前版本，经 tokens.css
+ * 变量自动换肤。耗时可降到全量的 1/3 左右。评估失败自动回退全量焕新。
+ * 对话框内可填写对当前样式的具体意见（如「配色太暗」），AI 优先定向修正这些问题。
+ */
+const onDeepRefresh = () => {
+	if (!props.session?.sessionId || state.chatting) return;
+	// 对话修改整合提示（后端 adjustCount 驱动）：让用户放心焕新不会丢掉微调劳动
+	const adjustNote = state.legacyAdjustCount > 0
+		? `\n\n注意：焕新前你已做过 ${state.legacyAdjustCount} 轮对话微调，本轮焕新会把它们整合进底稿基线（原版本自动另存备份），不会丢失。`
+		: '';
+	ElMessageBox.prompt(
+		'智能焕新：AI 先评估哪些页面与新设计方向强耦合（公共布局/首页等），只重做这些页面；其余页面保留并通过主题变量自动换肤，速度快、消耗少。评估失败时自动回退全量焕新。JS 功能与元素 id 仍全部保留，原备份不变。\n\n可选：填写对当前样式的具体意见（如「配色太暗」「卡片太密」），AI 将优先修正这些问题' + adjustNote,
+		'智能焕新',
+		{
+			confirmButtonText: '开始焕新',
+			cancelButtonText: '取 消',
+			type: 'warning',
+			inputType: 'textarea',
+			inputPlaceholder: '对当前样式的具体意见（可空，不填则按轮换设计方向焕新）',
+			inputValue: ''
+		}
+	).then(({ value }: any) => {
+		state.upgrading = true;
+		// 走标准 chat 流：携带 styleUpgrade + deepRefresh 标志（后端先做范围评估再重置计划）
+		state.inputText = '智能焕新样式组件化（AI 评估范围，重做方向耦合页面含 _layout.html，其余保留换肤，重写组件样式库，保留网站功能）';
+		state.pendingStyleUpgrade = true;
+		state.pendingDeepRefresh = true;
+		state.pendingFullRefresh = false;
+		state.pendingFeedback = (value || '').trim();
+		onSend();
+	}).catch(() => {});
+};
+
+/**
+ * 「全量焕新」（整体换设计方向的兜底选项）
+ *
+ * 跳过范围评估，全部计划页面（含 _layout.html）恢复原始备份底稿重新改造一轮。
+ * 适合对整体风格彻底不满意、想整套换设计方向的场景。同样支持填写具体意见定向修正。
+ */
+const onFullRefresh = () => {
+	if (!props.session?.sessionId || state.chatting) return;
+	// 对话修改整合提示（后端 adjustCount 驱动）：让用户放心焕新不会丢掉微调劳动
+	const adjustNote = state.legacyAdjustCount > 0
+		? `\n\n注意：焕新前你已做过 ${state.legacyAdjustCount} 轮对话微调，本轮焕新会把它们整合进底稿基线（原版本自动另存备份），不会丢失。`
+		: '';
+	ElMessageBox.prompt(
+		'全量焕新：跳过范围评估，全部页面（含 _layout.html 公共布局）恢复原始底稿、以新的设计方向整体重新改造，并重写组件样式库。耗时与 token 消耗为智能焕新的数倍，建议先试智能焕新。是否继续？\n\n可选：填写对当前样式的具体意见（如「配色太暗」「布局太乱」），AI 将优先修正这些问题' + adjustNote,
+		'全量焕新',
+		{
+			confirmButtonText: '开始全量焕新',
+			cancelButtonText: '取 消',
+			type: 'warning',
+			inputType: 'textarea',
+			inputPlaceholder: '对当前样式的具体意见（可空，不填则按轮换设计方向焕新）',
+			inputValue: ''
+		}
+	).then(({ value }: any) => {
+		state.upgrading = true;
+		state.inputText = '全量焕新样式组件化（重置计划，全部页面含 _layout.html 重新改造，重写组件样式库，保留网站功能）';
+		state.pendingStyleUpgrade = true;
+		state.pendingDeepRefresh = true;
+		state.pendingFullRefresh = true;
+		state.pendingFeedback = (value || '').trim();
+		onSend();
+	}).catch(() => {});
+};
 const onPreviewTemplate = () => {
 	if (!props.session?.templateName) return;
 	// 调整型会话工作目录即正式模板目录，直接预览首页；
@@ -911,9 +1484,17 @@ const onChatAreaScroll = () => {
 	userScrolledUp.value = el.scrollHeight - el.scrollTop - el.clientHeight > 40;
 };
 
+// ===== 渲染窗口与渲染缓存（渲染进程内存治理） =====
+// 仅渲染最近 N 条消息：超长升级会话历史几十轮，全量渲染 DOM 会把内存推到 GB 级
+const MESSAGE_RENDER_LIMIT = 30;
+const renderLimit = ref(MESSAGE_RENDER_LIMIT);
+const visibleMessages = computed(() => state.messages.slice(-renderLimit.value));
+// "最后一条消息"用引用比较（配合 visibleMessages 的局部下标偏移，index 比较会错位）
+const isLastMessage = (msg: any) => msg === state.messages[state.messages.length - 1];
+
 // 判断消息是否处于"思考中"：对话进行中 + 最后一条消息 + 正文尚未开始输出
-const reasoningThinking = (msg: any, msgIndex: number) => {
-	return state.chatting && msgIndex === state.messages.length - 1 && !msg.content;
+const reasoningThinking = (msg: any) => {
+	return state.chatting && isLastMessage(msg) && !msg.content;
 };
 
 // 进度卡已完成文件数
@@ -921,10 +1502,29 @@ const progressDoneCount = (msg: any) => {
 	return (msg.progress || []).filter((f: any) => f.status === 'done').length;
 };
 
+// 思考过程渲染（消息级缓存）：流式期间每 150ms 的状态更新会触发组件重渲，
+// 模板中调用的渲染函数若不缓存，所有历史消息每次都全量重算 HTML（KB 级思考文本
+// ×几十条 × 6.6 次/秒 = 分配速率爆炸，Chrome 渲染进程内存飙升数 GB）。
+// 缓存键 = (消息对象, reasoning 全文, thinking 态)：输入未变直接复用旧 HTML，
+// v-html 新旧值相同即跳过 DOM 更新；仅流式中的最后一条真正重算（且渲染窗口 6000 已限成本）
+const reasoningCache = new WeakMap<object, { src: string; thinking: boolean; html: string }>();
+const renderReasoning = (msg: any): string => {
+	const text = msg.reasoning;
+	if (!text) return '';
+	const thinking = reasoningThinking(msg);
+	const cached = reasoningCache.get(msg);
+	if (cached && cached.src === text && cached.thinking === thinking) {
+		return cached.html;
+	}
+	const html = doRenderReasoning(text, thinking);
+	reasoningCache.set(msg, { src: text, thinking, html });
+	return html;
+};
+
 // 思考过程渲染：模型思考文本常混有 markdown 结构（## 标题、- 列表、**加粗**），
 // 纯文本显示这些符号可读性差。这里先做 HTML 转义（防注入），再做轻量 markdown
 // 格式化 + 超长段落按句断行，中英文都适用
-const renderReasoning = (text: string, thinking: boolean): string => {
+const doRenderReasoning = (text: string, thinking: boolean): string => {
 	if (!text) return '';
 	const escaped = text
 		.replace(/&/g, '&amp;')
@@ -1007,6 +1607,16 @@ const breakSentences = (s: string): string =>
 	overflow-y: auto;
 	padding: 8px;
 	background: var(--el-fill-color-lighter);
+	/* 渲染窗口：点击加载更早消息的入口条 */
+	.load-earlier {
+		text-align: center;
+		margin: 4px 0 10px;
+		font-size: 12px;
+		color: var(--el-color-primary);
+		cursor: pointer;
+		user-select: none;
+		&:hover { text-decoration: underline; }
+	}
 	border-radius: 6px;
 	margin-bottom: 12px;
 	min-height: 200px;
@@ -1045,6 +1655,82 @@ const breakSentences = (s: string): string =>
 		border: 1px solid var(--el-border-color-lighter);
 		border-radius: 6px;
 		overflow: hidden;
+	}
+
+	// 设计稿先行模式：审计通过后的确认卡片（问题清单 + 预览链接 + 确认/驳回）
+	.confirm-box {
+		margin-bottom: 8px;
+		border: 1px solid var(--el-color-success-light-5);
+		border-left: 3px solid var(--el-color-success);
+		border-radius: 6px;
+		background: var(--el-color-success-light-9);
+		padding: 10px 12px;
+
+		.confirm-header {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			font-size: 13px;
+			font-weight: 600;
+			color: var(--el-text-color-primary);
+
+			.ci-done {
+				color: var(--el-color-success);
+			}
+
+			.confirm-preview {
+				margin-left: auto;
+				font-size: 12px;
+				font-weight: 400;
+			}
+		}
+
+		.confirm-issues {
+			margin: 8px 0 0;
+			padding: 8px 10px;
+			border-radius: 4px;
+			background: var(--el-bg-color);
+			border: 1px solid var(--el-border-color-lighter);
+		}
+
+		.ci-title {
+			font-size: 12px;
+			font-weight: 600;
+			color: var(--el-text-color-regular);
+			margin-bottom: 6px;
+		}
+
+		.ci-item {
+			display: flex;
+			align-items: baseline;
+			gap: 8px;
+			padding: 2px 0;
+			font-size: 12px;
+			color: var(--el-text-color-regular);
+			line-height: 1.6;
+
+			.ci-code {
+				flex-shrink: 0;
+			}
+		}
+
+		.confirm-actions {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-top: 10px;
+
+			.ci-auto-note {
+				font-size: 12px;
+				color: var(--el-text-color-secondary);
+			}
+		}
+
+		.confirm-done-note {
+			margin-top: 10px;
+			font-size: 12px;
+			color: var(--el-text-color-secondary);
+		}
 	}
 
 	.progress-header {
@@ -1113,6 +1799,45 @@ const breakSentences = (s: string): string =>
 		&.failed {
 			color: var(--el-color-danger);
 		}
+	}
+
+	// AI 消息底部元信息条（token 消耗 + 复制按钮）：hover 该条消息时浮出
+	.message-meta {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-top: 6px;
+		font-size: 12px;
+		color: var(--el-text-color-secondary);
+		opacity: 0;
+		transition: opacity 0.15s ease;
+		user-select: none;
+
+		.meta-tokens {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+		}
+
+		.meta-copy {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+			margin-left: auto;
+			cursor: pointer;
+			color: var(--el-text-color-secondary);
+			transition: color 0.15s ease;
+
+			&:hover {
+				color: var(--el-color-primary);
+			}
+		}
+	}
+
+	// hover 规则必须用 & 引用父级 .chat-message：直接写 .chat-message:hover 会被 SCSS
+	// 拼接成 ".chat-message .chat-message:hover .message-meta"（永不匹配，元信息条永远不显示）
+	&:hover .message-meta {
+		opacity: 1;
 	}
 
 	// 生成过程中的阶段性状态条（输入框上方：正在接收文件内容等）
@@ -1259,6 +1984,19 @@ const breakSentences = (s: string): string =>
 		border-radius: 4px;
 	}
 
+	// 全量注入开启时常驻警示（输入框正下方，警示色与点选提示的引导色区分）
+	.full-inject-tip {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 6px;
+		padding: 4px 8px;
+		font-size: 12px;
+		color: var(--el-color-warning);
+		background: var(--el-color-warning-light-9);
+		border-radius: 4px;
+	}
+
 	.chat-actions {
 		margin-top: 8px;
 		display: flex;
@@ -1268,6 +2006,24 @@ const breakSentences = (s: string): string =>
 			display: flex;
 			align-items: center;
 			gap: 8px;
+		}
+
+		// 全量注入开关（选区按钮右侧）：开关 + 标签，warning 色提示"昂贵模式"
+		.full-inject-toggle {
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			cursor: default;
+
+			.full-inject-label {
+				font-size: 12px;
+				color: #909399;
+				user-select: none;
+			}
+
+			&:has(.el-switch.is-checked) .full-inject-label {
+				color: #e6a23c;
+			}
 		}
 
 		// 工具按钮不存在时也保持发送按钮靠右

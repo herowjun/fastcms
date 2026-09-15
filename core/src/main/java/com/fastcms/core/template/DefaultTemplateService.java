@@ -21,6 +21,7 @@ import com.fastcms.common.exception.I18nFastcmsException;
 import com.fastcms.common.model.TreeNode;
 import com.fastcms.common.model.TreeNodeConvert;
 import com.fastcms.common.utils.DirUtils;
+import com.fastcms.common.utils.FastcmsInstallState;
 import com.fastcms.common.utils.FileUtils;
 import com.fastcms.common.utils.StrUtils;
 import com.fastcms.entity.Config;
@@ -138,6 +139,11 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
 
     @Override
     public Template getCurrTemplate() {
+        // 未安装模式下配置缓存为空，往下走会触发 saveConfig 写库（哑数据源不可用），直接返回 null；
+        // 调用方 getTemplateList 等已按可空处理，未安装期间也不会有模板渲染请求（InstallGuardFilter 已拦截）
+        if (FastcmsInstallState.isInstallMode()) {
+            return null;
+        }
         Config config = configService.findByKey(FastcmsConstants.TEMPLATE_ENABLE_ID);
         if(config == null) {
             //#I4NI6J https://gitee.com/xjd2020/fastcms/issues/I4NI6J
@@ -151,6 +157,10 @@ public class DefaultTemplateService<T extends TreeNode> implements TemplateServi
 
     @Override
     public void setDefaultTemplate() {
+        // 未安装模式下哑数据源不可用，跳过默认模板写配置，安装完成重启后由初始化逻辑补齐
+        if (FastcmsInstallState.isInstallMode()) {
+            return;
+        }
         List<Template> templateList = getTemplateList();
         if(CollectionUtils.isNotEmpty(templateList)) {
             String config = configService.getValue(FastcmsConstants.TEMPLATE_ENABLE_ID);

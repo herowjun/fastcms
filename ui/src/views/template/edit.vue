@@ -152,7 +152,7 @@
 
         <!-- AI 对话抽屉（全屏覆盖，完全独立于主编辑界面：调整型/会话编辑视图为左预览右对话，
              AI 每写一个文件自动刷新预览；关闭抽屉不影响主界面任何状态） -->
-        <el-drawer v-model="state.aiDrawerVisible" size="100%" :close-on-click-modal="false" custom-class="ai-template-drawer">
+        <el-drawer v-model="state.aiDrawerVisible" size="100%" :close-on-click-modal="false" custom-class="ai-template-drawer" :before-close="onAiDrawerBeforeClose">
             <template #header>
                 <div class="drawer-header">
                     <span class="drawer-title">{{ state.sessionView ? '编辑 AI 模板' : (state.aiMode === 'adjust' ? 'AI 调整模板' : 'AI 生成模板') }}</span>
@@ -209,7 +209,8 @@
                                  :session-active="state.sessionView"
                                  :image-pick-mode="state.imagePickMode" :section-select-mode="state.sectionSelectMode"
                                  @select-session="onSelectAiSession" @new-session="onNewAiSession"
-                                 @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @applied="onAiTemplateApplied"
+                                 @files-changed="onAiFilesChanged" @file-written="onAiFileWritten" @switch-file="onAiSwitchFile"
+                                 @applied="onAiTemplateApplied"
                                  @edit-files="onEditSessionFiles"
                                  @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
                     </div>
@@ -324,10 +325,50 @@
                     <el-input v-model="state.createDialog.templateName" placeholder="英文目录名，以字母开头，如 my-company"
                               @input="onTemplateNameInput" />
                 </el-form-item>
-                <el-form-item label="需求描述" required>
+                <el-form-item label="需求描述"
+                              :required="!(state.createDialog.createMode === 'design' && state.createDialog.importFile)">
                     <el-input v-model="state.createDialog.requirement" type="textarea" :rows="4"
-                              placeholder="描述模板需求，例如：企业官网模板，蓝色调，响应式设计" />
+                              :placeholder="state.createDialog.createMode === 'design' && state.createDialog.importFile
+                                  ? '可选。补充说明站点定位（如：企业官网），AI 仿写时参考；与上传文件冲突时以文件为准'
+                                  : '描述模板需求，例如：企业官网模板，蓝色调，响应式设计'" />
                 </el-form-item>
+                <el-form-item label="生成模式">
+                    <el-radio-group v-model="state.createDialog.createMode">
+                        <!-- element-plus 2.3.x：radio 用 label 绑定值（value 属性为新版 API，此处不生效） -->
+                        <el-radio label="pipeline">组件编排</el-radio>
+                        <el-radio label="design">AI 自主设计</el-radio>
+                    </el-radio-group>
+                    <div class="mode-tip">{{ createModeTip }}</div>
+                </el-form-item>
+                <template v-if="state.createDialog.createMode === 'design'">
+                    <!-- 参考文件（可选）：选择即切换为仿写链路——提交路由见 onCreateConfirm -->
+                    <el-form-item label="参考 HTML">
+                        <el-upload accept=".html,.htm,.zip" :limit="1" :auto-upload="false"
+                                   :file-list="state.createDialog.importFileList"
+                                   :on-change="onImportFileChange" :on-remove="onImportFileRemove"
+                                   :on-exceed="onImportFileExceed">
+                            <el-button type="primary" plain>
+                                <el-icon><ele-UploadFilled /></el-icon>选择 HTML / ZIP 文件
+                            </el-button>
+                            <template #tip>
+                                <div class="el-upload__tip">可选。单个 .html：首页 1:1 保真、子页按其设计语言仿写；zip 站包：整站 1:1 迁移</div>
+                            </template>
+                        </el-upload>
+                    </el-form-item>
+                    <!-- 设计方向：仅无参考文件时可选（有文件时文件本身即方向） -->
+                    <el-form-item v-if="!state.createDialog.importFile" label="设计方向">
+                        <el-select v-model="state.createDialog.designDirection" placeholder="AI 自选方向" clearable style="width: 100%">
+                            <el-option v-for="d in state.designOptions.directions" :key="d.key"
+                                       :label="d.name" :value="d.key">
+                                <span>{{ d.name }}</span>
+                                <span class="direction-summary">{{ d.summary }}</span>
+                            </el-option>
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="确认方式">
+                        <el-checkbox v-model="state.createDialog.confirmAuto">审计通过后自动转化（跳过人工确认）</el-checkbox>
+                    </el-form-item>
+                </template>
                 <el-form-item label="移动端适配">
                     <el-checkbox v-model="state.createDialog.mobileAdaptive">生成响应式布局（多端断点 + 移动端汉堡菜单）</el-checkbox>
                 </el-form-item>
@@ -374,7 +415,9 @@
                         <el-icon><ele-Clock /></el-icon>历史生成记录
                     </el-button>
                     <el-button @click="state.createDialog.visible = false">取 消</el-button>
-                    <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">开始生成</el-button>
+                    <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">
+                        开始生成
+                    </el-button>
                 </template>
                 <template v-else>
                     <el-button @click="state.createDialog.view = 'create'">返回新建</el-button>
@@ -459,10 +502,25 @@ const state = reactive({
         requirement: '',
         // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
         mobileAdaptive: true,
+        // 生成模式（UI 两项）：pipeline=组件编排（默认，兼容旧客户端不传字段的后端口径）；
+        // design=AI 自主设计。'import' 不再是 UI 选项——自主设计 + 参考文件时提交路由改走 import 口径
+        createMode: 'pipeline' as 'pipeline' | 'design',
+        // 设计稿模式：设计方向 key（空 = AI 自选；选项来自后端方向资产库，不写死）
+        designDirection: '',
+        // 设计稿模式：审计通过后自动转化（跳过人工确认；关闭时审计通过停在确认卡片）
+        confirmAuto: false,
+        // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 uploadReference 提交）
+        importFile: null as File | null,
+        importFileList: [] as any[],
         loading: false,
         // 历史生成型会话列表（未绑定 templateId，含已应用/未应用）
         sessions: [] as any[],
         historyLoading: false
+    },
+    // 设计稿模式选项（打开新建对话框时拉取）：directions=方向资产清单（选项始终显示，不受后端开关控制）
+    designOptions: {
+        loaded: false,
+        directions: [] as any[]
     },
     // 新建调整会话按钮 loading
     creatingAiSession: false,
@@ -771,7 +829,7 @@ const applyImagePickHooks = () => {
             style.textContent = `
                 img { outline: 2px dashed #e6a23c !important; outline-offset: 2px; cursor: pointer !important; }
                 img:hover { outline-style: solid !important; filter: brightness(1.08); }
-                [data-ai-slot] { outline: 2px dashed var(--el-color-primary, #409eff) !important; outline-offset: 2px; cursor: pointer !important; }
+                [data-ai-slot] { outline: 2px dashed var(--el-color-primary, #3b82f6) !important; outline-offset: 2px; cursor: pointer !important; }
                 [data-ai-slot]:hover { outline-style: solid !important; filter: brightness(1.08); }
             `;
             (doc.head || doc.documentElement).appendChild(style);
@@ -1158,14 +1216,39 @@ const onPickUploadError = () => {
  *
  * 会话编辑视图下若预览入口尚未初始化（新会话首个页面还没写盘），
  * 先刷新会话文件树并初始化预览入口——首个可路由 HTML 落地的瞬间预览自动出现；
- * 入口就绪后仅刷新预览键（key 变化重载 iframe）
+ * 入口就绪后仅刷新预览键（key 变化重载 iframe），但若落盘的是下拉选项之外的新
+ * 可路由 HTML（设计稿逐页落盘 / 转化产物逐文件落盘），须重载会话文件树让下拉
+ * 选项同步长出来——树只在首个文件落地时加载一次，后续新页将永远不可选
  */
-const onAiFileWritten = (_path: string) => {
-    if (state.sessionView && !state.aiPreviewEntry) {
-        loadSessionFileTree().then(() => initAiPreviewEntry());
-        return;
+const onAiFileWritten = (path: string) => {
+    if (state.sessionView) {
+        if (!state.aiPreviewEntry) {
+            loadSessionFileTree().then(() => initAiPreviewEntry());
+            return;
+        }
+        // 树路径含模板目录前缀（如 xxx/index.html），与后端推送的模板内相对路径按后缀匹配
+        const known = previewPageOptions.value.some((p) => p === path || p.endsWith('/' + path));
+        if (isRoutableHtml(path) && !known) {
+            loadSessionFileTree();
+        }
     }
     state.aiPreviewKey = Date.now();
+};
+
+/**
+ * AI 页面自动切换（SSE switch-file 事件）：调整对话中用户说"改首页某某问题"，
+ * 后端在流式期间识别到 AI 正在处理的首个可路由 HTML 即推送该事件，
+ * 实时预览立即切到目标页面（旧版本先行展示，文件写盘后经预览键自动重载新内容）
+ *
+ * 后端推送的是模板内相对路径（如 index.html），主编辑界面的预览选项含模板目录前缀
+ * （如 my-company/index.html），按后缀匹配到实际选项再切换，与下拉框保持一致
+ */
+const onAiSwitchFile = (path: string) => {
+    if (!isRoutableHtml(path)) return;
+    const target = previewPageOptions.value.find((p: string) => p === path || p.endsWith('/' + path));
+    if (target && target !== state.aiPreviewEntry) {
+        state.aiPreviewEntry = target;
+    }
 };
 
 /**
@@ -1223,6 +1306,33 @@ const onOpenAiAdjust = async () => {
     }
 };
 
+/** 生成模式提示：随选择与参考文件切换（文案与后端默认开关口径一致） */
+const createModeTip = computed(() => {
+    if (state.createDialog.createMode === 'design') {
+        return state.createDialog.importFile
+            ? '已选参考文件：AI 以其为权威仿写——单个 HTML 首页 1:1 保真、子页继承其设计语言；zip 整站 1:1 迁移'
+            : 'AI 自主设计整页视觉：灵活度高、效果上限高，但耗时与 token 成本约为组件模式的 2~3 倍。可上传参考 HTML 让 AI 照其仿写';
+    }
+    return '组件拼装 + 定向润色：快、稳、省 token，由组件数量决定丰富度（默认模式）';
+});
+
+/**
+ * 拉取设计稿先行模式的方向清单（打开新建对话框时调用）。
+ * 模式选项始终显示（不受后端 feature 开关控制）；此处仅拉方向资产清单，
+ * 拉取失败不阻断对话框——方向下拉留空，管线模式与"AI 自选"均不受影响。
+ */
+const loadDesignOptions = async () => {
+    try {
+        const res = await aiApi.designOptions();
+        if (res.data) {
+            state.designOptions.directions = Array.isArray(res.data.directions) ? res.data.directions : [];
+            state.designOptions.loaded = true;
+        }
+    } catch (e) {
+        // 忽略：方向下拉留空（AI 自选仍可用），不打扰用户
+    }
+};
+
 /**
  * 打开 AI 新建模板对话框（generate 模式）
  */
@@ -1231,7 +1341,35 @@ const onOpenAiCreate = () => {
     state.createDialog.templateName = '';
     state.createDialog.requirement = '';
     state.createDialog.mobileAdaptive = true;
+    // 设计模式三字段每次重置（避免上次选择残留：默认管线、方向 AI 自选、审计通过自动转化）
+    state.createDialog.createMode = 'pipeline';
+    state.createDialog.designDirection = '';
+    state.createDialog.confirmAuto = true;
+    // 参考文件每次重置（残留会让用户误以为已选择新文件）
+    state.createDialog.importFile = null;
+    state.createDialog.importFileList = [];
     state.createDialog.visible = true;
+    loadDesignOptions();
+};
+
+/** 参考文件选择（自主设计模式，手动上传暂存待创建会话后提交） */
+const onImportFileChange = (file: any) => {
+    state.createDialog.importFile = (file && file.raw) || null;
+    state.createDialog.importFileList = file ? [{ name: file.name }] : [];
+};
+
+/** 参考文件移除 */
+const onImportFileRemove = () => {
+    state.createDialog.importFile = null;
+    state.createDialog.importFileList = [];
+};
+
+/** 参考文件 limit=1 下重复选择 → 替换既有文件（el-upload 不自动替换，手动接管） */
+const onImportFileExceed = (files: any[]) => {
+    const file = files && files[0];
+    if (!file) return;
+    state.createDialog.importFile = file;
+    state.createDialog.importFileList = [{ name: file.name }];
 };
 
 /**
@@ -1291,11 +1429,15 @@ const onTemplateNameInput = (val: string) => {
 };
 
 /**
- * 确认新建模板：创建生成型会话并自动发送首条需求
+ * 确认新建模板：创建生成型会话并自动发送首条需求。
+ * 自主设计模式带参考文件：创建会话（createMode=design）→ 上传 HTML（同步 ingest，
+ * 后端归一为 import 血统）→ 自动发送消息触发转化（单文件 landing 起步 DESIGNING，AI 仿写子页；zip 起步 CONVERTING）
  */
 const onCreateConfirm = async () => {
     const name = state.createDialog.templateName.trim();
     const requirement = state.createDialog.requirement.trim();
+    // 自主设计 + 参考文件 = 仿写链路（上传后由后端归一血统）；无文件 = 纯 AI 自主设计
+    const withReference = state.createDialog.createMode === 'design' && !!state.createDialog.importFile;
     if (!name) {
         ElMessage.warning('请输入模板目录名');
         return;
@@ -1304,16 +1446,33 @@ const onCreateConfirm = async () => {
         ElMessage.warning('模板目录名必须以英文字母开头，只能包含字母、数字、下划线、横线');
         return;
     }
-    if (!requirement) {
+    if (!requirement && !withReference) {
         ElMessage.warning('请输入需求描述');
         return;
     }
     state.createDialog.loading = true;
     try {
-        const res = await aiApi.createSession({ templateName: name, requirement, mobileAdaptive: state.createDialog.mobileAdaptive });
+        // 模式只传 pipeline/design 两种；带参考文件时方向不传（文件本身即方向）
+        const d = state.createDialog;
+        const res = await aiApi.createSession({
+            templateName: name, requirement, mobileAdaptive: d.mobileAdaptive,
+            createMode: d.createMode,
+            designDirection: (!withReference && d.designDirection) || undefined,
+            confirmAuto: d.confirmAuto === true
+        });
         if (!res.data) {
             ElMessage.error(res.msg || '创建会话失败');
             return;
+        }
+        if (withReference) {
+            // 上传参考文件（同步完成解压 + 归一化 + plan.json 落盘，秒级；后端归一为 import 血统）
+            const impRes = await aiApi.uploadReference(res.data.sessionId, d.importFile as File);
+            if (!impRes.data) {
+                ElMessage.error(impRes.msg || '导入失败');
+                return;
+            }
+            const report = impRes.data;
+            ElMessage.success(`导入完成：${report.pageCount} 个页面 / ${report.assetCount} 个资产文件，开始转化…`);
         }
         // 会话创建成功：切换到生成模式，直接进入会话编辑视图（左预览右对话），
         // 生成过程中 AI 每写完一个文件实时刷新预览
@@ -1327,9 +1486,11 @@ const onCreateConfirm = async () => {
         state.aiDrawerVisible = true;
         // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
         loadSessionFileTree().then(() => initAiPreviewEntry());
-        // 抽屉渲染后自动发送首条需求（aiChat 内部会等待会话历史加载完成）
+        // 抽屉渲染后自动发送首条消息（aiChat 内部会等待会话历史加载完成）：
+        // 仿写链路触发编排器推进（单文件 landing DESIGNING 起步 / zip CONVERTING 起步）；生成模式发送需求
+        const firstMessage = withReference ? '开始转化导入的模板页面' : requirement;
         nextTick(() => {
-            aiChatRef.value?.autoSend(requirement);
+            aiChatRef.value?.autoSend(firstMessage);
         });
     } catch (e: any) {
         ElMessage.error(e?.message || '创建会话失败');
@@ -1964,6 +2125,20 @@ onMounted(() => {
     // ESC 清除选区锁定（选区模式内点错区块也可直接再点别的区块覆盖，ESC 是快速取消入口）
     window.addEventListener('keydown', onSectionEscKey);
 });
+
+// AI 抽屉关闭前确认：后台有 AI 任务在跑时提示"任务将继续后台处理"——关闭只断开
+// 续看连接，不中断任务（停止只能显式点击聊天内停止按钮）；重开抽屉自动续看思考与进度
+const onAiDrawerBeforeClose = (done: () => void) => {
+    if (aiChatRef.value?.isChatting?.()) {
+        ElMessageBox.confirm(
+            'AI 任务仍在运行，关闭后任务将在后台继续处理，进度与思考过程会保留，可随时重新打开继续查看。是否关闭？',
+            '任务后台运行中',
+            { confirmButtonText: '关 闭', cancelButtonText: '继 续 查 看', type: 'info' }
+        ).then(() => done()).catch(() => {});
+        return;
+    }
+    done();
+};
 
 // AI 抽屉关闭：退出换图/选区模式 + 停止生图轮询 + 关闭换图操作窗 + 重置会话编辑视图
 // （抽屉是完全独立的临时工作台：关闭即整体关闭，主编辑界面不受任何影响；

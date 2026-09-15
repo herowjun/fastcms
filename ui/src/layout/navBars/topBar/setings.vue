@@ -463,6 +463,8 @@ const onColorPickerChange = () => {
 	// 颜色加深
 	document.documentElement.style.setProperty('--el-color-primary-dark-2', `${getDarkColor(getThemeConfig.value.primary, 0.1)}`);
 	document.documentElement.style.setProperty('--el-color-primary', getThemeConfig.value.primary);
+	// 深空蓝渐变（品牌渐变：primary → 加深 0.35，用户改主色时自动跟随）
+	document.documentElement.style.setProperty('--grad', `linear-gradient(135deg, ${getThemeConfig.value.primary} 0%, ${getDarkColor(getThemeConfig.value.primary, 0.35)} 100%)`);
 	// 颜色变浅
 	for (let i = 1; i <= 9; i++) {
 		document.documentElement.style.setProperty(`--el-color-primary-light-${i}`, `${getLightColor(getThemeConfig.value.primary, i / 10)}`);

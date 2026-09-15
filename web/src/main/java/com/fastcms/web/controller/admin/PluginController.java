@@ -17,6 +17,7 @@
 package com.fastcms.web.controller.admin;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fastcms.ai.skill.PluginAssetService;
 import com.fastcms.common.auth.ActionTypes;
 import com.fastcms.common.auth.Secured;
 import com.fastcms.common.constants.FastcmsConstants;
@@ -32,6 +33,7 @@ import com.fastcms.plugin.PluginManagerService;
 import com.fastcms.utils.I18nUtils;
 import org.apache.commons.lang.StringUtils;
 import org.pf4j.Plugin;
+import org.pf4j.PluginManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -57,6 +59,9 @@ public class PluginController {
     @Resource
     private PluginManagerService pluginManagerService;
 
+    @Resource
+    private PluginAssetService pluginAssetService;
+
     /**
      * 插件列表
      * @param pluginId  插件id
@@ -67,8 +72,31 @@ public class PluginController {
     @Secured(name = RESOURCE_NAME_PLUGIN_LIST, resource = "plugin:list", action = ActionTypes.READ)
     public RestResult<Page<PluginManagerService.PluginVo>> list(PageModel page, String pluginId, String provider) {
         PluginManagerService.PluginResult pluginResult = pluginManagerService.getPluginList(page.getPageNum().intValue(), page.getPageSize().intValue(), pluginId, provider);
+        pluginResult.getPluginVoList().forEach(vo -> vo.setTags(
+                pluginAssetService.getPluginAssets(vo.getPluginId(),
+                        pluginClassLoader(vo.getPluginId())).tags()));
         return RestResultUtils.success(new Page<PluginManagerService.PluginVo>(page.getPageNum(), page.getPageSize(), pluginResult.getTotal())
                 .setRecords(pluginResult.getPluginVoList()));
+    }
+
+    /**
+     * 插件资产清单（skill / 能力 / AI 工具 / 组件包，按插件聚合）
+     * @param pluginId  插件id
+     * @return
+     */
+    @GetMapping("assets/{pluginId}")
+    @Secured(name = RESOURCE_NAME_PLUGIN_LIST, resource = "plugin:list", action = ActionTypes.READ)
+    public RestResult<PluginAssetService.PluginAssets> assets(@PathVariable("pluginId") String pluginId) {
+        return RestResultUtils.success(pluginAssetService.getPluginAssets(pluginId, pluginClassLoader(pluginId)));
+    }
+
+    private ClassLoader pluginClassLoader(String pluginId) {
+        try {
+            PluginManager pluginManager = pluginManagerService.getPluginManager();
+            return pluginManager == null ? null : pluginManager.getPluginClassLoader(pluginId);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

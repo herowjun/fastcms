@@ -1,0 +1,25 @@
+{
+  "key": "feedback-spacious",
+  "name": "疏朗留白",
+  "summary": "降低信息密度——减少同屏卡片数量、增大区块间距与内边距、每个区块只保留核心元素，让页面有呼吸感",
+  "tokensOverride": {
+    "stylePreset": "minimal"
+  },
+  "referenceBlocks": [
+    "<section class=\"py-24 md:py-32\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <div class=\"max-w-2xl\">\n      <h2 class=\"text-3xl md:text-4xl font-bold text-slate-900 mb-6\">每区块只讲一件事</h2>\n      <p class=\"text-slate-600 text-lg leading-relaxed mb-8\">标题、一段说明、一个动作——核心元素之外全部裁掉，留白本身就是设计。</p>\n      <a href=\"#\" class=\"text-primary-600 font-semibold hover:text-primary-700 transition\">了解更多 →</a>\n    </div>\n  </div>\n</section>",
+    "<section class=\"py-24 md:py-32 bg-slate-50\">\n  <div class=\"max-w-6xl mx-auto px-4\">\n    <h2 class=\"text-2xl md:text-3xl font-bold text-slate-900 mb-4\">大间距三列</h2>\n    <p class=\"text-slate-500 mb-16\">每行最多三列，列间距 gap-10 起步</p>\n    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-10\">\n      <div class=\"p-2\">\n        <div class=\"w-12 h-12 bg-primary-50 rounded-lg flex items-center justify-center mb-6\"><span class=\"text-primary-600 font-bold text-xl\">01</span></div>\n        <h3 class=\"text-lg font-semibold text-slate-900 mb-4\">无卡片也成立</h3>\n        <p class=\"text-slate-600 text-sm leading-loose\">去卡片化的开放排布，靠间距分组而不是边框分组。</p>\n      </div>\n    </div>\n  </div>\n</section>"
+  ],
+  "do": [
+    "区块垂直间距 py-24 起步（重要分区 py-32）",
+    "每行最多 3 列（grid md:grid-cols-3），列间距 gap-8 以上",
+    "每个区块只保留一个核心信息组（一个标题 + 一段话 + 一个动作）",
+    "卡片内边距 p-8 起步，元素间距 mb-6 起步",
+    "允许去卡片化开放排布（靠留白分组）"
+  ],
+  "dont": [
+    "密集小卡片阵列（同屏 4 列以上的紧凑网格）",
+    "一屏堆三个以上分区（滚动节奏过密）",
+    "卡片内元素贴边（p-4 以下内边距）",
+    "为填满空间保留非核心元素（装饰性占位文字/图标堆砌）"
+  ]
+}

@@ -44,22 +44,38 @@ public class AiUsageRecorder {
     }
 
     /**
-     * 记录一次成功的 AI 调用
+     * 记录一次成功的 AI 调用（走智能体的调用，agentId 落审计支撑智能体用量统计与配额）
      */
-    public void record(Long userId, String scene, String sessionId, String model,
+    public void record(String agentId, Long userId, String scene, String sessionId, String model,
                        Integer promptTokens, Integer completionTokens, Integer totalTokens, long durationMs) {
-        doRecord(userId, scene, sessionId, model, promptTokens, completionTokens, totalTokens, durationMs, true, null);
+        doRecord(agentId, userId, scene, sessionId, model, promptTokens, completionTokens, totalTokens, durationMs, true, null);
     }
 
     /**
-     * 记录一次失败的 AI 调用（失败场景同样占用配额之外的审计价值：定位问题、统计失败率）
+     * 记录一次失败的 AI 调用（走智能体；失败场景同样有审计价值：定位问题、统计失败率）
+     */
+    public void recordError(String agentId, Long userId, String scene, String sessionId, String model,
+                            long durationMs, String errorMsg) {
+        doRecord(agentId, userId, scene, sessionId, model, 0, 0, 0, durationMs, false, truncate(errorMsg, 1000));
+    }
+
+    /**
+     * 记录一次成功的 AI 调用（未走智能体的调用）
+     */
+    public void record(Long userId, String scene, String sessionId, String model,
+                       Integer promptTokens, Integer completionTokens, Integer totalTokens, long durationMs) {
+        doRecord(null, userId, scene, sessionId, model, promptTokens, completionTokens, totalTokens, durationMs, true, null);
+    }
+
+    /**
+     * 记录一次失败的 AI 调用（未走智能体；失败场景同样占用配额之外的审计价值：定位问题、统计失败率）
      */
     public void recordError(Long userId, String scene, String sessionId, String model,
                             long durationMs, String errorMsg) {
-        doRecord(userId, scene, sessionId, model, 0, 0, 0, durationMs, false, truncate(errorMsg, 1000));
+        doRecord(null, userId, scene, sessionId, model, 0, 0, 0, durationMs, false, truncate(errorMsg, 1000));
     }
 
-    private void doRecord(Long userId, String scene, String sessionId, String model,
+    private void doRecord(String agentId, Long userId, String scene, String sessionId, String model,
                           Integer promptTokens, Integer completionTokens, Integer totalTokens,
                           long durationMs, boolean success, String errorMsg) {
         if (!properties.isAuditEnabled()) {
@@ -67,6 +83,7 @@ public class AiUsageRecorder {
         }
         try {
             AiUsageLog usageLog = new AiUsageLog();
+            usageLog.setAgentId(agentId);
             usageLog.setUserId(userId);
             usageLog.setScene(scene);
             usageLog.setSessionId(sessionId);
@@ -80,7 +97,7 @@ public class AiUsageRecorder {
             usageLogService.record(usageLog);
         } catch (Exception e) {
             // 审计落库失败不影响业务主流程
-            log.warn("AI 用量审计记录失败: userId={}, scene={}", userId, scene, e);
+            log.warn("AI 用量审计记录失败: agentId={}, userId={}, scene={}", agentId, userId, scene, e);
         }
     }
 

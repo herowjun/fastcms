@@ -3,6 +3,30 @@
 -- MySQL 5.7 has no ADD COLUMN IF NOT EXISTS; verify the column does not exist before running
 -- ----------------------------
 
+-- ----------------------------
+-- 一键安装向导：安装锁表 + 默认账号首次登录强制改密
+-- ----------------------------
+
+-- 安装锁：存在记录即视为已完成安装（阻止重复安装/重放安装接口）
+CREATE TABLE fastcms_install (
+  id bigint NOT NULL AUTO_INCREMENT,
+  install_time datetime DEFAULT NULL COMMENT '安装完成时间（安装向导执行时更新）',
+  version varchar(32) DEFAULT NULL COMMENT '安装时的系统版本',
+  created datetime DEFAULT NULL,
+  updated datetime DEFAULT NULL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统安装锁：存在记录即视为已完成安装，阻止重复安装与重放安装接口';
+
+-- 已有环境视同已安装，写入锁记录（幂等）
+INSERT INTO fastcms_install (id, install_time, version, created, updated)
+SELECT 1, NOW(), '0.2.0', NOW(), NOW() FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM fastcms_install WHERE id = 1);
+
+-- 默认账号首次登录须强制修改密码（默认密码公开于README，不强制不安全）
+ALTER TABLE `user` ADD COLUMN must_change_pwd tinyint(1) DEFAULT '0' COMMENT '是否必须修改密码：1=首次登录须强制设置新密码，0=正常' AFTER login_time;
+
+UPDATE `user` SET must_change_pwd = 1 WHERE id = 1;
+
 -- api_key nullable + comment (column itself is already nullable, keep comment in sync)
 ALTER TABLE ai_model_config MODIFY COLUMN api_key varchar(255) DEFAULT NULL COMMENT 'API Key (nullable for local providers such as Ollama)';
 
@@ -133,3 +157,46 @@ ALTER TABLE menu ADD COLUMN exclude_template_ids varchar(500) DEFAULT NULL COMME
 
 -- global menus may be excluded from specific sites (comma-separated site keys: domain or path)
 ALTER TABLE menu ADD COLUMN exclude_site_keys varchar(1000) DEFAULT NULL COMMENT '排除显示的站点key列表（域名或路径），逗号分隔（仅全局菜单生效）' AFTER exclude_template_ids;
+
+-- ----------------------------
+-- AI 对话消息 token 用量（每轮 assistant 消息回写，前端 hover 展示；跨轮次聚合，含思考/工具调用轮）
+-- ----------------------------
+ALTER TABLE ai_template_message ADD COLUMN prompt_tokens int DEFAULT NULL COMMENT '本轮输入token（仅assistant，跨轮次聚合）' AFTER reasoning;
+ALTER TABLE ai_template_message ADD COLUMN completion_tokens int DEFAULT NULL COMMENT '本轮输出token（仅assistant）' AFTER prompt_tokens;
+ALTER TABLE ai_template_message ADD COLUMN total_tokens int DEFAULT NULL COMMENT '本轮总token（仅assistant）' AFTER completion_tokens;
+
+-- ----------------------------
+-- 0.3.1: AI 智能体（多智能体架构管理）
+-- ----------------------------
+
+-- AI 智能体配置表（自定义智能体落库，内置智能体由代码注册不落库）
+CREATE TABLE ai_agent (
+  id bigint NOT NULL AUTO_INCREMENT,
+  agent_id varchar(64) NOT NULL COMMENT '智能体业务ID（自定义智能体为 custom-xxx）',
+  name varchar(64) NOT NULL COMMENT '智能体名称',
+  description varchar(255) DEFAULT NULL COMMENT '智能体描述',
+  execution_mode varchar(16) NOT NULL DEFAULT 'chat' COMMENT '执行模式: chat-对话循环 / pipeline-管线驱动（自定义智能体仅允许 chat）',
+  system_prompt text COMMENT '系统提示词（支持 {{site.name}} 等站点变量占位，运行时替换）',
+  model_config_id bigint DEFAULT NULL COMMENT '绑定的模型配置ID（NULL=继承当前激活的对话模型）',
+  temperature double DEFAULT NULL COMMENT '温度（NULL=继承模型配置默认值）',
+  max_tokens int DEFAULT NULL COMMENT 'MaxTokens（NULL=继承模型配置默认值）',
+  skills text COMMENT '绑定的 skill ID JSON 数组（能力白名单）',
+  tools text COMMENT '绑定的工具名 JSON 数组（工具白名单）',
+  daily_token_quota bigint DEFAULT 0 COMMENT '日 token 配额（0=不限）',
+  sort_num int DEFAULT 0 COMMENT '排序（越小越靠前）',
+  status tinyint DEFAULT 1 COMMENT '状态: 1启用 0停用',
+  base_agent_id varchar(64) DEFAULT NULL COMMENT '复制来源智能体ID（内置升级时不动副本，仅提示）',
+  created datetime DEFAULT NULL,
+  updated datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_agent_id (agent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 智能体配置表';
+
+-- 智能体不设独立菜单：功能已合并到「设置/模型」页的 tab 页签中（后端 API 权限 ai:agent:* 保留在 resource 表）
+-- 已有环境若曾安装过智能体菜单（permission.id=45），执行以下语句移除（含角色关联）
+DELETE FROM role_permission WHERE permission_id = 45;
+DELETE FROM permission WHERE id = 45;
+
+-- AI 调用审计日志增加智能体归属列（走智能体的调用记录 agent_id，支撑智能体级配额与用量统计）
+ALTER TABLE ai_usage_log ADD COLUMN agent_id varchar(64) DEFAULT NULL COMMENT '归属智能体ID（builtin.*/custom-*，未走智能体为空）' AFTER session_id;
+ALTER TABLE ai_usage_log ADD INDEX idx_agent_created (agent_id, created);

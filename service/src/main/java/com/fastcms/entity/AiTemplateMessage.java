@@ -59,6 +59,21 @@ public class AiTemplateMessage implements Serializable {
      */
     private String reasoning;
 
+    /**
+     * 本轮输入 token 消耗（仅 assistant 消息，跨轮次聚合：含工具调用/修复轮）
+     */
+    private Integer promptTokens;
+
+    /**
+     * 本轮输出 token 消耗（仅 assistant 消息）
+     */
+    private Integer completionTokens;
+
+    /**
+     * 本轮总 token 消耗（仅 assistant 消息）
+     */
+    private Integer totalTokens;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime created;
 
@@ -76,6 +91,15 @@ public class AiTemplateMessage implements Serializable {
 
     public String getReasoning() { return reasoning; }
     public void setReasoning(String reasoning) { this.reasoning = reasoning; }
+
+    public Integer getPromptTokens() { return promptTokens; }
+    public void setPromptTokens(Integer promptTokens) { this.promptTokens = promptTokens; }
+
+    public Integer getCompletionTokens() { return completionTokens; }
+    public void setCompletionTokens(Integer completionTokens) { this.completionTokens = completionTokens; }
+
+    public Integer getTotalTokens() { return totalTokens; }
+    public void setTotalTokens(Integer totalTokens) { this.totalTokens = totalTokens; }
 
     public LocalDateTime getCreated() { return created; }
     public void setCreated(LocalDateTime created) { this.created = created; }

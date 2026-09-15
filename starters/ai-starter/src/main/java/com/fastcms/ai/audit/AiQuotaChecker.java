@@ -16,6 +16,7 @@
  */
 package com.fastcms.ai.audit;
 
+import com.fastcms.ai.agent.AgentProfile;
 import com.fastcms.ai.autoconfigure.FastcmsAiProperties;
 import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
@@ -62,6 +63,30 @@ public class AiQuotaChecker {
             log.warn("AI 配额超限: userId={}, used={}, quota={}", userId, used, quota);
             throw new AiQuotaExceededException(
                     String.format("今日 AI 用量已达上限（%d/%d token），请明天再试或联系管理员调整配额", used, quota));
+        }
+    }
+
+    /**
+     * 智能体级配额检查：该智能体当日（全体用户合计）消耗达到其日配额时拒绝调用
+     *
+     * <p>配额语义为<b>智能体预算</b>（跨用户累计，{@code AgentProfile.dailyTokenQuota}，
+     * 0/null 不限），与全局用户级配额 {@link #check(Long)} 叠加生效；
+     * 同样继承 check-then-act 软限制语义（见类注释）。</p>
+     */
+    public void checkAgent(AgentProfile profile) {
+        if (profile == null) {
+            return;
+        }
+        long quota = profile.getDailyTokenQuota() == null ? 0L : profile.getDailyTokenQuota();
+        if (quota <= 0) {
+            return;
+        }
+        long used = usageLogService.getTodayUsedTokensByAgent(profile.getAgentId());
+        if (used >= quota) {
+            log.warn("智能体配额超限: agentId={}, used={}, quota={}", profile.getAgentId(), used, quota);
+            throw new AiQuotaExceededException(
+                    String.format("智能体【%s】今日用量已达上限（%d/%d token），请明天再试或调整该智能体配额",
+                            profile.getName(), used, quota));
         }
     }
 }

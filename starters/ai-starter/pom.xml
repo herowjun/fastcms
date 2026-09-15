@@ -60,6 +60,18 @@
             <artifactId>fastcms-plugin-starter</artifactId>
         </dependency>
 
+        <!-- SnakeYAML：SKILL.md frontmatter 解析（SafeConstructor 防恶意反序列化） -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+
+        <!-- Jsoup：设计稿先行模式的 HTML 结构解析（V1~V6 格式校验 / A1~A7 机器审计 / 区块切分） -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

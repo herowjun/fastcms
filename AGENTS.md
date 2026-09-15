@@ -78,6 +78,16 @@ cd web && mvn spring-boot:run -Dspring-boot.run.profiles=deploytest
 4. 修改 `starters/*` 后必须 `mvn install` 到本地仓库，`web` 模块运行才会生效（IDE 直接运行除外）
 5. MyBatis-Plus 保持 3.5.16+（Boot 4 兼容版本），拦截器依赖需单独引 `mybatis-plus-jsqlparser-4.9`
 6. 插件工程（`plugins/`）编译 JDK 版本必须为 21（`plugins/pom.xml` 中 `java.version`）
+7. 修改 `doc/sql/fastcms.sql` 表结构后，必须将等价 ALTER 语句同步到最新版本的增量 SQL（如 `doc/sql/fastcms-0.2.0.sql`）：全量脚本供新装环境，增量脚本供已有环境升级，两处缺一不可
+
+## 前端页面布局铁律（ui/）
+
+- 管理后台新页面（含 AI、插件等）必须沿用 `设置/系统`、`设置/通信` 等既有页面的 CSS 布局风格：
+  - 列表页：`<div class="xxx-container">` > `el-card shadow="hover"` 包裹全部内容，禁止裸 div 直接放 `el-table`（表格上下左右边距由 el-card 统一提供）
+  - 工具栏（搜索/操作按钮区）：置于表格上方，容器加 `mb15`；同行按钮/输入框之间用 `ml10` 间隔
+  - 分页：`el-pagination` 加 `mt15`
+  - 表单页：`el-card shadow="hover"` 包裹，`el-form` 加 `mt35 mb35`
+- 禁止自定义偏离以上规范的表格边距与按钮边距（不得顶边、不得私自加大留白）
 
 ## 已知遗留问题
 

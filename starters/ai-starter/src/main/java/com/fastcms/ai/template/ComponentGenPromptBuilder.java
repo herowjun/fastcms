@@ -16,8 +16,10 @@
  */
 package com.fastcms.ai.template;
 
+import com.fastcms.ai.capability.PluginCapabilityRegistry;
 import com.fastcms.ai.component.ComponentRegistry;
 import com.fastcms.ai.component.TokenEngine;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -45,8 +47,20 @@ public class ComponentGenPromptBuilder {
 
     private final ComponentRegistry componentRegistry;
 
+    /**
+     * 插件能力注册中心（L1 摘要注入用；测试环境无能力体系时可注入 null）
+     */
+    private final PluginCapabilityRegistry capabilityRegistry;
+
     public ComponentGenPromptBuilder(ComponentRegistry componentRegistry) {
+        this(componentRegistry, null);
+    }
+
+    @Autowired
+    public ComponentGenPromptBuilder(ComponentRegistry componentRegistry,
+                                     PluginCapabilityRegistry capabilityRegistry) {
         this.componentRegistry = componentRegistry;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     /**
@@ -66,8 +80,9 @@ public class ComponentGenPromptBuilder {
 
                 tw:content-body — 正文占位：渲染时替换为该页真实正文（文章列表/文章详情/单页正文），无变体无槽位。
                 每个内容页（article_list / article / page 及其 suffix 变体）在 sections 序列中放一个 content-body
-                标记正文位置，前后可自由叠加其他组件，实现"栏目横幅 → 正文 → 底部转化区"等完整页面结构。
+                标记正文位置，前后可自由叠加其他组件，实现"栏目横幅 → 底部转化区"等完整页面结构。
 
+%s
                 # PageSpec 格式（JSON Schema 说明）
 
                 ```json
@@ -186,8 +201,53 @@ public class ComponentGenPromptBuilder {
                 5. site 信息架构必须完整输出（menus/categories/singlePages/articles 四段齐全），哪怕需求只有一句话
                 6. 全程使用中文思考和回复
                 """.formatted(componentRegistry.buildManifest(),
-                exampleFullId("page-hero"), exampleFullId("faq"), exampleFullId("cta-banner"),
-                com.fastcms.ai.component.BuiltinTailwindPackProvider.FOUNDATION);
+                buildCapabilitySection(),
+                com.fastcms.ai.component.BuiltinTailwindPackProvider.FOUNDATION,
+                exampleFullId("page-hero"), exampleFullId("faq"), exampleFullId("cta-banner"));
+    }
+
+    /**
+     * 能力集成注入块（L1 摘要 + 集成规范）
+     *
+     * <p>无已注册能力（未安装任何提供能力的插件）时返回空串，prompt 不出现该段——
+     * 避免空清单误导 AI 引用不存在的能力。</p>
+     */
+    public String buildCapabilitySection() {
+        if (capabilityRegistry == null) {
+            return "";
+        }
+        String manifest = capabilityRegistry.buildManifest();
+        if (manifest == null || manifest.isBlank()) {
+            return "";
+        }
+        String customHtml = exampleFullId("custom-html");
+        return """
+                # 可用插件能力（已安装插件与内置能力，可按需集成进页面）
+
+                %s
+
+                # 能力集成规范（用户需求涉及支付/下载/登录等能力时必须遵守）
+
+                集成方式：在目标页面 sections 中添加 custom-html section（component 填 "%s"），两种形态二选一：
+                1. snippet 引用（优先，官方参考实现，质量有保证）：
+                   { "id": "区块id", "component": "%s", "snippetId": "snippet的id",
+                     "snippetParams": { "参数名": "参数值" }, "capability": ["依赖的能力id"] }
+                   可用 snippet 及参数清单：调用 get_capability_detail 工具查看目标能力的「官方 snippet」段
+                2. 手写逃生舱（snippet 满足不了需求时才用）：
+                   { "id": "区块id", "component": "%s", "capability": ["依赖的能力id"],
+                     "data": { "html": "完整 HTML+JS 片段（含 script）" } }
+
+                强制规则：
+                - 集成任何能力前必须先调用 get_capability_detail 工具获取接口契约；
+                  data.html 中的接口路径/参数/响应字段必须与契约完全一致，禁止凭记忆编造
+                - capability 数组必须列出该 section 依赖的全部能力 id（渲染期按此做插件装卸门控）
+                - custom-html section 必须有非空 id（如 "pay"），snippetId 与 data.html 互斥
+                - 标注 missing-channel 的能力不可集成（回复中提示用户先安装对应渠道插件）
+                - data.html 会经 FreeMarker 渲染：可用 ${(article.id)!0} 等插值取当前页面数据，
+                  但 JS 中严禁使用 ${} 模板字符串语法（与 FreeMarker 插值冲突），字符串拼接用 +
+                - 用户需求未提及能力集成时不要主动添加
+
+                """.formatted(manifest, customHtml, customHtml, customHtml);
     }
 
     /**
@@ -221,8 +281,11 @@ public class ComponentGenPromptBuilder {
                 + "   补充组件（常见问题/转化区等）」范式，各页面选不同组件与文案，体现页面差异化\n"
                 + "5. 图片槽位（type=media）按「图片槽位协议」填 search: 搜索关键词，\n"
                 + "   附件库无匹配时系统自动用演示图，不要编造图片 URL\n"
-                + "6. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
-                + "7. 请全程使用中文思考和回复\n";
+                + "6. 用户需求涉及支付/下载/登录等能力集成时：先调用 get_capability_detail 工具\n"
+                + "   获取目标能力契约，按「能力集成规范」在对应页面编排 custom-html section\n"
+                + "   （优先 snippet 引用）；需求未涉及能力时忽略本条\n"
+                + "7. 严格按照约定的 JSON 格式输出，不要包裹 markdown 代码块\n"
+                + "8. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -257,7 +320,11 @@ public class ComponentGenPromptBuilder {
                 + "   纯咨询/信息查询类需求（问答、解释、查询当前状态，无需修改模板）→\n"
                 + "   只输出 reply 字段，直接省略 pagespec 与 filePatches（系统跳过渲染，不写任何文件）。\n"
                 + "   只要需求涉及任何模板修改，必须输出完整 pagespec，不得省略\n"
-                + "6. filePatches 格式（可选字段）：[{\"path\": \"_components/组件文件名.ftl\",\n"
+                + "6. 能力集成（支付/下载/登录等）：当前 PageSpec 中带 capability/snippetId 字段的\n"
+                + "   section 即已集成清单——同类需求先检查是否已存在，避免重复添加；\n"
+                + "   新增集成必须先调用 get_capability_detail 工具获取契约，\n"
+                + "   custom-html section 的两种形态与强制规则见 system prompt「能力集成规范」\n"
+                + "7. filePatches 格式（可选字段）：[{\"path\": \"_components/组件文件名.ftl\",\n"
                 + "   \"search\": \"当前源码中的原文精确片段（须全文唯一）\", \"replace\": \"替换后片段\"}]。\n"
                 + "   search 必须与上方组件源码逐字一致（含空格缩进）；不要删除源码中\n"
                 + "   data-ai-section-root / data-ai-slot 标记（预览点选依赖它们）\n"
@@ -267,8 +334,8 @@ public class ComponentGenPromptBuilder {
                 + "   font-thin~black、rounded-none~full（以上全站已兜底定义）。\n"
                 + "   禁用任意值语法（py-[13px]、text-[1.1rem]、bg-[#ff0000]）及未列出的\n"
                 + "   自造类名（CSS 未编译，样式会静默失效）\n"
-                + "7. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出差异），不要包裹 markdown 代码块\n"
-                + "8. 请全程使用中文思考和回复\n";
+                + "8. 严格按照约定的 JSON 格式输出完整 PageSpec（不是只输出差异），不要包裹 markdown 代码块\n"
+                + "9. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -307,6 +374,8 @@ public class ComponentGenPromptBuilder {
                 .append("2. 除选中区块外，输出的完整 PageSpec 中其余所有内容（site 信息架构、其他页面的")
                 .append("所有 sections、布局结构）必须与当前 PageSpec 逐字保持一致，严禁任何「顺手优化」\n")
                 .append("3. 选中区块调整后仍须遵守组件菜单约束：只能取清单内组件与变体，必填槽位必须填\n")
+                .append("   （需求涉及在选中区块集成支付/下载等能力时：先调用 get_capability_detail ")
+                .append("获取契约，按 system prompt「能力集成规范」改为 custom-html section）\n")
                 .append("4. 图片槽位：未要求换图时保持原值；需要换图时改填 search:新关键词；")
                 .append("spec 中的 imageAssets 字段由系统维护，原样保留即可\n")
                 .append("5. 需求路由：spec 能表达的（文案/槽位数据/换组件变体）→ 只改 PageSpec；")

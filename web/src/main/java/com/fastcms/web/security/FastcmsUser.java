@@ -78,6 +78,11 @@ public class FastcmsUser implements Serializable {
 	 */
 	private Integer userType;
 
+	/**
+	 * 是否必须修改密码：手工导入SQL部署的默认账号首次登录时为true，须强制修改密码后才能使用后台
+	 */
+	private boolean mustChangePwd;
+
 	public FastcmsUser(User user, String token, long tokenTtl, boolean isAdmin, boolean hasRole) {
 		this.username = user.getUserName();
 		this.nickname = user.getNickName() == null ? user.getUserName() : user.getNickName();
@@ -87,6 +92,7 @@ public class FastcmsUser implements Serializable {
 		this.superAdmin = isAdmin;
 		this.hasRole = hasRole;
 		this.userType = user.getUserType();
+		this.mustChangePwd = user.getMustChangePwd() != null && user.getMustChangePwd() == 1;
 		this.version = VersionUtils.getFullClientVersion();
 	}
 
@@ -156,6 +162,14 @@ public class FastcmsUser implements Serializable {
 
 	public Integer getUserType() {
 		return userType;
+	}
+
+	public boolean isMustChangePwd() {
+		return mustChangePwd;
+	}
+
+	public void setMustChangePwd(boolean mustChangePwd) {
+		this.mustChangePwd = mustChangePwd;
 	}
 
 	public void setUserType(Integer userType) {
