@@ -13,7 +13,7 @@
                     <div class="toolbar-actions">
                         <el-upload
                             class="upload-btn"
-                            :action="uploadAction"
+                            :action="state.uploadUrl"
                             name="files"
                             :data="uploadData"
                             multiple
@@ -42,12 +42,13 @@
                 </el-col>
             </el-row>
         </div>
-        <el-form style="padding-top: 5px;" size="default" label-width="100px" ref="myRefForm">
+        <!-- 编辑区容器（历史遗留的 el-form 包裹已移除：无 model/rules/label，纯布局用 div 即可） -->
+        <div style="padding-top: 5px;">
             <el-row :gutter="35" ref="editRowRef">
                 <el-col :sm="5" class="mb20">
                     <div class="tree-container">
                         <!-- 树卡片与右侧编辑器等高（高度内联注入），内部 flex 让树占满卡片剩余空间 -->
-                        <el-card shadow="hover" class="tree-card" :style="{ height: state.clientHight }">
+                        <el-card shadow="hover" class="tree-card" :style="{ height: state.clientHeight }">
                             <template #header>
                                 <div class="tree-card-header">
                                     <span>模板文件树</span>
@@ -74,7 +75,7 @@
                 </el-col>
                 <el-col :sm="19" class="mb20">
                     <!-- 图片工作台：文件树点选图片文件时覆盖代码编辑器（左原图 / 右生成结果对比，确认后应用） -->
-                    <div v-if="state.imagePreview.visible" class="img-workbench" :style="{ height: state.clientHight }">
+                    <div v-if="state.imagePreview.visible" class="img-workbench" :style="{ height: state.clientHeight }">
                         <div class="img-workbench-toolbar">
                             <el-tag size="small" type="info">{{ state.imagePreview.filePath }}</el-tag>
                             <div class="img-workbench-toolbar-actions">
@@ -142,16 +143,15 @@
                     </div>
                     <Codemirror
                             v-else
-                            ref="codeMirror"
                             v-model="state.content"
-                            :style="{ height: state.clientHight, width: '100%' }"
+                            :style="{ height: state.clientHeight, width: '100%' }"
                             :autofocus="true"
                             @change="onChange"
                             v-bind="$attrs"
                             :extensions="extensions" />
                 </el-col>
             </el-row>
-        </el-form>
+        </div>
 
         <!-- AI 对话抽屉（全屏覆盖，完全独立于主编辑界面：调整型/会话编辑视图为左预览右对话，
              AI 每写一个文件自动刷新预览；关闭抽屉不影响主界面任何状态） -->
@@ -177,7 +177,7 @@
                     </div>
                     <div class="preview-frame-wrap">
                         <iframe v-if="aiPreviewUrl" ref="aiPreviewFrameRef" :src="aiPreviewUrl"
-                                class="preview-frame" frameborder="0" @load="onPreviewFrameLoad"></iframe>
+                                class="preview-frame" title="模板实时预览" @load="onPreviewFrameLoad"></iframe>
                         <!-- 预览空白占位：新会话生成中（尚无页面文件）或无可路由 HTML 时 -->
                         <div v-else class="preview-empty">
                             <el-empty :description="previewEmptyTip" :image-size="80" />
@@ -448,7 +448,6 @@ import { css } from "@codemirror/lang-css";
 import { search } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 
-const codeMirror = ref()
 const treeTable = ref()
 // 编辑区行（左树 + 右编辑器）：用于实测编辑区起点，计算高度自适应
 const editRowRef = ref();
@@ -476,7 +475,7 @@ const attachApi = AttachApi();
 const aiChatRef = ref();
 const aiPreviewFrameRef = ref();
 const state = reactive({
-    clientHight: "600px",
+    clientHeight: "600px",
     treeLoading: false,
     treeTableData: [],
     treeDefaultProps: {
@@ -665,9 +664,6 @@ const aiPreviewUrl = computed(() => {
     if (!state.loadedTemplateId || !state.aiPreviewEntry) return '';
     return '/template/preview/' + state.loadedTemplateId + '/' + state.aiPreviewEntry + '?t=' + state.aiPreviewKey;
 });
-
-/** 上传地址（主编辑界面只上传正式模板目录） */
-const uploadAction = computed(() => state.uploadUrl);
 
 /** 上传附加参数 */
 const uploadData = computed(() => ({ dirName: state.uploadParam.dirName, templateId: state.uploadParam.templateId }));
@@ -2215,7 +2211,7 @@ onMounted(() => {
     updateEditorHeight();
     // 事件驱动兜底（无轮询）：冷启动（F5/直接 URL）时顶栏/标签栏（tagsview 异步加载）尚未定型，
     // el-main 的高度会经历一次真实变化（setMainHeight 57→94px）。观察 el-main：其高度由 CSS 决定、
-    // 不依赖本页的 clientHight（非循环依赖），在布局定型变化时触发 updateEditorHeight 重读 top，
+    // 不依赖本页的 clientHeight（非循环依赖），在布局定型变化时触发 updateEditorHeight 重读 top，
     // 覆盖"首帧 top 偏大算出 400px 下限、之后无人重算"的空窗。
     // （top 本身是位置变化，无 DOM 事件可捕获；布局容器的高度变化才是可靠的事件源）
     if (typeof ResizeObserver !== 'undefined') {
@@ -2285,14 +2281,14 @@ const updateEditorHeight = () => {
     if (!rowEl) return;
     const viewportW = document.documentElement.clientWidth;
     if (viewportW < 768) {
-        state.clientHight = '600px';
+        state.clientHeight = '600px';
         return;
     }
     const top = rowEl.getBoundingClientRect().top;
     const viewportH = document.documentElement.clientHeight;
     // 底部留白覆盖：el-col 的 mb20 + 页面级 el-card body 的 padding（合计约 40px）+ 少量呼吸空间
     const height = viewportH - top - 48;
-    state.clientHight = Math.max(400, height) + 'px';
+    state.clientHeight = Math.max(400, height) + 'px';
 };
 
 /** Ctrl/Cmd + S 快捷保存：AI 抽屉与对话框打开时忽略（全屏工作台里误触发主编辑器保存） */
