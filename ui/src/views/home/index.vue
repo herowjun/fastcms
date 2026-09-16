@@ -276,7 +276,7 @@ onMounted(() => {
 		flex: 1;
 		min-height: 300px;
 	}
-	// AI 横幅
+	// AI 横幅（白底卡片 + 渐变小面积点缀：左竖条/图标块/按钮，避免大面积深色压顶导致头重脚轻）
 		.hero {
 			position: relative;
 			overflow: hidden;
@@ -285,68 +285,73 @@ onMounted(() => {
 			gap: 18px;
 			padding: 22px 26px;
 			border-radius: 14px;
-		background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
-		color: #fff;
-		&::before {
-			content: '';
-			position: absolute;
-			inset: 0;
-			background-image: radial-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px);
-			background-size: 22px 22px;
-			-webkit-mask-image: linear-gradient(100deg, transparent 30%, #000 90%);
-			mask-image: linear-gradient(100deg, transparent 30%, #000 90%);
-			pointer-events: none;
-		}
-		&>* {
-			position: relative;
-		}
-		.hi {
-			flex: none;
-			width: 46px;
-			height: 46px;
-			display: grid;
-			place-items: center;
-			border-radius: 12px;
-			background: rgba(255, 255, 255, 0.16);
-			border: 1px solid rgba(255, 255, 255, 0.25);
-		}
-		.hero-text {
-			min-width: 0;
-			h3 {
-				margin: 0;
-				font-size: 17px;
-				font-weight: 700;
-			}
-			p {
-				margin: 2px 0 0;
-				font-size: 12.5px;
-				opacity: 0.85;
-			}
-		}
-		.sp {
-			flex: 1;
-		}
-		.go {
-			flex: none;
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			height: 38px;
-			padding: 0 18px;
-			border: none;
-			border-radius: 99px;
 			background: #fff;
-			color: #2563eb;
-			font-size: 13px;
-			font-weight: 600;
-			cursor: pointer;
-			transition: all 0.2s;
-			&:hover {
-				transform: translateY(-1px);
-				box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+			border: 1px solid #e2e8f0;
+			box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
+			// 左侧渐变竖条（呼应侧边栏激活项的渐变竖条样式）
+			&::before {
+				content: '';
+				position: absolute;
+				left: 0;
+				top: 14px;
+				bottom: 14px;
+				width: 3px;
+				border-radius: 0 3px 3px 0;
+				background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+			}
+			&>* {
+				position: relative;
+			}
+			.hi {
+				flex: none;
+				width: 46px;
+				height: 46px;
+				display: grid;
+				place-items: center;
+				border-radius: 12px;
+				background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+				color: #fff;
+				box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+			}
+			.hero-text {
+				min-width: 0;
+				h3 {
+					margin: 0;
+					font-size: 17px;
+					font-weight: 700;
+					color: #0f172a;
+				}
+				p {
+					margin: 2px 0 0;
+					font-size: 12.5px;
+					color: #64748b;
+				}
+			}
+			.sp {
+				flex: 1;
+			}
+			.go {
+				flex: none;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				height: 38px;
+				padding: 0 18px;
+				border: none;
+				border-radius: 99px;
+				background: var(--grad, linear-gradient(135deg, #3b82f6 0%, #6366f1 100%));
+				color: #fff;
+				font-size: 13px;
+				font-weight: 600;
+				cursor: pointer;
+				box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
+				transition: all 0.2s;
+				&:hover {
+					transform: translateY(-1px);
+					box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+				}
 			}
 		}
-	}
 	// 统计卡
 	.stats {
 		display: grid;

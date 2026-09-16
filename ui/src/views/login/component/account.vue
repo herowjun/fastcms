@@ -213,9 +213,18 @@ onMounted(() => {
 	}
 	.login-content-code {
 		width: 100%;
+		height: 44px;
 		padding: 0;
 		font-weight: bold;
 		letter-spacing: 5px;
+		// 后端验证码原图 130x48，须按容器缩放显示，否则第 4 个字符会被按钮截断
+		.login-content-code-img {
+			display: block;
+			width: 100%;
+			height: 42px;
+			border-radius: 8px;
+			cursor: pointer;
+		}
 	}
 }
 </style>

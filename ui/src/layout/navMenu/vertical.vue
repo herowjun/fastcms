@@ -83,6 +83,8 @@ const menuGroupMap: Record<string, string> = {
 	// 系统
 	'/system': '系统',
 };
+// 分组显示顺序（原型 side 导航：概览置顶 → 内容管理 → 模板与 AI → 站点设置 → 系统；不依赖后端菜单返回顺序）
+const groupOrder: string[] = ['内容管理', '模板与 AI', '站点设置', '系统'];
 const groupedMenus = computed(() => {
 	const groups: { title: string; items: RouteItems }[] = [];
 	const pushToGroup = (title: string, item: RouteItems) => {
@@ -96,7 +98,9 @@ const groupedMenus = computed(() => {
 	menuLists.value.forEach((item) => {
 		pushToGroup(menuGroupMap[item.path] || '', item);
 	});
-	return groups;
+	// 显式排序：无标题分组（概览/首页）置顶，未列入 groupOrder 的分组排最后
+	const groupRank = (g: { title: string }) => (!g.title ? -1 : groupOrder.indexOf(g.title) === -1 ? groupOrder.length : groupOrder.indexOf(g.title));
+	return groups.sort((a, b) => groupRank(a) - groupRank(b));
 });
 // 获取布局配置信息
 const getThemeConfig = computed(() => {

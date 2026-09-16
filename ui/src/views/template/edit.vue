@@ -45,10 +45,11 @@
             </el-row>
         </div>
         <el-form style="padding-top: 5px;" size="default" label-width="100px" ref="myRefForm">
-            <el-row :gutter="35">
+            <el-row :gutter="35" ref="editRowRef">
                 <el-col :sm="5" class="mb20">
                     <div class="tree-container">
-                        <el-card shadow="hover">
+                        <!-- 树卡片与右侧编辑器等高（高度内联注入），内部 flex 让树占满卡片剩余空间 -->
+                        <el-card shadow="hover" class="tree-card" :style="{ height: state.clientHight }">
                             <template #header>
                                 <div class="tree-card-header">
                                     <span>模板文件树</span>
@@ -58,7 +59,7 @@
                                     </el-button>
                                 </div>
                             </template>
-                            <div v-loading="state.treeLoading">
+                            <div v-loading="state.treeLoading" class="tree-body">
                                 <el-tree :data="state.treeTableData"
                                     :default-expand-all="false"
                                     :default-expanded-keys="state.expandedKeys"
@@ -66,7 +67,7 @@
                                     node-key="filePath"
                                     :props="state.treeDefaultProps"
                                     @node-click="onNodeClick"
-                                    style="height: 550px;overflow: auto;"
+                                    style="height: 100%;overflow: auto;"
                                     ref="treeTable">
                                 </el-tree>
                             </div>
@@ -430,7 +431,7 @@
 </template>
 
 <script lang="ts" name="templateEdit" setup>
-import { reactive, computed, onMounted, onBeforeUnmount, ref, nextTick, watch } from 'vue';
+import { reactive, computed, onMounted, onActivated, onBeforeUnmount, ref, nextTick, watch } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { ElMessageBox, ElMessage } from 'element-plus';
 import { Local } from '/@/utils/storage';
@@ -444,6 +445,10 @@ import { oneDark } from "@codemirror/theme-one-dark";
 
 const codeMirror = ref()
 const treeTable = ref()
+// 编辑区行（左树 + 右编辑器）：用于实测编辑区起点，计算高度自适应
+const editRowRef = ref();
+// 布局容器尺寸变化观察器（keep-alive 缓存页切回时 onMounted 不会重跑，靠 onActivated 兜底重算）
+let editorHeightObserver: ResizeObserver | null = null;
 const extensions = [html(), oneDark];
 
 const templateApi = TemplateApi();
@@ -2119,11 +2124,25 @@ onBeforeRouteLeave((to, from, next) => {
 
 onMounted(() => {
     loadTemplateList();
-    let clientHight = document.documentElement.clientHeight;
-    state.clientHight = clientHight + "px";
+    // 高度自适应：初始计算 + 窗口变化时重算（编辑器/文件树等高，页面不整页滚动）
+    updateEditorHeight();
+    // 事件驱动兜底（无轮询）：冷启动（F5/直接 URL）时顶栏/标签栏（tagsview 异步加载）尚未定型，
+    // el-main 的高度会经历一次真实变化（setMainHeight 57→94px）。观察 el-main：其高度由 CSS 决定、
+    // 不依赖本页的 clientHight（非循环依赖），在布局定型变化时触发 updateEditorHeight 重读 top，
+    // 覆盖"首帧 top 偏大算出 400px 下限、之后无人重算"的空窗。
+    // （top 本身是位置变化，无 DOM 事件可捕获；布局容器的高度变化才是可靠的事件源）
+    if (typeof ResizeObserver !== 'undefined') {
+        editorHeightObserver = new ResizeObserver(updateEditorHeight);
+        const mainEl = document.querySelector('.layout-main');
+        if (mainEl) editorHeightObserver.observe(mainEl);
+        editorHeightObserver.observe(document.documentElement);
+    }
+    window.addEventListener('resize', updateEditorHeight);
     window.addEventListener('beforeunload', onBeforeUnload);
     // ESC 清除选区锁定（选区模式内点错区块也可直接再点别的区块覆盖，ESC 是快速取消入口）
     window.addEventListener('keydown', onSectionEscKey);
+    // Ctrl/Cmd + S 快捷保存
+    window.addEventListener('keydown', onSaveShortcut);
 });
 
 // AI 抽屉关闭前确认：后台有 AI 任务在跑时提示"任务将继续后台处理"——关闭只断开
@@ -2168,11 +2187,53 @@ const onSectionEscKey = (e: KeyboardEvent) => {
     }
 };
 
+/**
+ * 编辑器高度自适应：视口高度 - 编辑区起点到视口顶的距离（含布局头部、tagsview、工具栏等占位） - 底部留白。
+ * 以 DOM 实测代替写死高度，保证左树卡片与右编辑器等高、页面整体不出现整页滚动；
+ * 窄屏（<768px）左右栏堆叠时退回固定高度，避免编辑器被压得过高过矮。
+ */
+const updateEditorHeight = () => {
+    const rowEl = editRowRef.value?.$el || editRowRef.value;
+    if (!rowEl) return;
+    const viewportW = document.documentElement.clientWidth;
+    if (viewportW < 768) {
+        state.clientHight = '600px';
+        return;
+    }
+    const top = rowEl.getBoundingClientRect().top;
+    const viewportH = document.documentElement.clientHeight;
+    // 底部留白覆盖：el-col 的 mb20 + 页面级 el-card body 的 padding（合计约 40px）+ 少量呼吸空间
+    const height = viewportH - top - 48;
+    state.clientHight = Math.max(400, height) + 'px';
+};
+
+/** Ctrl/Cmd + S 快捷保存：AI 抽屉与对话框打开时忽略（全屏工作台里误触发主编辑器保存） */
+const onSaveShortcut = (e: KeyboardEvent) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+    e.preventDefault();
+    if (state.aiDrawerVisible || state.createDialog.visible || state.imagePickDialog.visible) return;
+    if (!state.currEditFile) return;
+    onSaveFile();
+};
+
 onBeforeUnmount(() => {
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('keydown', onSectionEscKey);
+    window.removeEventListener('keydown', onSaveShortcut);
+    window.removeEventListener('resize', updateEditorHeight);
+    stopSettleEditorHeight();
+    if (editorHeightObserver) {
+        editorHeightObserver.disconnect();
+        editorHeightObserver = null;
+    }
     stopImageGenPolling();
     stopImageEditPolling();
+});
+
+// keep-alive 缓存恢复时重算高度：从其他菜单切回本页走的是 onActivated 而非 onMounted，
+// 不重算会沿用旧高度（窗口尺寸/布局已变时出现半高留白）
+onActivated(() => {
+    updateEditorHeight();
 });
 </script>
 
@@ -2194,6 +2255,26 @@ onBeforeUnmount(() => {
     align-items: center;
     flex-wrap: wrap;
     gap: 0;
+}
+// 文件树卡片：高度与右侧编辑器一致（内联注入），flex 让树占满 header 之外的剩余空间
+// 注意：本组件 style 非 scoped，:deep() 会输出无效选择器被浏览器丢弃，必须用全局嵌套选择器（同 .ai-template-drawer 的写法）
+.tree-card {
+    display: flex;
+    flex-direction: column;
+
+    .el-card__body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .tree-body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
 }
 .tree-card-header {
     display: flex;
