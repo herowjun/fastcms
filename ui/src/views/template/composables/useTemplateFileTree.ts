@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { ElMessage } from 'element-plus';
 import { TemplateApi } from '/@/api/template/index';
 import { AiTemplateApi } from '/@/api/ai/index';
 
@@ -67,13 +68,17 @@ export function useTemplateFileTree() {
 
     /**
      * 加载会话工作目录文件树（仅用于抽屉左侧预览的页面下拉，与主编辑界面无关）
+     *
+     * 失败时清空树并提示：静默置空会让预览区显示"暂无可预览页面"，
+     * 用户会误以为会话没有生成任何文件（与"空树"混淆）
      */
     const loadSession = (sessionId: string | undefined) => {
         if (!sessionId) return Promise.resolve();
         return aiApi.getSessionFileTree(sessionId).then((res: any) => {
             tree.sessionData = res.data || [];
-        }).catch(() => {
+        }).catch((e: any) => {
             tree.sessionData = [];
+            ElMessage.error(e?.message || '会话文件列表加载失败，请刷新重试');
         });
     };
 
