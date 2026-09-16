@@ -177,7 +177,7 @@
 </template>
 
 <script lang="ts" name="templateEdit" setup>
-import { reactive, computed, onMounted, onActivated, onBeforeUnmount, ref, nextTick, watch, defineAsyncComponent } from 'vue';
+import { reactive, computed, onMounted, onActivated, onBeforeUnmount, ref, nextTick, watch } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import { ElMessageBox, ElMessage } from 'element-plus';
 import { Local } from '/@/utils/storage';
@@ -197,37 +197,12 @@ import { useTemplateFileTree } from '/@/views/template/composables/useTemplateFi
 
 import { useAiPreview, isRoutableHtml } from '/@/views/template/composables/useAiPreview';
 import { usePreviewIframeHooks } from '/@/views/template/composables/usePreviewIframeHooks';
-// CodeMirror 编辑器组件异步分包：组件 + 语言包 + 主题 + 搜索面板全部按需加载，
-// 首屏 bundle 不含这套 220KB+ 依赖，进入编辑页后编辑器 chunk 就绪再挂载
-const Codemirror = defineAsyncComponent(() => import("vue-codemirror").then((m: any) => ({ default: m.Codemirror })));
-
-// 语言/主题/搜索模块缓存（同模块只加载一次，切换文件零开销复用）
-const extModuleCache = new Map<string, Promise<any>>();
-const loadExtModule = (key: string, loader: () => Promise<any>): Promise<any> => {
-    if (!extModuleCache.has(key)) extModuleCache.set(key, loader());
-    return extModuleCache.get(key) as Promise<any>;
-};
-
-/**
- * 按文件后缀异步加载语法高亮扩展：
- * css/scss/less → css、js/ts → javascript，其余（html/htm/xml/txt/json 等）回退 html
- */
-const loadLangExtension = (filePath: string): Promise<any> => {
-    const lower = (filePath || '').toLowerCase();
-    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) {
-        return loadExtModule('css', () => import('@codemirror/lang-css')).then((m: any) => m.css());
-    }
-    if (lower.endsWith('.ts')) {
-        return loadExtModule('ts', () => import('@codemirror/lang-javascript')).then((m: any) => m.javascript({ typescript: true }));
-    }
-    if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) {
-        return loadExtModule('js', () => import('@codemirror/lang-javascript')).then((m: any) => m.javascript());
-    }
-    return loadExtModule('html', () => import('@codemirror/lang-html')).then((m: any) => m.html());
-};
-
-// 编辑器扩展集合（语言 + 主题 + 搜索面板），随当前文件异步装配
-const extensions = ref<any[]>([]);
+import { Codemirror } from "vue-codemirror";
+import { html } from "@codemirror/lang-html";
+import { javascript } from "@codemirror/lang-javascript";
+import { css } from "@codemirror/lang-css";
+import { search } from "@codemirror/search";
+import { oneDark } from "@codemirror/theme-one-dark";
 
 const treeTable = ref();
 // 编辑区行（左树 + 右编辑器）：用于实测编辑区起点，计算高度自适应
@@ -285,19 +260,19 @@ const state = reactive({
     aiChatCollapsed: false
 });
 
-// 编辑器扩展异步装配：当前文件变化（含首次）时加载语言扩展 + 主题 + 搜索面板，
-// 就绪后整体替换 extensions 触发编辑器重挂扩展；失败降级为空集合（仅无高亮）
-watch(() => state.currEditFile, (file) => {
-    Promise.all([
-        loadLangExtension(file),
-        loadExtModule('search', () => import('@codemirror/search')).then((m: any) => m.search()),
-        loadExtModule('one-dark', () => import('@codemirror/theme-one-dark')).then((m: any) => m.oneDark)
-    ]).then(([lang, searchExt, oneDark]) => {
-        extensions.value = [lang, oneDark, searchExt];
-    }).catch(() => {
-        extensions.value = [];
-    });
-}, { immediate: true });
+/**
+ * 按文件后缀切换语法高亮（state 定义在上方已初始化）：
+ * css/scss/less → css、js/ts → javascript，其余（html/htm/xml/txt/json 等）回退 html
+ */
+const langExtensionFor = (filePath: string) => {
+    const lower = (filePath || '').toLowerCase();
+    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return css();
+    if (lower.endsWith('.ts')) return javascript({ typescript: true });
+    if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) return javascript();
+    return html();
+};
+// search() 提供编辑器内搜索面板（Ctrl/Cmd+F），随文件切换语言扩展
+const extensions = computed(() => [langExtensionFor(state.currEditFile), oneDark, search()]);
 
 // 文件树（正式模板目录树 + AI 会话工作目录树，加载与查找下沉到 composable）
 const { tree, findIndexNode, load: loadTemplateTree, loadSession, clearSession } = useTemplateFileTree();
