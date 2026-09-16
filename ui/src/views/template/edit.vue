@@ -52,19 +52,19 @@
                             <template #header>
                                 <div class="tree-card-header">
                                     <span>模板文件树</span>
-                                    <el-button size="small" text :loading="state.treeLoading"
+                                    <el-button size="small" text :loading="tree.loading"
                                                title="刷新文件树" @click="loadFileTree()">
                                         <el-icon><ele-Refresh /></el-icon>
                                     </el-button>
                                 </div>
                             </template>
-                            <div v-loading="state.treeLoading" class="tree-body">
-                                <el-tree :data="state.treeTableData"
+                            <div v-loading="tree.loading" class="tree-body">
+                                <el-tree :data="tree.data"
                                     :default-expand-all="false"
-                                    :default-expanded-keys="state.expandedKeys"
+                                    :default-expanded-keys="tree.expandedKeys"
                                     highlight-current
                                     node-key="filePath"
-                                    :props="state.treeDefaultProps"
+                                    :props="tree.defaultProps"
                                     @node-click="onNodeClick"
                                     style="height: 100%;overflow: auto;"
                                     ref="treeTable">
@@ -75,72 +75,8 @@
                 </el-col>
                 <el-col :sm="19" class="mb20">
                     <!-- 图片工作台：文件树点选图片文件时覆盖代码编辑器（左原图 / 右生成结果对比，确认后应用） -->
-                    <div v-if="state.imagePreview.visible" class="img-workbench" :style="{ height: state.clientHeight }">
-                        <div class="img-workbench-toolbar">
-                            <el-tag size="small" type="info">{{ state.imagePreview.filePath }}</el-tag>
-                            <div class="img-workbench-toolbar-actions">
-                                <el-button size="small" type="danger" plain :loading="state.imagePreview.deleting" title="删除该图片文件"
-                                           @click="onDeleteImageFile">
-                                    <el-icon><ele-Delete /></el-icon>删除
-                                </el-button>
-                                <el-button size="small" :loading="state.imagePreview.restoring" title="用 .bak 备份覆盖回当前图片（撤销已应用的修改）"
-                                           @click="restoreTemplateImage">
-                                    <el-icon><ele-RefreshLeft /></el-icon>恢复原图
-                                </el-button>
-                                <el-button size="small" title="关闭图片工作台，回到代码编辑器" @click="closeImageWorkbench">
-                                    <el-icon><ele-Close /></el-icon>关闭
-                                </el-button>
-                            </div>
-                        </div>
-                        <div class="img-compare">
-                            <div class="img-compare-pane">
-                                <div class="img-compare-label">原图</div>
-                                <div class="img-compare-body">
-                                    <img v-if="state.imagePreview.url" :src="state.imagePreview.url"
-                                         class="img-compare-el" title="点击新窗口查看原图" @click="openImageRaw" />
-                                </div>
-                            </div>
-                            <div class="img-compare-pane">
-                                <div class="img-compare-label">生成结果</div>
-                                <div class="img-compare-body">
-                                    <img v-if="state.imageEdit.resultUrl" :src="state.imageEdit.resultUrl"
-                                         class="img-compare-el" title="点击新窗口查看生成结果" @click="openResultRaw" />
-                                    <div v-else class="img-compare-empty">
-                                        提交修图要求后，生成结果将显示在此处与原图对比
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="img-edit-form">
-                            <el-input v-model="state.imageEdit.prompt" type="textarea" :rows="2" maxlength="500" show-word-limit
-                                      placeholder="描述修图要求，例如：把背景换成浅蓝色，去掉右下角的水印" />
-                            <div class="img-edit-actions">
-                                <el-button type="primary" size="small" :loading="state.imageEdit.submitting"
-                                           :disabled="state.imageEdit.status === 'pending' || state.imageEdit.status === 'running'"
-                                           @click="submitTemplateImageEdit">
-                                    <el-icon><ele-MagicStick /></el-icon>AI 修图
-                                </el-button>
-                                <el-button v-if="state.imageEdit.resultUrl && state.imageEdit.status === 'success'"
-                                           type="success" size="small" :loading="state.imageEdit.applying"
-                                           title="将右侧生成结果写入模板文件（原件备份为 .bak）"
-                                           @click="applyImageEdit">
-                                    <el-icon><ele-Check /></el-icon>应用
-                                </el-button>
-                                <el-button v-if="state.imageEdit.taskId && state.imageEdit.status === 'failed'" size="small"
-                                           type="warning" @click="retryTemplateImageEdit">重试</el-button>
-                            </div>
-                            <div class="gen-status">
-                                <template v-if="state.imageEdit.status === 'pending' || state.imageEdit.status === 'running'">
-                                    <el-icon class="is-loading"><ele-Loading /></el-icon>
-                                    <span>AI 修图中（约 10~60 秒）...</span>
-                                </template>
-                                <template v-else-if="state.imageEdit.status === 'failed'">
-                                    <span class="gen-error">修图失败：{{ state.imageEdit.error || '未知错误' }}</span>
-                                </template>
-                                <span v-else-if="state.imageEdit.status === 'success'" class="gen-done">修图完成，请对比左右图片，满意后点击「应用」写入模板（原件备份为 .bak，可「恢复原图」撤销）</span>
-                            </div>
-                        </div>
-                    </div>
+                    <ImageWorkbench v-if="workbenchVisible" v-model:visible="workbenchVisible" :template-id="state.loadedTemplateId"
+                                    :file-path="workbenchFile" :height="state.clientHeight" @refresh-tree="loadFileTree" />
                     <Codemirror
                             v-else
                             v-model="state.content"
@@ -164,7 +100,7 @@
             <div class="ai-drawer-body" :class="{ split: state.aiMode === 'adjust' || state.sessionView }">
                 <div v-if="state.aiMode === 'adjust' || state.sessionView" class="ai-preview-col" :class="{ 'chat-collapsed': state.aiChatCollapsed }">
                     <div class="preview-toolbar">
-                        <el-select v-model="state.aiPreviewEntry" size="small" filterable placeholder="选择预览页面">
+                        <el-select v-model="preview.entry" size="small" filterable placeholder="选择预览页面">
                             <el-option v-for="p in previewPageOptions" :key="p" :value="p" :label="p" />
                         </el-select>
                         <!-- 换图/选区按钮在右侧 AI 聊天操作行（与发送按钮同排，随聊天列收缩） -->
@@ -205,7 +141,7 @@
                             <span class="focus-section-tip">本轮对话聚焦该区块</span>
                         </div>
                         <ai-chat ref="aiChatRef" :session="state.currentAiSession" :mode="state.aiMode"
-                                 :current-file="state.aiMode === 'adjust' ? (state.aiPreviewEntry || state.currEditFile) : ''"
+                                 :current-file="state.aiMode === 'adjust' ? (preview.entry || state.currEditFile) : ''"
                                  :focus-section="state.selectedSection?.sectionId || ''"
                                  :focus-element-hint="state.selectedSection?.elementHint || ''"
                                  :sessions="state.aiSessions" :creating-session="state.creatingAiSession"
@@ -222,212 +158,12 @@
         </el-drawer>
 
         <!-- 预览页点选换图对话框（搜附件库 / AI 生成 / 上传，选定后更新图片槽位） -->
-        <el-dialog v-model="state.imagePickDialog.visible" width="720px" top="6vh" append-to-body
-                   :close-on-click-modal="false">
-            <template #header>
-                <div class="pick-dialog-title">
-                    <span>更换图片</span>
-                    <el-tag v-if="state.imagePickDialog.rawSrc" size="small" type="warning">演示图片 · 仅预览生效</el-tag>
-                    <el-tag v-else size="small" type="info">{{ state.imagePickDialog.slot }} @ {{ state.imagePickDialog.sectionId }}</el-tag>
-                </div>
-            </template>
-            <el-tabs v-model="state.imagePickDialog.tab">
-                <!-- 附件库：搜索 + 分页图片网格，点选即应用 -->
-                <el-tab-pane label="附件库" name="library">
-                    <div class="pick-toolbar">
-                        <el-input v-model="state.attLib.keyword" size="small" placeholder="按文件名搜索图片，回车搜索" clearable
-                                  style="width: 260px" @keyup.enter="searchAttImages">
-                            <template #append>
-                                <el-button @click="searchAttImages">
-                                    <el-icon><ele-Search /></el-icon>
-                                </el-button>
-                            </template>
-                        </el-input>
-                        <span class="pick-toolbar-tip">共 {{ state.attLib.total }} 张</span>
-                    </div>
-                    <div v-loading="state.attLib.loading" class="pick-grid"
-                         :style="{ minHeight: '200px' }">
-                        <div v-for="img in state.attLib.list" :key="img.id" class="pick-cell"
-                             :title="img.fileName" @click="applyImageSlot(img.id)">
-                            <el-image :src="img.typePath" fit="cover" class="pick-img" lazy />
-                            <div class="pick-name">{{ img.fileName }}</div>
-                        </div>
-                        <el-empty v-if="!state.attLib.loading && state.attLib.list.length === 0"
-                                  description="附件库暂无图片" :image-size="60" />
-                    </div>
-                    <el-pagination v-if="state.attLib.total > state.attLib.pageSize" small background layout="prev, pager, next"
-                                   :total="state.attLib.total" :page-size="state.attLib.pageSize"
-                                   :current-page="state.attLib.page" class="pick-pager"
-                                   @current-change="(p: number) => { state.attLib.page = p; loadAttImages(); }" />
-                </el-tab-pane>
-                <!-- AI 生成：prompt 提交 → 轮询任务 → 结果网格点选应用 -->
-                <el-tab-pane label="AI 生成" name="generate">
-                    <div class="gen-form">
-                        <el-input v-model="state.imageGen.prompt" type="textarea" :rows="3" maxlength="500" show-word-limit
-                                  placeholder="描述想要的图片，例如：现代简约风格的办公室照片，自然光，蓝白色调" />
-                        <div class="gen-actions">
-                            <el-select v-model="state.imageGen.size" size="small" style="width: 140px">
-                                <el-option label="1024*1024 方图" value="1024*1024" />
-                                <el-option label="1280*720 横图" value="1280*720" />
-                                <el-option label="720*1280 竖图" value="720*1280" />
-                            </el-select>
-                            <el-select v-model="state.imageGen.num" size="small" style="width: 110px">
-                                <el-option v-for="n in [1, 2, 4]" :key="n" :label="n + ' 张'" :value="n" />
-                            </el-select>
-                            <el-button type="primary" size="small" :loading="state.imageGen.submitting"
-                                       :disabled="!state.imageGen.prompt.trim()" @click="submitImageGen">
-                                <el-icon><ele-MagicStick /></el-icon>生成
-                            </el-button>
-                            <el-button v-if="state.imageGen.taskId && state.imageGen.status === 'failed'" size="small"
-                                      type="warning" @click="retryImageGen">重试</el-button>
-                        </div>
-                    </div>
-                    <div class="gen-status">
-                        <template v-if="state.imageGen.status === 'pending' || state.imageGen.status === 'running'">
-                            <el-icon class="is-loading"><ele-Loading /></el-icon>
-                            <span>AI 生图中（约 10~60 秒）...</span>
-                        </template>
-                        <template v-else-if="state.imageGen.status === 'failed'">
-                            <span class="gen-error">生成失败：{{ state.imageGen.error || '未知错误' }}</span>
-                        </template>
-                        <span v-else-if="state.imageGen.status === 'success'" class="gen-done">生成完成，点击图片应用到该位置（已存入附件库）</span>
-                    </div>
-                    <div v-if="state.imageGen.results.length" class="pick-grid">
-                        <div v-for="(r, i) in state.imageGen.results" :key="i" class="pick-cell"
-                             :title="r.url" @click="applyImageSlot(r.attachmentId)">
-                            <el-image :src="r.url" fit="cover" class="pick-img" />
-                            <div class="pick-name">生成结果 {{ i + 1 }}</div>
-                        </div>
-                    </div>
-                </el-tab-pane>
-                <!-- 上传：直传附件库，成功后切到附件库 tab 点选刚上传的图片 -->
-                <el-tab-pane label="上传图片" name="upload">
-                    <el-upload class="pick-upload" drag multiple accept="image/*"
-                              :action="state.pickUploadUrl" name="files" :headers="state.headers"
-                              :show-file-list="false" :on-success="onPickUploadSuccess" :on-error="onPickUploadError">
-                        <el-icon class="el-icon--upload"><ele-UploadFilled /></el-icon>
-                        <div class="el-upload__text">拖拽图片到此处，或<em>点击上传</em></div>
-                        <template #tip>
-                            <div class="el-upload__tip">上传后存入附件库，请在列表中点击刚上传的图片应用（按上传时间倒序排在最前）</div>
-                        </template>
-                    </el-upload>
-                </el-tab-pane>
-            </el-tabs>
-            <div v-if="state.imagePickDialog.applying" class="pick-applying">
-                <el-icon class="is-loading"><ele-Loading /></el-icon>
-                <span>正在更新图片槽位并重渲染模板...</span>
-            </div>
-        </el-dialog>
+        <ImagePickDialog ref="imagePickDialogRef" v-model:visible="pickDialogVisible"
+                         :session-id="state.currentAiSession?.sessionId || ''" @applied="onPickApplied" />
 
         <!-- AI 新建模板对话框（含历史生成记录入口） -->
-        <el-dialog v-model="state.createDialog.visible"
-                   :title="state.createDialog.view === 'history' ? '历史生成记录' : 'AI 新建模板'"
-                   :width="state.createDialog.view === 'history' ? '680px' : '520px'" :close-on-click-modal="false">
-            <el-form v-if="state.createDialog.view === 'create'" label-width="90px">
-                <el-form-item label="模板目录名" required>
-                    <el-input v-model="state.createDialog.templateName" placeholder="英文目录名，以字母开头，如 my-company"
-                              @input="onTemplateNameInput" />
-                </el-form-item>
-                <el-form-item label="需求描述"
-                              :required="!(state.createDialog.createMode === 'design' && state.createDialog.importFile)">
-                    <el-input v-model="state.createDialog.requirement" type="textarea" :rows="4"
-                              :placeholder="state.createDialog.createMode === 'design' && state.createDialog.importFile
-                                  ? '可选。补充说明站点定位（如：企业官网），AI 仿写时参考；与上传文件冲突时以文件为准'
-                                  : '描述模板需求，例如：企业官网模板，蓝色调，响应式设计'" />
-                </el-form-item>
-                <el-form-item label="生成模式">
-                    <el-radio-group v-model="state.createDialog.createMode">
-                        <!-- element-plus 2.3.x：radio 用 label 绑定值（value 属性为新版 API，此处不生效） -->
-                        <el-radio label="pipeline">组件编排</el-radio>
-                        <el-radio label="design">AI 自主设计</el-radio>
-                    </el-radio-group>
-                    <div class="mode-tip">{{ createModeTip }}</div>
-                </el-form-item>
-                <template v-if="state.createDialog.createMode === 'design'">
-                    <!-- 参考文件（可选）：选择即切换为仿写链路——提交路由见 onCreateConfirm -->
-                    <el-form-item label="参考 HTML">
-                        <el-upload accept=".html,.htm,.zip" :limit="1" :auto-upload="false"
-                                   :file-list="state.createDialog.importFileList"
-                                   :on-change="onImportFileChange" :on-remove="onImportFileRemove"
-                                   :on-exceed="onImportFileExceed">
-                            <el-button type="primary" plain>
-                                <el-icon><ele-UploadFilled /></el-icon>选择 HTML / ZIP 文件
-                            </el-button>
-                            <template #tip>
-                                <div class="el-upload__tip">可选。单个 .html：首页 1:1 保真、子页按其设计语言仿写；zip 站包：整站 1:1 迁移</div>
-                            </template>
-                        </el-upload>
-                    </el-form-item>
-                    <!-- 设计方向：仅无参考文件时可选（有文件时文件本身即方向） -->
-                    <el-form-item v-if="!state.createDialog.importFile" label="设计方向">
-                        <el-select v-model="state.createDialog.designDirection" placeholder="AI 自选方向" clearable style="width: 100%">
-                            <el-option v-for="d in state.designOptions.directions" :key="d.key"
-                                       :label="d.name" :value="d.key">
-                                <span>{{ d.name }}</span>
-                                <span class="direction-summary">{{ d.summary }}</span>
-                            </el-option>
-                        </el-select>
-                    </el-form-item>
-                    <el-form-item label="确认方式">
-                        <el-checkbox v-model="state.createDialog.confirmAuto">审计通过后自动转化（跳过人工确认）</el-checkbox>
-                    </el-form-item>
-                </template>
-                <el-form-item label="移动端适配">
-                    <el-checkbox v-model="state.createDialog.mobileAdaptive">生成响应式布局（多端断点 + 移动端汉堡菜单）</el-checkbox>
-                </el-form-item>
-            </el-form>
-            <template v-else>
-                <!-- 已应用/未应用分页签：未应用是活跃工作集（默认），已应用仅回看 -->
-                <el-tabs v-model="state.createDialog.historyTab">
-                    <el-tab-pane name="pending">
-                        <template #label>
-                            未应用<el-badge v-if="pendingSessions.length" :value="pendingSessions.length" type="warning" class="history-tab-badge" />
-                        </template>
-                        <el-table :data="pendingSessions" v-loading="state.createDialog.historyLoading" stripe size="small"
-                                  max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
-                            <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
-                            <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
-                            <el-table-column label="创建时间" width="130">
-                                <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
-                            </el-table-column>
-                        </el-table>
-                        <el-empty v-if="!state.createDialog.historyLoading && pendingSessions.length === 0"
-                                  description="暂无未应用的生成记录" :image-size="60" />
-                    </el-tab-pane>
-                    <el-tab-pane name="applied">
-                        <template #label>
-                            已应用<el-badge v-if="appliedSessions.length" :value="appliedSessions.length" type="success" class="history-tab-badge" />
-                        </template>
-                        <el-table :data="appliedSessions" v-loading="state.createDialog.historyLoading" stripe size="small"
-                                  max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
-                            <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
-                            <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
-                            <el-table-column label="创建时间" width="130">
-                                <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
-                            </el-table-column>
-                        </el-table>
-                        <el-empty v-if="!state.createDialog.historyLoading && appliedSessions.length === 0"
-                                  description="暂无已应用的生成记录" :image-size="60" />
-                    </el-tab-pane>
-                </el-tabs>
-                <div class="history-tip">点击记录直接进入编辑视图（左预览右对话）：未应用的可继续打磨或应用；已应用的仅回看</div>
-            </template>
-            <template #footer>
-                <template v-if="state.createDialog.view === 'create'">
-                    <el-button text type="primary" @click="onShowHistory">
-                        <el-icon><ele-Clock /></el-icon>历史生成记录
-                    </el-button>
-                    <el-button @click="state.createDialog.visible = false">取 消</el-button>
-                    <el-button type="primary" :loading="state.createDialog.loading" @click="onCreateConfirm">
-                        开始生成
-                    </el-button>
-                </template>
-                <template v-else>
-                    <el-button @click="state.createDialog.view = 'create'">返回新建</el-button>
-                    <el-button type="primary" @click="state.createDialog.visible = false">关 闭</el-button>
-                </template>
-            </template>
-        </el-dialog>
+        <CreateTemplateDialog ref="createDialogRef" v-model:visible="createDialogVisible"
+                              @created="onCreateDialogCreated" @open-session="onOpenHistorySession" />
     </el-card>
 </div>
 </template>
@@ -438,9 +174,20 @@ import { onBeforeRouteLeave } from 'vue-router';
 import { ElMessageBox, ElMessage } from 'element-plus';
 import { Local } from '/@/utils/storage';
 import { TemplateApi } from '/@/api/template/index';
-import { AiTemplateApi, AiImageApi } from '/@/api/ai/index';
-import { AttachApi } from '/@/api/attach/index';
+
+import { AiTemplateApi } from '/@/api/ai/index';
+
 import AiChat from '/@/views/template/aiChat.vue';
+
+import ImagePickDialog from '/@/views/template/ImagePickDialog.vue';
+
+import ImageWorkbench from '/@/views/template/ImageWorkbench.vue';
+
+import CreateTemplateDialog from '/@/views/template/CreateTemplateDialog.vue';
+
+import { useTemplateFileTree } from '/@/views/template/composables/useTemplateFileTree';
+
+import { useAiPreview, isRoutableHtml } from '/@/views/template/composables/useAiPreview';
 import { Codemirror } from "vue-codemirror";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
@@ -470,19 +217,20 @@ const extensions = computed(() => [langExtensionFor(state.currEditFile), oneDark
 
 const templateApi = TemplateApi();
 const aiApi = AiTemplateApi();
-const aiImageApi = AiImageApi();
-const attachApi = AttachApi();
+// 修图/生图任务状态机已随组件下沉：生图在 ImagePickDialog、修图在 ImageWorkbench
 const aiChatRef = ref();
 const aiPreviewFrameRef = ref();
+// 换图对话框显示状态（v-model:visible，Ctrl+S 快捷键据此判断是否拦截）
+const pickDialogVisible = ref(false);
+const imagePickDialogRef = ref();
+// 图片工作台状态（文件树点选图片文件打开；filePath 变化驱动组件内部重载原图）
+const workbenchVisible = ref(false);
+const workbenchFile = ref('');
+// AI 新建模板对话框显示状态（v-model:visible，Ctrl+S 快捷键据此判断是否拦截）
+const createDialogVisible = ref(false);
+const createDialogRef = ref();
 const state = reactive({
     clientHeight: "600px",
-    treeLoading: false,
-    treeTableData: [],
-    treeDefaultProps: {
-        children: 'children',
-        label: 'label',
-        filePath: 'filePath'
-    },
     // 模板选择（可编辑非激活模板）
     templateList: [] as any[],
     templateId: '',
@@ -511,43 +259,8 @@ const state = reactive({
     // true 时抽屉切换为「编辑 AI 模板」：左预览右对话，预览走会话路由；
     // 纯抽屉内状态，主编辑界面不受任何影响，关闭抽屉即重置
     sessionView: false,
-    // 会话工作目录文件树（仅服务抽屉左侧预览页面下拉，与主页面文件树无关）
-    sessionFileTree: [] as any[],
-    // AI 新建模板对话框（create：新建表单；history：历史生成记录列表）
-    createDialog: {
-        visible: false,
-        view: 'create' as 'create' | 'history',
-        // 历史记录页签（pending：未应用，默认；applied：已应用仅回看）
-        historyTab: 'pending' as 'pending' | 'applied',
-        templateName: '',
-        requirement: '',
-        // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
-        mobileAdaptive: true,
-        // 生成模式（UI 两项）：pipeline=组件编排（默认，兼容旧客户端不传字段的后端口径）；
-        // design=AI 自主设计。'import' 不再是 UI 选项——自主设计 + 参考文件时提交路由改走 import 口径
-        createMode: 'pipeline' as 'pipeline' | 'design',
-        // 设计稿模式：设计方向 key（空 = AI 自选；选项来自后端方向资产库，不写死）
-        designDirection: '',
-        // 设计稿模式：审计通过后自动转化（跳过人工确认；关闭时审计通过停在确认卡片）
-        confirmAuto: false,
-        // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 uploadReference 提交）
-        importFile: null as File | null,
-        importFileList: [] as any[],
-        loading: false,
-        // 历史生成型会话列表（未绑定 templateId，含已应用/未应用）
-        sessions: [] as any[],
-        historyLoading: false
-    },
-    // 设计稿模式选项（打开新建对话框时拉取）：directions=方向资产清单（选项始终显示，不受后端开关控制）
-    designOptions: {
-        loaded: false,
-        directions: [] as any[]
-    },
     // 新建调整会话按钮 loading
     creatingAiSession: false,
-    // AI 调整抽屉的实时预览：当前预览页面 + 刷新键（变化即强制 iframe 重载）
-    aiPreviewEntry: '',
-    aiPreviewKey: 0,
     // ===== 预览页点选换图 =====
     // 换图模式：开启后向预览 iframe 注入点选钩子（全部图片边框高亮可点选——
     // 槽位图 data-ai-slot 主色粗虚线、演示图浅色细虚线，点击弹操作窗）
@@ -559,110 +272,23 @@ const state = reactive({
     // elementHint 为点选时命中的具体元素描述（如 标题「散养土鸡蛋」），做元素级语义提示
     selectedSection: null as { sectionId: string; elementHint: string } | null,
     // 换图模式注入的 click 捕获监听（跨 iframe 重载复用同一函数，便于移除）
-    // 点选换图对话框（槽位图：slot/sectionId 来自预览页 data-ai-slot/data-ai-section 标记；
-    // 演示图：rawSrc 为点击图片的原样 src，改 _preview_data.json 仅预览生效）
-    imagePickDialog: {
-        visible: false,
-        sectionId: '',
-        slot: '',
-        rawSrc: '',
-        tab: 'library' as 'library' | 'generate' | 'upload',
-        applying: false
-    },
-    // 附件库图片检索（typePath 为图片直显地址）
-    attLib: {
-        keyword: '',
-        page: 1,
-        pageSize: 12,
-        total: 0,
-        list: [] as any[],
-        loading: false
-    },
-    // AI 生图任务（提交即返回 + 轮询 task/{id} 至 success/failed）
-    imageGen: {
-        prompt: '',
-        size: '1280*720',
-        num: 2,
-        submitting: false,
-        taskId: null as any,
-        status: '' as '' | 'pending' | 'running' | 'success' | 'failed',
-        error: '',
-        results: [] as any[],
-        pollTimer: null as any
-    },
-    // 换图上传接口（直传附件库）
-    pickUploadUrl: import.meta.env.VITE_API_URL + '/admin/attachment/upload',
-    // ===== 模板图片工作台（覆盖代码编辑器：左原图 / 右生成结果对比，确认后应用） =====
-    // 图片工作台激活状态（文件树点选图片文件打开）：url 带刷新键，应用/恢复原图后重载左侧原图
-    imagePreview: {
-        visible: false,
-        filePath: '',
-        url: '',
-        key: 0,
-        restoring: false,
-        deleting: false
-    },
-    // 模板图片 AI 修图任务（edit 类型 + sourceTemplateId/sourceFilePath，
-    // 成功后结果仅存附件库展示在右侧，用户点「应用」才回写模板文件）
-    imageEdit: {
-        prompt: '',
-        submitting: false,
-        taskId: null as any,
-        status: '' as '' | 'pending' | 'running' | 'success' | 'failed',
-        error: '',
-        // 最新一次修图的结果图（显示在右侧与原图对比，应用后清空）
-        resultUrl: '',
-        applying: false,
-        pollTimer: null as any
-    },
-    // 文件树默认展开的节点（第一层）
-    expandedKeys: [] as string[],
     // AI 对话框收缩状态（仅 adjust 模式）
     aiChatCollapsed: false
 });
 
+// 文件树（正式模板目录树 + AI 会话工作目录树，加载与查找下沉到 composable）
+const { tree, findIndexNode, load: loadTemplateTree, loadSession, clearSession } = useTemplateFileTree();
+
 // ==================== AI 集成 ====================
 
-/**
- * 判断是否为可路由的 HTML 文件（非 _ 开头的布局/宏文件）
- */
-const isRoutableHtml = (file: string) =>
-    !!file && file.toLowerCase().endsWith('.html') && !file.split('/').pop()!.startsWith('_');
-
-/**
- * 实时预览可选页面：文件树中的可路由 HTML（含模板目录前缀，预览后端会截掉）
- *
- * 会话编辑视图用会话工作目录的文件树（sessionFileTree），其余用主页面正式模板文件树
- */
-const previewPageOptions = computed<string[]>(() => {
-    const result: string[] = [];
-    const walk = (nodes: any[]) => {
-        for (const n of nodes || []) {
-            if (n.children && n.children.length > 0) {
-                walk(n.children);
-            } else if (n.sortNum === 1 && isRoutableHtml(n.filePath || '')) {
-                result.push(n.filePath);
-            }
-        }
-    };
-    walk((state.sessionView ? state.sessionFileTree : state.treeTableData) as any[]);
-    return result;
-});
-
-/**
- * 实时预览 iframe 地址：刷新键变化（AI 写盘/手动刷新）即重载
- *
- * 会话编辑视图走会话预览路由（按 sessionId 定位工作目录），
- * 文件路径含模板目录前缀，后端 AiTemplatePreviewController 会截掉
- */
-const aiPreviewUrl = computed(() => {
-    if (state.sessionView) {
-        const sess = state.currentAiSession;
-        if (!sess?.sessionId || !sess.templateName || !state.aiPreviewEntry) return '';
-        return '/ai/template/preview/' + sess.sessionId + '/' + sess.templateName + '/' + state.aiPreviewEntry + '?t=' + state.aiPreviewKey;
-    }
-    if (!state.loadedTemplateId || !state.aiPreviewEntry) return '';
-    return '/template/preview/' + state.loadedTemplateId + '/' + state.aiPreviewEntry + '?t=' + state.aiPreviewKey;
+// AI 实时预览（入口页面/刷新键/预览地址，getter 注入树与会话上下文）
+const { preview, previewPageOptions, aiPreviewUrl, previewEmptyTip, initEntry: initAiPreviewEntry, refresh: refreshAiPreview, openInNewWindow: openAiPreviewNewWindow } = useAiPreview({
+    getSessionView: () => state.sessionView,
+    getCurrentSession: () => state.currentAiSession,
+    getLoadedTemplateId: () => state.loadedTemplateId,
+    getCurrEditFile: () => state.currEditFile,
+    getTreeNodes: () => (state.sessionView ? tree.sessionData : tree.data) as any[],
+    getSessionTreeNodes: () => tree.sessionData
 });
 
 /** 上传附加参数 */
@@ -674,44 +300,6 @@ const uploadTargetTip = computed(() =>
 
 /** 会话编辑视图下已应用的会话：只读（禁用选区等需要写会话的交互入口） */
 const sessionReadonly = computed(() => state.sessionView && state.currentAiSession?.status === 'applied');
-
-/**
- * 预览空白占位文案：会话尚无任何文件（新会话生成中）显示引导提示，
- * 其余（树已就绪但无可路由 HTML）用通用提示
- */
-const previewEmptyTip = computed(() => {
-    if (state.sessionView && (state.sessionFileTree || []).length === 0) {
-        return 'AI 正在生成文件，首个页面完成后将在此显示实时预览';
-    }
-    return '暂无可预览页面';
-});
-
-/**
- * 初始化实时预览入口：优先当前编辑的可路由 HTML（仅非会话视图），其次首页（index.html），
- * 最后取第一个可选页
- *
- * 文件树路径含模板目录前缀（如 my-company/index.html），首页匹配须按后缀而非全等，
- * 否则永远回退到文件树第一个页面（字母序在前，如 article.html）
- */
-const initAiPreviewEntry = () => {
-    const options = previewPageOptions.value;
-    // 会话编辑视图预览的是会话工作目录，主编辑器当前文件（正式模板）不适用
-    if (!state.sessionView && isRoutableHtml(state.currEditFile) && options.includes(state.currEditFile)) {
-        state.aiPreviewEntry = state.currEditFile;
-    } else {
-        const indexEntry = options.find((p: string) => p === 'index.html' || p.endsWith('/index.html'));
-        state.aiPreviewEntry = indexEntry || (options.length > 0 ? options[0] : '');
-    }
-    state.aiPreviewKey = Date.now();
-};
-
-const refreshAiPreview = () => {
-    state.aiPreviewKey = Date.now();
-};
-
-const openAiPreviewNewWindow = () => {
-    if (aiPreviewUrl.value) window.open(aiPreviewUrl.value, '_blank');
-};
 
 // ==================== 预览页点选换图 ====================
 
@@ -810,8 +398,8 @@ const onPreviewLinkClick = (e: Event) => {
     // 本页链接（含锚点跳转）放行默认行为
     if (resolved.pathname === win.location.pathname) return;
     e.preventDefault();
-    if (entry !== state.aiPreviewEntry) {
-        state.aiPreviewEntry = entry;
+    if (entry !== preview.entry) {
+        preview.entry = entry;
     } else {
         refreshAiPreview();
     }
@@ -829,8 +417,8 @@ const syncPreviewEntryFromIframe = () => {
     if (!win) return;
     try {
         const entry = extractPreviewEntry(win.location.pathname);
-        if (entry && isRoutableHtml(entry) && entry !== state.aiPreviewEntry) {
-            state.aiPreviewEntry = entry;
+        if (entry && isRoutableHtml(entry) && entry !== preview.entry) {
+            preview.entry = entry;
         }
     } catch {
         // 读不到 iframe 地址时忽略（不联动）
@@ -887,7 +475,7 @@ const onPickImageClick = (e: Event) => {
             ElMessage.warning('该图片缺少槽位标记，无法点选更换（可让 AI 调整该区域的图片）');
             return;
         }
-        openImagePickDialog(sectionId, slot, '');
+        imagePickDialogRef.value?.open(sectionId, slot, '');
         return;
     }
     // 无槽位标记：点击的是 img 才进入演示图换图（点链接文字等不响应）
@@ -899,23 +487,7 @@ const onPickImageClick = (e: Event) => {
         ElMessage.warning('该图片缺少地址，无法更换');
         return;
     }
-    openImagePickDialog('', '', rawSrc);
-};
-
-/**
- * 打开换图操作窗并加载附件库图片
- *
- * 槽位图传 sectionId/slot；演示图传 rawSrc（仅预览生效）
- */
-const openImagePickDialog = (sectionId: string, slot: string, rawSrc: string) => {
-    state.imagePickDialog.sectionId = sectionId;
-    state.imagePickDialog.slot = slot;
-    state.imagePickDialog.rawSrc = rawSrc;
-    state.imagePickDialog.tab = 'library';
-    state.imagePickDialog.visible = true;
-    resetImageGen();
-    state.attLib.page = 1;
-    loadAttImages();
+    imagePickDialogRef.value?.open('', '', rawSrc);
 };
 
 // ==================== 预览页选区修改 ====================
@@ -1048,196 +620,14 @@ const clearSelectedSection = () => {
 };
 
 /**
- * 加载附件库图片（分页 + 文件名模糊搜索，只取 image 类型）
+ * 换图对话框应用成功回调：
+ * 刷新预览 iframe；槽位图重渲染了模板文件需同步刷新文件树
  */
-const loadAttImages = async () => {
-    state.attLib.loading = true;
-    try {
-        const res: any = await attachApi.getAttachList({
-            page: state.attLib.page,
-            pageSize: state.attLib.pageSize,
-            fileType: 'image',
-            fileName: state.attLib.keyword || undefined
-        });
-        state.attLib.list = res.data?.records || [];
-        state.attLib.total = res.data?.total || 0;
-    } catch (e: any) {
-        ElMessage.error(e?.message || '加载附件库图片失败');
-    } finally {
-        state.attLib.loading = false;
+const onPickApplied = (isPreviewOnly: boolean) => {
+    refreshAiPreview();
+    if (!isPreviewOnly) {
+        loadFileTree();
     }
-};
-
-/** 附件库搜索（回到第一页） */
-const searchAttImages = () => {
-    state.attLib.page = 1;
-    loadAttImages();
-};
-
-/**
- * 应用换图：按图片来源分流
- * - 槽位图（有 sectionId/slot）：更新 _pagespec.json（spec 替换 → 校验 → 重渲染 → 持久化），正式生效
- * - 演示图（有 rawSrc）：更新 _preview_data.json 的 imageOverrides，仅预览生效
- *
- * attachmentId 三个来源归一：附件库点选 / AI 生成结果（已自动入库）/ 上传后入库
- */
-const applyImageSlot = async (attachmentId: number) => {
-    const sessionId = state.currentAiSession?.sessionId;
-    if (!sessionId) {
-        ElMessage.warning('当前无 AI 调整会话');
-        return;
-    }
-    if (!attachmentId) {
-        ElMessage.warning('缺少附件 ID');
-        return;
-    }
-    const isPreviewOnly = !!state.imagePickDialog.rawSrc && !state.imagePickDialog.slot;
-    state.imagePickDialog.applying = true;
-    try {
-        const res: any = isPreviewOnly
-            ? await aiApi.updatePreviewImage(sessionId, {
-                imageUrl: state.imagePickDialog.rawSrc,
-                attachmentId
-            })
-            : await aiApi.updateImageSlot(sessionId, {
-                sectionId: state.imagePickDialog.sectionId,
-                slot: state.imagePickDialog.slot,
-                attachmentId
-            });
-        if (res.data) {
-            ElMessage.success(isPreviewOnly ? '演示图片已更换（仅预览生效）' : '图片已更换');
-            state.imagePickDialog.visible = false;
-            stopImageGenPolling();
-            // 刷新预览 iframe；槽位图重渲染了模板文件需同步刷新文件树
-            refreshAiPreview();
-            if (!isPreviewOnly) {
-                loadFileTree();
-            }
-        } else {
-            ElMessage.error(res.msg || '更换图片失败');
-        }
-    } catch (e: any) {
-        ElMessage.error(e?.message || '更换图片失败');
-    } finally {
-        state.imagePickDialog.applying = false;
-    }
-};
-
-/** 重置 AI 生图表单（打开操作窗/应用成功后） */
-const resetImageGen = () => {
-    stopImageGenPolling();
-    state.imageGen.prompt = '';
-    state.imageGen.submitting = false;
-    state.imageGen.taskId = null;
-    state.imageGen.status = '';
-    state.imageGen.error = '';
-    state.imageGen.results = [];
-};
-
-/** 停止生图任务轮询 */
-const stopImageGenPolling = () => {
-    if (state.imageGen.pollTimer) {
-        clearInterval(state.imageGen.pollTimer);
-        state.imageGen.pollTimer = null;
-    }
-};
-
-/**
- * 提交 AI 生图任务（t2i 文生图），提交即返回，前端轮询至完成
- */
-const submitImageGen = async () => {
-    const prompt = state.imageGen.prompt.trim();
-    if (!prompt) {
-        ElMessage.warning('请描述想要生成的图片');
-        return;
-    }
-    state.imageGen.submitting = true;
-    state.imageGen.results = [];
-    state.imageGen.error = '';
-    try {
-        const res: any = await aiImageApi.generate({
-            taskType: 't2i',
-            prompt,
-            size: state.imageGen.size,
-            num: state.imageGen.num
-        });
-        if (!res.data) {
-            ElMessage.error(res.msg || '提交生图任务失败');
-            return;
-        }
-        state.imageGen.taskId = res.data.id;
-        state.imageGen.status = res.data.status || 'pending';
-        startImageGenPolling();
-    } catch (e: any) {
-        ElMessage.error(e?.message || '提交生图任务失败');
-    } finally {
-        state.imageGen.submitting = false;
-    }
-};
-
-/** 重试失败的生图任务 */
-const retryImageGen = async () => {
-    if (!state.imageGen.taskId) return;
-    try {
-        const res: any = await aiImageApi.retry(state.imageGen.taskId);
-        if (res.data) {
-            state.imageGen.taskId = res.data.id;
-            state.imageGen.status = res.data.status || 'pending';
-            state.imageGen.error = '';
-            startImageGenPolling();
-        } else {
-            ElMessage.error(res.msg || '重试失败');
-        }
-    } catch (e: any) {
-        ElMessage.error(e?.message || '重试失败');
-    }
-};
-
-/**
- * 轮询生图任务状态：3 秒一次，success 时解析 results（url + attachmentId），failed 时展示错误
- */
-const startImageGenPolling = () => {
-    stopImageGenPolling();
-    // 防重入：上一轮请求未返回时跳过本轮，避免慢请求下轮询堆叠并发
-    let polling = false;
-    state.imageGen.pollTimer = setInterval(async () => {
-        if (!state.imageGen.taskId) {
-            stopImageGenPolling();
-            return;
-        }
-        if (polling) return;
-        polling = true;
-        try {
-            const res: any = await aiImageApi.getTask(state.imageGen.taskId);
-            const task = res.data;
-            if (!task) return;
-            state.imageGen.status = task.status;
-            if (task.status === 'success') {
-                stopImageGenPolling();
-                state.imageGen.results = (task.results || []).filter((r: any) => r.attachmentId);
-            } else if (task.status === 'failed') {
-                stopImageGenPolling();
-                state.imageGen.error = task.error || '';
-            }
-        } catch (e) {
-            // 单次轮询异常不打断（网络抖动等），下轮继续
-        } finally {
-            polling = false;
-        }
-    }, 3000);
-};
-
-/** 换图上传成功：入库成功后切到附件库 tab（最新上传排在最前），由用户点选应用 */
-const onPickUploadSuccess = () => {
-    ElMessage.success('上传成功，请在列表中点击刚上传的图片应用');
-    state.imagePickDialog.tab = 'library';
-    state.attLib.keyword = '';
-    state.attLib.page = 1;
-    loadAttImages();
-};
-
-const onPickUploadError = () => {
-    ElMessage.error('上传失败');
 };
 
 /**
@@ -1251,7 +641,7 @@ const onPickUploadError = () => {
  */
 const onAiFileWritten = (path: string) => {
     if (state.sessionView) {
-        if (!state.aiPreviewEntry) {
+        if (!preview.entry) {
             loadSessionFileTree().then(() => initAiPreviewEntry());
             return;
         }
@@ -1261,7 +651,7 @@ const onAiFileWritten = (path: string) => {
             loadSessionFileTree();
         }
     }
-    state.aiPreviewKey = Date.now();
+    preview.key = Date.now();
 };
 
 /**
@@ -1275,8 +665,8 @@ const onAiFileWritten = (path: string) => {
 const onAiSwitchFile = (path: string) => {
     if (!isRoutableHtml(path)) return;
     const target = previewPageOptions.value.find((p: string) => p === path || p.endsWith('/' + path));
-    if (target && target !== state.aiPreviewEntry) {
-        state.aiPreviewEntry = target;
+    if (target && target !== preview.entry) {
+        preview.entry = target;
     }
 };
 
@@ -1349,197 +739,49 @@ const onOpenAiAdjust = async () => {
     }
 };
 
-/** 生成模式提示：随选择与参考文件切换（文案与后端默认开关口径一致） */
-const createModeTip = computed(() => {
-    if (state.createDialog.createMode === 'design') {
-        return state.createDialog.importFile
-            ? '已选参考文件：AI 以其为权威仿写——单个 HTML 首页 1:1 保真、子页继承其设计语言；zip 整站 1:1 迁移'
-            : 'AI 自主设计整页视觉：灵活度高、效果上限高，但耗时与 token 成本约为组件模式的 2~3 倍。可上传参考 HTML 让 AI 照其仿写';
-    }
-    return '组件拼装 + 定向润色：快、稳、省 token，由组件数量决定丰富度（默认模式）';
-});
-
 /**
- * 拉取设计稿先行模式的方向清单（打开新建对话框时调用）。
- * 模式选项始终显示（不受后端 feature 开关控制）；此处仅拉方向资产清单，
- * 拉取失败不阻断对话框——方向下拉留空，管线模式与"AI 自选"均不受影响。
- */
-const loadDesignOptions = async () => {
-    try {
-        const res = await aiApi.designOptions();
-        if (res.data) {
-            state.designOptions.directions = Array.isArray(res.data.directions) ? res.data.directions : [];
-            state.designOptions.loaded = true;
-        }
-    } catch (e) {
-        // 忽略：方向下拉留空（AI 自选仍可用），不打扰用户
-    }
-};
-
-/**
- * 打开 AI 新建模板对话框（generate 模式）
+ * 打开 AI 新建模板对话框：字段重置与方向清单拉取由组件内部 open() 处理
  */
 const onOpenAiCreate = () => {
-    state.createDialog.view = 'create';
-    state.createDialog.templateName = '';
-    state.createDialog.requirement = '';
-    state.createDialog.mobileAdaptive = true;
-    // 设计模式三字段每次重置（避免上次选择残留：默认管线、方向 AI 自选、审计通过自动转化）
-    state.createDialog.createMode = 'pipeline';
-    state.createDialog.designDirection = '';
-    state.createDialog.confirmAuto = true;
-    // 参考文件每次重置（残留会让用户误以为已选择新文件）
-    state.createDialog.importFile = null;
-    state.createDialog.importFileList = [];
-    state.createDialog.visible = true;
-    loadDesignOptions();
-};
-
-/** 参考文件选择（自主设计模式，手动上传暂存待创建会话后提交） */
-const onImportFileChange = (file: any) => {
-    state.createDialog.importFile = (file && file.raw) || null;
-    state.createDialog.importFileList = file ? [{ name: file.name }] : [];
-};
-
-/** 参考文件移除 */
-const onImportFileRemove = () => {
-    state.createDialog.importFile = null;
-    state.createDialog.importFileList = [];
-};
-
-/** 参考文件 limit=1 下重复选择 → 替换既有文件（el-upload 不自动替换，手动接管） */
-const onImportFileExceed = (files: any[]) => {
-    const file = files && files[0];
-    if (!file) return;
-    state.createDialog.importFile = file;
-    state.createDialog.importFileList = [{ name: file.name }];
+    createDialogRef.value?.open();
 };
 
 /**
- * 查看历史生成记录：加载生成型会话（未绑定 templateId），
- * 已应用/未应用全部显示，点击记录可回到抽屉继续处理
+ * 新建模板对话框创建会话成功回调：切换到生成模式进入会话编辑视图（左预览右对话），
+ * 生成过程中 AI 每写完一个文件实时刷新预览；
+ * 抽屉渲染后自动发送首条消息（aiChat 内部会等待会话历史加载完成）
  */
-const onShowHistory = async () => {
-    state.createDialog.view = 'history';
-    // 默认展示未应用页签（活跃工作集），每次打开重置避免上次停留页签造成误导
-    state.createDialog.historyTab = 'pending';
-    state.createDialog.historyLoading = true;
+const onCreateDialogCreated = async (session: any, firstMessage: string) => {
+    state.aiMode = 'generate';
+    state.sessionView = true;
     try {
-        const res = await aiApi.listSessions();
-        state.createDialog.sessions = (res.data || []).filter((s: any) => !s.templateId);
-    } catch (e: any) {
-        ElMessage.error(e?.message || '加载历史记录失败');
-    } finally {
-        state.createDialog.historyLoading = false;
+        const listRes = await aiApi.listSessions();
+        state.aiSessions = (listRes.data || []).filter((s: any) => !s.templateId);
+    } catch (e) {
+        // 会话列表刷新失败不阻断进入抽屉（下拉列表稍旧，下次打开会重拉）
     }
+    state.currentAiSessionId = session.sessionId;
+    state.currentAiSession = session;
+    state.aiDrawerVisible = true;
+    // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
+    loadSessionFileTree().then(() => initAiPreviewEntry());
+    nextTick(() => {
+        aiChatRef.value?.autoSend(firstMessage);
+    });
 };
-
-/** 历史记录按状态分流：未应用（可继续打磨/应用）与已应用（仅回看） */
-const pendingSessions = computed(() => state.createDialog.sessions.filter((s: any) => s.status !== 'applied'));
-const appliedSessions = computed(() => state.createDialog.sessions.filter((s: any) => s.status === 'applied'));
 
 /**
  * 打开历史生成会话：直接进入会话编辑视图恢复会话（不自动发送消息）；
  * 未应用的可继续对话打磨，已应用的只读回看（预览照常显示）
  */
-const onOpenHistorySession = (row: any) => {
-    state.createDialog.visible = false;
+const onOpenHistorySession = (row: any, sessions: any[]) => {
     state.aiMode = 'generate';
     state.sessionView = true;
-    state.aiSessions = state.createDialog.sessions;
+    state.aiSessions = sessions;
     state.currentAiSessionId = row.sessionId;
     state.currentAiSession = row;
     state.aiDrawerVisible = true;
     loadSessionFileTree().then(() => initAiPreviewEntry());
-};
-
-/** 历史记录创建时间格式化（月-日 时:分） */
-const formatHistoryTime = (created: any) => {
-    if (!created) return '';
-    const d = new Date(created);
-    if (isNaN(d.getTime())) return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-
-/**
- * 模板目录名输入过滤：只允许字母、数字、下划线、横线，非法字符（含中文、空格、粘贴内容）即时剥离
- *
- * "以字母开头"不在输入时强制（避免与用户输入过程打架），提交时校验兜底
- */
-const onTemplateNameInput = (val: string) => {
-    state.createDialog.templateName = (val || '').replace(/[^a-zA-Z0-9_-]/g, '');
-};
-
-/**
- * 确认新建模板：创建生成型会话并自动发送首条需求。
- * 自主设计模式带参考文件：创建会话（createMode=design）→ 上传 HTML（同步 ingest，
- * 后端归一为 import 血统）→ 自动发送消息触发转化（单文件 landing 起步 DESIGNING，AI 仿写子页；zip 起步 CONVERTING）
- */
-const onCreateConfirm = async () => {
-    const name = state.createDialog.templateName.trim();
-    const requirement = state.createDialog.requirement.trim();
-    // 自主设计 + 参考文件 = 仿写链路（上传后由后端归一血统）；无文件 = 纯 AI 自主设计
-    const withReference = state.createDialog.createMode === 'design' && !!state.createDialog.importFile;
-    if (!name) {
-        ElMessage.warning('请输入模板目录名');
-        return;
-    }
-    if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
-        ElMessage.warning('模板目录名必须以英文字母开头，只能包含字母、数字、下划线、横线');
-        return;
-    }
-    if (!requirement && !withReference) {
-        ElMessage.warning('请输入需求描述');
-        return;
-    }
-    state.createDialog.loading = true;
-    try {
-        // 模式只传 pipeline/design 两种；带参考文件时方向不传（文件本身即方向）
-        const d = state.createDialog;
-        const res = await aiApi.createSession({
-            templateName: name, requirement, mobileAdaptive: d.mobileAdaptive,
-            createMode: d.createMode,
-            designDirection: (!withReference && d.designDirection) || undefined,
-            confirmAuto: d.confirmAuto === true
-        });
-        if (!res.data) {
-            ElMessage.error(res.msg || '创建会话失败');
-            return;
-        }
-        if (withReference) {
-            // 上传参考文件（同步完成解压 + 归一化 + plan.json 落盘，秒级；后端归一为 import 血统）
-            const impRes = await aiApi.uploadReference(res.data.sessionId, d.importFile as File);
-            if (!impRes.data) {
-                ElMessage.error(impRes.msg || '导入失败');
-                return;
-            }
-            const report = impRes.data;
-            ElMessage.success(`导入完成：${report.pageCount} 个页面 / ${report.assetCount} 个资产文件，开始转化…`);
-        }
-        // 会话创建成功：切换到生成模式，直接进入会话编辑视图（左预览右对话），
-        // 生成过程中 AI 每写完一个文件实时刷新预览
-        state.aiMode = 'generate';
-        state.sessionView = true;
-        const listRes = await aiApi.listSessions();
-        state.aiSessions = (listRes.data || []).filter((s: any) => !s.templateId);
-        state.currentAiSessionId = res.data.sessionId;
-        state.currentAiSession = res.data;
-        state.createDialog.visible = false;
-        state.aiDrawerVisible = true;
-        // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
-        loadSessionFileTree().then(() => initAiPreviewEntry());
-        // 抽屉渲染后自动发送首条消息（aiChat 内部会等待会话历史加载完成）：
-        // 仿写链路触发编排器推进（单文件 landing DESIGNING 起步 / zip CONVERTING 起步）；生成模式发送需求
-        const firstMessage = withReference ? '开始转化导入的模板页面' : requirement;
-        nextTick(() => {
-            aiChatRef.value?.autoSend(firstMessage);
-        });
-    } catch (e: any) {
-        ElMessage.error(e?.message || '创建会话失败');
-    } finally {
-        state.createDialog.loading = false;
-    }
 };
 
 /**
@@ -1635,24 +877,17 @@ const onAiFilesChanged = () => {
 // ==================== 会话编辑视图（抽屉内，生成型会话应用前查看打磨） ====================
 
 /**
- * 加载会话工作目录文件树（仅用于抽屉左侧预览的页面下拉，与主编辑界面无关）
+ * 加载会话工作目录文件树（仅用于抽屉左侧预览的页面下拉，与主编辑界面无关）；
+ * 树数据由 useTemplateFileTree 托管，此处仅桥接当前会话 ID
  */
-const loadSessionFileTree = () => {
-    const sessionId = state.currentAiSession?.sessionId;
-    if (!sessionId) return Promise.resolve();
-    return aiApi.getSessionFileTree(sessionId).then((res: any) => {
-        state.sessionFileTree = res.data || [];
-    }).catch(() => {
-        state.sessionFileTree = [];
-    });
-};
+const loadSessionFileTree = () => loadSession(state.currentAiSession?.sessionId);
 
 /**
  * 退出会话编辑视图：抽屉回到 aiChat 独占全宽（无左侧预览）
  */
 const exitSessionView = () => {
     state.sessionView = false;
-    state.sessionFileTree = [];
+    clearSession();
     // 选区锁定随会话上下文一并清除
     state.sectionSelectMode = false;
     clearSelectedSection();
@@ -1690,7 +925,7 @@ const onAiTemplateApplied = (templateId?: string) => {
     if (state.currentAiSession) state.currentAiSession.status = 'applied';
     state.aiDrawerVisible = false;
     state.sessionView = false;
-    state.sessionFileTree = [];
+    clearSession();
     // 刷新模板列表并选中应用后的模板（preferId 缺省回落到当前激活模板）
     const doLoad = () => loadTemplateList(templateId || undefined);
     if (checkDirty()) {
@@ -1738,18 +973,8 @@ const loadTemplateList = (preferId?: string) => {
  * @returns 加载 Promise（供调用方在树就绪后初始化预览入口）
  */
 const loadFileTree = (openDefault = false) => {
-    state.treeLoading = true;
-    return templateApi.getTemplateFileTree(state.loadedTemplateId || undefined).then((res: any) => {
-        state.treeTableData = res.data;
-        // 默认展开第一层（顶层节点）
-        state.expandedKeys = (res.data || []).map((n: any) => n.filePath);
-        if (openDefault) {
-            openDefaultFile();
-        }
-    }).finally(() => {
-        state.treeLoading = false;
-    })
-}
+    return loadTemplateTree(state.loadedTemplateId || undefined, openDefault ? openDefaultFile : undefined);
+};
 
 /**
  * 读取文件内容（正式模板目录）
@@ -1763,18 +988,7 @@ const loadFileContent = (filePath: string) => {
  * 在文件树中查找 index.html 并加载到编辑器（含模板目录前缀，如 xjd2022/index.html）
  */
 const openDefaultFile = () => {
-    const find = (nodes: any[]): any => {
-        for (const n of nodes || []) {
-            if (n.children && n.children.length > 0) {
-                const hit = find(n.children);
-                if (hit) return hit;
-            } else if ((n.filePath || '').toLowerCase().endsWith('/index.html') || n.filePath === 'index.html') {
-                return n;
-            }
-        }
-        return null;
-    };
-    const node = find(state.treeTableData as any[]);
+    const node = findIndexNode(tree.data as any[]);
     if (node) {
         state.currEditFile = node.filePath;
         loadFileContent(node.filePath).then((res: any) => {
@@ -1883,228 +1097,6 @@ const isImageFile = (filePath: string) => {
     return IMAGE_SUFFIXES.some((s) => lower.endsWith(s));
 };
 
-/**
- * 图片预览地址：复用预览路由的静态文件分支（主编辑界面只处理正式模板图片），
- * filePath 含模板目录前缀（与文件树一致），后端会截掉前缀解析；
- * 逐段编码（保留 / 分隔符，避免 %2F 被 Tomcat 拒绝）
- */
-const buildImageUrl = (filePath: string) => {
-    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-    return '/template/preview/' + encodeURIComponent(state.loadedTemplateId) + '/' + encodedPath + '?t=' + state.imagePreview.key;
-};
-
-/** 重置修图任务状态（keepPrompt：应用/恢复后保留提示词便于继续微调） */
-const resetImageEditState = (keepPrompt = false) => {
-    stopImageEditPolling();
-    if (!keepPrompt) state.imageEdit.prompt = '';
-    state.imageEdit.submitting = false;
-    state.imageEdit.taskId = null;
-    state.imageEdit.status = '';
-    state.imageEdit.error = '';
-    state.imageEdit.resultUrl = '';
-    state.imageEdit.applying = false;
-};
-
-/** 打开图片工作台（文件树点选图片文件，覆盖代码编辑器） */
-const openImagePreview = (filePath: string) => {
-    state.imagePreview.filePath = filePath;
-    state.imagePreview.key = Date.now();
-    state.imagePreview.url = buildImageUrl(filePath);
-    state.imagePreview.visible = true;
-    resetImageEditState();
-};
-
-/** 关闭图片工作台，回到代码编辑器 */
-const closeImageWorkbench = () => {
-    state.imagePreview.visible = false;
-    resetImageEditState();
-};
-
-/** 左侧原图重载（应用生成结果/恢复原图后） */
-const refreshImagePreview = () => {
-    if (!state.imagePreview.visible) return;
-    state.imagePreview.key = Date.now();
-    state.imagePreview.url = buildImageUrl(state.imagePreview.filePath);
-};
-
-/** 新窗口查看原图 */
-const openImageRaw = () => {
-    if (state.imagePreview.url) window.open(state.imagePreview.url, '_blank');
-};
-
-/** 新窗口查看生成结果图 */
-const openResultRaw = () => {
-    if (state.imageEdit.resultUrl) window.open(state.imageEdit.resultUrl, '_blank');
-};
-
-/** 提交模板图片 AI 修图任务（结果先存附件库展示对比，用户应用后才回写） */
-const submitTemplateImageEdit = async () => {
-    const prompt = state.imageEdit.prompt.trim();
-    if (!prompt) {
-        ElMessage.warning('请描述修图要求');
-        return;
-    }
-    if (!state.loadedTemplateId || !state.imagePreview.filePath) {
-        ElMessage.warning('缺少模板或图片文件信息');
-        return;
-    }
-    state.imageEdit.submitting = true;
-    state.imageEdit.error = '';
-    state.imageEdit.taskId = null;
-    state.imageEdit.status = '';
-    state.imageEdit.resultUrl = '';
-    try {
-        const res: any = await aiImageApi.generate({
-            taskType: 'edit',
-            prompt,
-            num: 1,
-            sourceTemplateId: state.loadedTemplateId,
-            sourceFilePath: state.imagePreview.filePath
-        });
-        if (!res.data) {
-            ElMessage.error(res.msg || '提交修图任务失败');
-            return;
-        }
-        state.imageEdit.taskId = res.data.id;
-        state.imageEdit.status = res.data.status || 'pending';
-        startImageEditPolling();
-    } catch (e: any) {
-        ElMessage.error(e?.message || '提交修图任务失败');
-    } finally {
-        state.imageEdit.submitting = false;
-    }
-};
-
-/** 重试失败的修图任务 */
-const retryTemplateImageEdit = async () => {
-    if (!state.imageEdit.taskId) return;
-    try {
-        const res: any = await aiImageApi.retry(state.imageEdit.taskId);
-        if (res.data) {
-            state.imageEdit.taskId = res.data.id;
-            state.imageEdit.status = res.data.status || 'pending';
-            state.imageEdit.error = '';
-            startImageEditPolling();
-        } else {
-            ElMessage.error(res.msg || '重试失败');
-        }
-    } catch (e: any) {
-        ElMessage.error(e?.message || '重试失败');
-    }
-};
-
-/**
- * 轮询修图任务：success 时取第一张结果图展示在右侧（不回写模板，等用户点「应用」）；
- * failed 时展示错误
- */
-const startImageEditPolling = () => {
-    stopImageEditPolling();
-    // 防重入：上一轮请求未返回时跳过本轮，避免慢请求下轮询堆叠并发
-    let polling = false;
-    state.imageEdit.pollTimer = setInterval(async () => {
-        if (!state.imageEdit.taskId) {
-            stopImageEditPolling();
-            return;
-        }
-        if (polling) return;
-        polling = true;
-        try {
-            const res: any = await aiImageApi.getTask(state.imageEdit.taskId);
-            const task = res.data;
-            if (!task) return;
-            state.imageEdit.status = task.status;
-            if (task.status === 'success') {
-                stopImageEditPolling();
-                const results = (task.results || []).filter((r: any) => r.url);
-                state.imageEdit.resultUrl = results.length > 0 ? results[0].url : '';
-                if (!state.imageEdit.resultUrl) {
-                    ElMessage.warning('修图完成但未返回结果图，请重试');
-                }
-            } else if (task.status === 'failed') {
-                stopImageEditPolling();
-                state.imageEdit.error = task.error || '';
-            }
-        } catch (e) {
-            // 单次轮询异常不打断（网络抖动等），下轮继续
-        } finally {
-            polling = false;
-        }
-    }, 3000);
-};
-
-/** 停止修图任务轮询 */
-const stopImageEditPolling = () => {
-    if (state.imageEdit.pollTimer) {
-        clearInterval(state.imageEdit.pollTimer);
-        state.imageEdit.pollTimer = null;
-    }
-};
-
-/** 应用修图结果：回写模板文件（后端先备份原图 .bak），成功后刷新左侧原图并可继续修图 */
-const applyImageEdit = async () => {
-    if (!state.imageEdit.taskId) {
-        ElMessage.warning('暂无可应用的修图结果');
-        return;
-    }
-    state.imageEdit.applying = true;
-    try {
-        const res: any = await aiImageApi.apply(state.imageEdit.taskId);
-        if (res.data) {
-            ElMessage.success('已应用：模板图片已更新（原件备份为 .bak，可「恢复原图」撤销）');
-            refreshImagePreview();
-            // 保留提示词便于继续微调，清掉已应用的生成结果
-            resetImageEditState(true);
-        } else {
-            ElMessage.error(res.msg || '应用失败');
-        }
-    } catch (e: any) {
-        ElMessage.error(e?.message || '应用失败');
-    } finally {
-        state.imageEdit.applying = false;
-    }
-};
-
-/** 恢复 AI 修图前的原图（.bak 备份覆盖回原路径），同时清掉未应用的生成结果 */
-const restoreTemplateImage = () => {
-    if (!state.imagePreview.filePath) return;
-    state.imagePreview.restoring = true;
-    templateApi.restoreImage(state.imagePreview.filePath, state.loadedTemplateId || undefined).then((res: any) => {
-        if (res.data !== undefined && res.data !== null) {
-            ElMessage.success('已恢复原图');
-            refreshImagePreview();
-            // 恢复后原图已变化，之前基于旧图的生成结果不再适用
-            resetImageEditState(true);
-        } else {
-            ElMessage.error(res.msg || '恢复失败');
-        }
-    }).catch((e: any) => {
-        ElMessage.error(e?.message || '恢复失败');
-    }).finally(() => {
-        state.imagePreview.restoring = false;
-    });
-};
-
-/** 删除图片文件：图片工作台此前无删除入口（顶栏删除按钮依赖 currEditFile，图片模式下被禁用） */
-const onDeleteImageFile = () => {
-    if (!state.imagePreview.filePath) return;
-    ElMessageBox.confirm('此操作将永久删除[' + state.imagePreview.filePath + ']文件, 是否继续?', '提示', {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-    }).then(() => {
-        state.imagePreview.deleting = true;
-        templateApi.delTemplateFile(state.imagePreview.filePath, state.loadedTemplateId || undefined).then(() => {
-            ElMessage.success("删除成功");
-            closeImageWorkbench();
-            loadFileTree();
-        }).catch((res: any) => {
-            ElMessage.error(res?.message || '删除失败');
-        }).finally(() => {
-            state.imagePreview.deleting = false;
-        });
-    }).catch(() => {});
-};
-
 const onNodeClick = (node: any) => {
     const switchToFile = () => {
         // 用 sortNum 区分目录(0)与文件(1)：空目录（如仅剩 .properties 被过滤的 i18n 目录）children 为 null，不能按 children 判断
@@ -2113,7 +1105,7 @@ const onNodeClick = (node: any) => {
             state.currEditFile = '';
             state.content = '';
             state.savedContent = '';
-            closeImageWorkbench();
+            workbenchVisible.value = false;
             checkDirty();
         }else if (isImageFile(node.filePath)) {
             // 图片文件：清空代码编辑状态，切换为图片工作台（左原图/右生成图对比，AI 修图/恢复原图）
@@ -2121,9 +1113,10 @@ const onNodeClick = (node: any) => {
             state.content = '';
             state.savedContent = '';
             checkDirty();
-            openImagePreview(node.filePath);
+            workbenchFile.value = node.filePath;
+            workbenchVisible.value = true;
         } else {
-            closeImageWorkbench();
+            workbenchVisible.value = false;
             state.currEditFile = node.filePath;
             loadFileContent(node.filePath).then((res: any) => {
                 state.content = res.data;
@@ -2151,8 +1144,8 @@ const onTemplateChange = (val: string) => {
         state.content = '';
         state.savedContent = '';
         state.uploadParam.dirName = '';
-        state.isDirty = false;
-        closeImageWorkbench();
+        checkDirty();
+        workbenchVisible.value = false;
         loadFileTree(true);
     };
 
@@ -2176,7 +1169,7 @@ const onHandleUploadError = () => {
 const onBeforeUpload = () => {
     if (!state.uploadParam.dirName) {
         // 未选择目录时默认上传到模板根目录（文件树顶层节点即模板目录），上传前置要求不再导致必失败
-        const root = ((state.treeTableData as any[]) || [])[0];
+        const root = ((tree.data as any[]) || [])[0];
         if (!root?.filePath) {
             ElMessage.warning("文件树尚未加载完成，请稍后重试");
             return false;
@@ -2250,19 +1243,13 @@ watch(() => state.aiDrawerVisible, (visible) => {
         state.sectionSelectMode = false;
         // 选区锁定随抽屉上下文一并清除，避免换模板重开抽屉后残留旧区块标签
         clearSelectedSection();
-        state.imagePickDialog.visible = false;
-        stopImageGenPolling();
+        imagePickDialogRef.value?.close();
         state.sessionView = false;
-        state.sessionFileTree = [];
+        clearSession();
     }
 });
 
-// 图片工作台关闭：停止修图轮询（后台任务继续执行，未应用的结果不会写入模板）
-watch(() => state.imagePreview.visible, (visible) => {
-    if (!visible) {
-        stopImageEditPolling();
-    }
-});
+// 图片工作台关闭的轮询停止已下沉到 ImageWorkbench 组件内部
 
 /** ESC 清除选区锁定 */
 const onSectionEscKey = (e: KeyboardEvent) => {
@@ -2295,7 +1282,7 @@ const updateEditorHeight = () => {
 const onSaveShortcut = (e: KeyboardEvent) => {
     if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
     e.preventDefault();
-    if (state.aiDrawerVisible || state.createDialog.visible || state.imagePickDialog.visible) return;
+    if (state.aiDrawerVisible || createDialogVisible.value || pickDialogVisible.value) return;
     if (!state.currEditFile) return;
     onSaveFile();
 };
@@ -2309,8 +1296,6 @@ onBeforeUnmount(() => {
         editorHeightObserver.disconnect();
         editorHeightObserver = null;
     }
-    stopImageGenPolling();
-    stopImageEditPolling();
 });
 
 // keep-alive 缓存恢复时重算高度：从其他菜单切回本页走的是 onActivated 而非 onMounted，
@@ -2320,7 +1305,7 @@ onActivated(() => {
 });
 </script>
 
-<style lang="scss">
+<style lang="scss" scoped>
 .toolbar {
     // 吸顶：页面滚动时工具栏（含保存/删除）始终固定在顶部
     position: sticky;
@@ -2340,12 +1325,11 @@ onActivated(() => {
     gap: 0;
 }
 // 文件树卡片：高度与右侧编辑器一致（内联注入），flex 让树占满 header 之外的剩余空间
-// 注意：本组件 style 非 scoped，:deep() 会输出无效选择器被浏览器丢弃，必须用全局嵌套选择器（同 .ai-template-drawer 的写法）
 .tree-card {
     display: flex;
     flex-direction: column;
 
-    .el-card__body {
+    :deep(.el-card__body) {
         flex: 1;
         min-height: 0;
         overflow: hidden;
@@ -2375,35 +1359,15 @@ onActivated(() => {
         font-weight: 600;
     }
 }
-// 抽屉主体撑满高度（抽屉默认 teleport 到 body，需用全局选择器）
+// 抽屉主体撑满高度（el-drawer teleport 到 body，根元素带本组件 scoped 属性，:deep 可穿透内部）
 .ai-template-drawer {
-    .el-drawer__body {
+    :deep(.el-drawer__body) {
         display: flex;
         flex-direction: column;
         overflow: hidden;
     }
 }
-// 历史生成记录列表（el-dialog 同样 teleport 到 body，需全局选择器）
-.history-session-table {
-    cursor: pointer;
-}
-
-// 页签 label 内 badge：与文字垂直居中、间距收紧
-.history-tab-badge {
-    margin-left: 6px;
-    vertical-align: 2px;
-
-    :deep(.el-badge__content) {
-        position: relative;
-        transform: none;
-    }
-}
-
-.history-tip {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-}
+// 历史生成记录列表样式随组件下沉到 CreateTemplateDialog.vue
 // AI 抽屉主体：调整型左右分栏（对话 + 实时预览）
 .ai-drawer-body {
     display: flex;
@@ -2544,216 +1508,11 @@ onActivated(() => {
     }
 }
 
-// ===== 点选换图操作窗 =====
-.pick-dialog-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 16px;
-    font-weight: 600;
-}
-.pick-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-
-    .pick-toolbar-tip {
-        color: var(--el-text-color-secondary);
-        font-size: 12px;
-    }
-}
-.pick-grid {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 10px;
-
-    .pick-cell {
-        cursor: pointer;
-        border: 1px solid var(--el-border-color-lighter);
-        border-radius: 6px;
-        overflow: hidden;
-        transition: border-color 0.2s, box-shadow 0.2s;
-
-        &:hover {
-            border-color: var(--el-color-primary);
-            box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
-        }
-
-        .pick-img {
-            width: 100%;
-            height: 90px;
-            display: block;
-        }
-
-        .pick-name {
-            padding: 4px 6px;
-            font-size: 12px;
-            color: var(--el-text-color-secondary);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-    }
-}
-.pick-pager {
-    margin-top: 10px;
-    justify-content: center;
-}
-.gen-form {
-    .gen-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 8px;
-    }
-}
-.gen-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 12px 0;
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
-
-    .gen-error {
-        color: var(--el-color-danger);
-    }
-
-    .gen-done {
-        color: var(--el-color-success);
-    }
-}
-.pick-applying {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding-top: 10px;
-    border-top: 1px solid var(--el-border-color-lighter);
-    color: var(--el-color-primary);
-    font-size: 13px;
-}
-.pick-upload {
-    width: 100%;
-
-    :deep(.el-upload-dragger) {
-        width: 100%;
-    }
-}
-
-// ===== 模板图片工作台（覆盖代码编辑器：左原图 / 右生成结果对比） =====
-.img-workbench {
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 6px;
-    overflow: hidden;
-
-    .img-workbench-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--el-border-color-lighter);
-        background: var(--el-fill-color-light);
-
-        .img-workbench-toolbar-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-    }
-
-    .img-compare {
-        flex: 1;
-        display: flex;
-        min-height: 0;
-
-        .img-compare-pane {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-
-            & + .img-compare-pane {
-                border-left: 1px solid var(--el-border-color-lighter);
-            }
-
-            .img-compare-label {
-                padding: 4px 12px;
-                font-size: 12px;
-                color: var(--el-text-color-secondary);
-                border-bottom: 1px dashed var(--el-border-color-lighter);
-            }
-
-            .img-compare-body {
-                flex: 1;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 0;
-                overflow: auto;
-                padding: 12px;
-                // 棋盘格底纹：透明图片（png/svg）边界可辨识
-                background-color: var(--el-fill-color-lighter);
-                background-image:
-                    linear-gradient(45deg, var(--el-fill-color) 25%, transparent 25%, transparent 75%, var(--el-fill-color) 75%),
-                    linear-gradient(45deg, var(--el-fill-color) 25%, transparent 25%, transparent 75%, var(--el-fill-color) 75%);
-                background-size: 16px 16px;
-                background-position: 0 0, 8px 8px;
-
-                .img-compare-el {
-                    max-width: 100%;
-                    max-height: 100%;
-                    object-fit: contain;
-                    cursor: zoom-in;
-                }
-
-                .img-compare-empty {
-                    color: var(--el-text-color-placeholder);
-                    font-size: 13px;
-                    text-align: center;
-                    padding: 0 20px;
-                }
-            }
-        }
-    }
-
-    .img-edit-form {
-        padding: 10px 12px;
-        border-top: 1px solid var(--el-border-color-lighter);
-
-        .img-edit-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 8px;
-        }
-
-        .gen-status {
-            margin: 8px 0 0;
-        }
-    }
-}
+// ===== 点选换图操作窗（样式随组件下沉到 ImagePickDialog.vue） =====
+// ===== 模板图片工作台（样式随组件下沉到 ImageWorkbench.vue） =====
 .dirty-tip {
     color: #e6a23c;
     font-size: 12px;
     margin-left: 10px;
-}
-.CodeMirror-scroll {
-  overflow: scroll !important;
-  margin-bottom: 0;
-  margin-right: 0;
-  padding-bottom: 0;
-  outline: none;
-  position: relative;
-  border: 1px solid #dddddd;
-}
-.code-mirror{
-  font-size : 13px;
-  line-height : 150%;
-  height: 600px;
-  text-align: left;
 }
 </style>
