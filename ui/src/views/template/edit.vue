@@ -20,11 +20,9 @@
                             :headers="state.headers"
                             :show-file-list="false"
                             :on-success="uploadSuccess"
-                            :on-exceed="onHandleExceed"
                             :on-error="onHandleUploadError"
-                            :before-upload="onBeforeUpload"
-                            :limit="state.limit">
-                            <el-button size="default" type="primary"><el-icon><ele-Plus /></el-icon>上传模板文件</el-button>
+                            :before-upload="onBeforeUpload">
+                            <el-button size="default" type="primary" :title="uploadTargetTip"><el-icon><ele-Plus /></el-icon>上传模板文件</el-button>
                         </el-upload>
                         <el-divider direction="vertical" />
                         <el-button @click="onPreview" :disabled="!state.loadedTemplateId">
@@ -80,6 +78,10 @@
                         <div class="img-workbench-toolbar">
                             <el-tag size="small" type="info">{{ state.imagePreview.filePath }}</el-tag>
                             <div class="img-workbench-toolbar-actions">
+                                <el-button size="small" type="danger" plain :loading="state.imagePreview.deleting" title="删除该图片文件"
+                                           @click="onDeleteImageFile">
+                                    <el-icon><ele-Delete /></el-icon>删除
+                                </el-button>
                                 <el-button size="small" :loading="state.imagePreview.restoring" title="用 .bak 备份覆盖回当前图片（撤销已应用的修改）"
                                            @click="restoreTemplateImage">
                                     <el-icon><ele-RefreshLeft /></el-icon>恢复原图
@@ -441,6 +443,9 @@ import { AttachApi } from '/@/api/attach/index';
 import AiChat from '/@/views/template/aiChat.vue';
 import { Codemirror } from "vue-codemirror";
 import { html } from "@codemirror/lang-html";
+import { javascript } from "@codemirror/lang-javascript";
+import { css } from "@codemirror/lang-css";
+import { search } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 const codeMirror = ref()
@@ -449,7 +454,20 @@ const treeTable = ref()
 const editRowRef = ref();
 // 布局容器尺寸变化观察器（keep-alive 缓存页切回时 onMounted 不会重跑，靠 onActivated 兜底重算）
 let editorHeightObserver: ResizeObserver | null = null;
-const extensions = [html(), oneDark];
+
+/**
+ * 按文件后缀切换语法高亮（state 定义在下方，getter 惰性求值时已初始化）：
+ * css/scss/less → css、js/ts → javascript，其余（html/htm/xml/txt/json 等）回退 html
+ */
+const langExtensionFor = (filePath: string) => {
+    const lower = (filePath || '').toLowerCase();
+    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return css();
+    if (lower.endsWith('.ts')) return javascript({ typescript: true });
+    if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) return javascript();
+    return html();
+};
+// search() 提供编辑器内搜索面板（Ctrl/Cmd+F），随文件切换语言扩展
+const extensions = computed(() => [langExtensionFor(state.currEditFile), oneDark, search()]);
 
 const templateApi = TemplateApi();
 const aiApi = AiTemplateApi();
@@ -475,7 +493,6 @@ const state = reactive({
     // 最后一次保存/加载的内容，用于判断是否有未保存修改
     savedContent: '',
     isDirty: false,
-    limit: 3,
     uploadUrl: import.meta.env.VITE_API_URL + "/admin/template/files/upload",
     headers: {"Authorization": Local.get('token')},
     uploadParam: {
@@ -583,7 +600,8 @@ const state = reactive({
         filePath: '',
         url: '',
         key: 0,
-        restoring: false
+        restoring: false,
+        deleting: false
     },
     // 模板图片 AI 修图任务（edit 类型 + sourceTemplateId/sourceFilePath，
     // 成功后结果仅存附件库展示在右侧，用户点「应用」才回写模板文件）
@@ -653,6 +671,10 @@ const uploadAction = computed(() => state.uploadUrl);
 
 /** 上传附加参数 */
 const uploadData = computed(() => ({ dirName: state.uploadParam.dirName, templateId: state.uploadParam.templateId }));
+
+/** 上传目标目录提示（按钮 tooltip）：未选目录时将兜底上传到模板根目录 */
+const uploadTargetTip = computed(() =>
+    state.uploadParam.dirName ? `将上传到目录：${state.uploadParam.dirName}` : '未选择目录，将上传到模板根目录');
 
 /** 会话编辑视图下已应用的会话：只读（禁用选区等需要写会话的交互入口） */
 const sessionReadonly = computed(() => state.sessionView && state.currentAiSession?.status === 'applied');
@@ -1180,11 +1202,15 @@ const retryImageGen = async () => {
  */
 const startImageGenPolling = () => {
     stopImageGenPolling();
+    // 防重入：上一轮请求未返回时跳过本轮，避免慢请求下轮询堆叠并发
+    let polling = false;
     state.imageGen.pollTimer = setInterval(async () => {
         if (!state.imageGen.taskId) {
             stopImageGenPolling();
             return;
         }
+        if (polling) return;
+        polling = true;
         try {
             const res: any = await aiImageApi.getTask(state.imageGen.taskId);
             const task = res.data;
@@ -1199,6 +1225,8 @@ const startImageGenPolling = () => {
             }
         } catch (e) {
             // 单次轮询异常不打断（网络抖动等），下轮继续
+        } finally {
+            polling = false;
         }
     }, 3000);
 };
@@ -1263,12 +1291,26 @@ const onAiSwitchFile = (path: string) => {
  * 否则预览首页 index.html。
  */
 const onPreview = () => {
+    if (!state.loadedTemplateId) return;
     let entry = 'index.html';
     if (isRoutableHtml(state.currEditFile)) {
         entry = state.currEditFile;
     }
-    if (!state.loadedTemplateId) return;
-    window.open('/template/preview/' + encodeURIComponent(state.loadedTemplateId) + '/' + entry, '_blank');
+    const doOpen = () => window.open('/template/preview/' + encodeURIComponent(state.loadedTemplateId) + '/' + entry, '_blank');
+    if (checkDirty()) {
+        // 预览渲染的是服务器已保存内容，未保存修改不会出现，先给用户选择
+        ElMessageBox.confirm('当前文件有未保存的修改，预览展示的是已保存的内容。可先保存再预览。', '未保存的修改', {
+            confirmButtonText: '保存并预览',
+            cancelButtonText: '仍要预览',
+            distinguishCancelAndClose: true,
+            type: 'warning',
+        }).then(() => doSave().then(doOpen))
+        .catch((action: string) => {
+            if (action === 'cancel') doOpen();
+        });
+    } else {
+        doOpen();
+    }
 };
 
 /**
@@ -1564,6 +1606,22 @@ const onAiFilesChanged = () => {
     loadFileContent(state.currEditFile).then((res: any) => {
         // 仅当服务器内容与本地保存基线不一致（即 AI 确实改了当前文件）时刷新编辑器
         if (normalizeEol(res.data || '') !== normalizeEol(state.savedContent || '')) {
+            // 本地有未保存修改时交给用户选择，避免 AI 版本静默覆盖本地修改
+            if (checkDirty()) {
+                ElMessageBox.confirm('AI 修改了当前文件，而您有未保存的本地修改。加载 AI 版本将丢弃本地修改，是否继续？', '文件已被 AI 修改', {
+                    confirmButtonText: '加载 AI 版本',
+                    cancelButtonText: '保留本地修改',
+                    type: 'warning',
+                }).then(() => {
+                    state.content = res.data;
+                    state.savedContent = res.data;
+                    checkDirty();
+                    ElMessage.info('编辑器内容已刷新为 AI 版本');
+                }).catch(() => {
+                    ElMessage.info('已保留本地修改；如需查看 AI 版本，请从文件树重新打开该文件');
+                });
+                return;
+            }
             state.content = res.data;
             state.savedContent = res.data;
             checkDirty();
@@ -1945,11 +2003,15 @@ const retryTemplateImageEdit = async () => {
  */
 const startImageEditPolling = () => {
     stopImageEditPolling();
+    // 防重入：上一轮请求未返回时跳过本轮，避免慢请求下轮询堆叠并发
+    let polling = false;
     state.imageEdit.pollTimer = setInterval(async () => {
         if (!state.imageEdit.taskId) {
             stopImageEditPolling();
             return;
         }
+        if (polling) return;
+        polling = true;
         try {
             const res: any = await aiImageApi.getTask(state.imageEdit.taskId);
             const task = res.data;
@@ -1968,6 +2030,8 @@ const startImageEditPolling = () => {
             }
         } catch (e) {
             // 单次轮询异常不打断（网络抖动等），下轮继续
+        } finally {
+            polling = false;
         }
     }, 3000);
 };
@@ -2022,6 +2086,27 @@ const restoreTemplateImage = () => {
     }).finally(() => {
         state.imagePreview.restoring = false;
     });
+};
+
+/** 删除图片文件：图片工作台此前无删除入口（顶栏删除按钮依赖 currEditFile，图片模式下被禁用） */
+const onDeleteImageFile = () => {
+    if (!state.imagePreview.filePath) return;
+    ElMessageBox.confirm('此操作将永久删除[' + state.imagePreview.filePath + ']文件, 是否继续?', '提示', {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+    }).then(() => {
+        state.imagePreview.deleting = true;
+        templateApi.delTemplateFile(state.imagePreview.filePath, state.loadedTemplateId || undefined).then(() => {
+            ElMessage.success("删除成功");
+            closeImageWorkbench();
+            loadFileTree();
+        }).catch((res: any) => {
+            ElMessage.error(res?.message || '删除失败');
+        }).finally(() => {
+            state.imagePreview.deleting = false;
+        });
+    }).catch(() => {});
 };
 
 const onNodeClick = (node: any) => {
@@ -2086,19 +2171,21 @@ const onTemplateChange = (val: string) => {
 }
 
 const uploadSuccess = () => {
-    ElMessage.success("上传成功");
+    ElMessage.success("上传成功（" + (state.uploadParam.dirName || '模板根目录') + "）");
     loadFileTree();
-}
-const onHandleExceed = () => {
-    ElMessage.error("上传文件数量不能超过 "+state.limit+" 个!");
 }
 const onHandleUploadError = () => {
     ElMessage.error("上传失败");
 }
 const onBeforeUpload = () => {
-    if(state.uploadParam.dirName == '') {
-        ElMessage.warning("请选择上传目录");
-        return false;
+    if (!state.uploadParam.dirName) {
+        // 未选择目录时默认上传到模板根目录（文件树顶层节点即模板目录），上传前置要求不再导致必失败
+        const root = ((state.treeTableData as any[]) || [])[0];
+        if (!root?.filePath) {
+            ElMessage.warning("文件树尚未加载完成，请稍后重试");
+            return false;
+        }
+        state.uploadParam.dirName = root.filePath;
     }
 }
 const onChange = (value: string) => {
@@ -2135,7 +2222,6 @@ onMounted(() => {
         editorHeightObserver = new ResizeObserver(updateEditorHeight);
         const mainEl = document.querySelector('.layout-main');
         if (mainEl) editorHeightObserver.observe(mainEl);
-        editorHeightObserver.observe(document.documentElement);
     }
     window.addEventListener('resize', updateEditorHeight);
     window.addEventListener('beforeunload', onBeforeUnload);
@@ -2166,6 +2252,8 @@ watch(() => state.aiDrawerVisible, (visible) => {
     if (!visible) {
         state.imagePickMode = false;
         state.sectionSelectMode = false;
+        // 选区锁定随抽屉上下文一并清除，避免换模板重开抽屉后残留旧区块标签
+        clearSelectedSection();
         state.imagePickDialog.visible = false;
         stopImageGenPolling();
         state.sessionView = false;
@@ -2221,7 +2309,6 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', onSectionEscKey);
     window.removeEventListener('keydown', onSaveShortcut);
     window.removeEventListener('resize', updateEditorHeight);
-    stopSettleEditorHeight();
     if (editorHeightObserver) {
         editorHeightObserver.disconnect();
         editorHeightObserver = null;
@@ -2663,7 +2750,6 @@ onActivated(() => {
   margin-bottom: 0;
   margin-right: 0;
   padding-bottom: 0;
-  height: 600;
   outline: none;
   position: relative;
   border: 1px solid #dddddd;
