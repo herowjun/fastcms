@@ -66,8 +66,18 @@
                               max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
                         <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
                         <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
+                        <el-table-column label="状态" width="86">
+                            <template #default="scope">
+                                <el-tag size="small" :type="sessionBadge(scope.row).type">{{ sessionBadge(scope.row).text }}</el-tag>
+                            </template>
+                        </el-table-column>
                         <el-table-column label="创建时间" width="130">
                             <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="70">
+                            <template #default="scope">
+                                <el-button size="small" text type="primary" @click.stop="onOpenHistorySession(scope.row)">打开</el-button>
+                            </template>
                         </el-table-column>
                     </el-table>
                     <el-empty v-if="!dialog.historyLoading && pendingSessions.length === 0"
@@ -81,15 +91,25 @@
                               max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
                         <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
                         <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
+                        <el-table-column label="状态" width="86">
+                            <template #default="scope">
+                                <el-tag size="small" :type="sessionBadge(scope.row).type">{{ sessionBadge(scope.row).text }}</el-tag>
+                            </template>
+                        </el-table-column>
                         <el-table-column label="创建时间" width="130">
                             <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="70">
+                            <template #default="scope">
+                                <el-button size="small" text type="primary" @click.stop="onOpenHistorySession(scope.row)">回看</el-button>
+                            </template>
                         </el-table-column>
                     </el-table>
                     <el-empty v-if="!dialog.historyLoading && appliedSessions.length === 0"
                               description="暂无已应用的生成记录" :image-size="60" />
                 </el-tab-pane>
             </el-tabs>
-            <div class="history-tip">点击记录直接进入编辑视图（左预览右对话）：未应用的可继续打磨或应用；已应用的仅回看</div>
+            <div class="history-tip">点击记录或「打开 / 回看」进入 AI 工作台：未应用的可继续打磨、重新生成或应用；已应用的仅回看</div>
         </template>
         <template #footer>
             <template v-if="dialog.view === 'create'">
@@ -141,6 +161,10 @@ const dialog = reactive({
     view: 'create' as 'create' | 'history',
     // 历史记录页签（pending：未应用，默认；applied：已应用仅回看）
     historyTab: 'pending' as 'pending' | 'applied',
+    // 状态徽章覆盖上下文（open 传入快照）：正在跑的会话显示「生成中」、本轮失败的显示「生成失败」；
+    // 两者均为会话期瞬时态（后端无此状态值，不落库），刷新后回退为「待应用」
+    runningId: '',
+    failedId: '',
     templateName: '',
     requirement: '',
     // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
@@ -211,8 +235,18 @@ const loadDesignOptions = async () => {
 
 /**
  * 打开 AI 新建模板对话框（generate 模式）
+ *
+ * @param view 落地页签：create=新建表单（默认）；history=历史生成记录（工具条「历史记录」入口）
+ * @param badgeCtx 状态徽章覆盖上下文（打开时快照）：runningId=正在生成的会话，failedId=本轮失败的会话
  */
-const open = () => {
+const open = (view: 'create' | 'history' = 'create', badgeCtx?: { runningId?: string; failedId?: string }) => {
+    dialog.runningId = badgeCtx?.runningId || '';
+    dialog.failedId = badgeCtx?.failedId || '';
+    if (view === 'history') {
+        onShowHistory();
+        visible.value = true;
+        return;
+    }
     dialog.view = 'create';
     dialog.templateName = '';
     dialog.requirement = '';
@@ -272,6 +306,17 @@ const onShowHistory = async () => {
 /** 历史记录按状态分流：未应用（可继续打磨/应用）与已应用（仅回看） */
 const pendingSessions = computed(() => dialog.sessions.filter((s: any) => s.status !== 'applied'));
 const appliedSessions = computed(() => dialog.sessions.filter((s: any) => s.status === 'applied'));
+
+/**
+ * 状态徽章四态：生成中（蓝）/ 生成失败（红）为会话期瞬时态（内存覆盖，open 时快照）；
+ * 待应用（黄）/ 已应用（绿）按落库 status 映射
+ */
+const sessionBadge = (row: any): { text: string; type: 'primary' | 'danger' | 'warning' | 'success' } => {
+    if (row.sessionId && row.sessionId === dialog.runningId) return { text: '生成中', type: 'primary' };
+    if (row.sessionId && row.sessionId === dialog.failedId) return { text: '生成失败', type: 'danger' };
+    if (row.status === 'applied') return { text: '已应用', type: 'success' };
+    return { text: '待应用', type: 'warning' };
+};
 
 /**
  * 打开历史生成会话：通知父组件进入会话编辑视图恢复会话（不自动发送消息）；

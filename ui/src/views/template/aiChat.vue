@@ -2,6 +2,8 @@
 	<div class="ai-chat-panel">
 		<!-- 会话信息：会话切换/新建（由父组件管理会话数据，本组件只负责展示与转发事件） -->
 		<div class="panel-header">
+			<!-- modePill 四态：调整会话 / 会话工作目录 / 已应用（仅回看）/ 生成失败 -->
+			<span class="mode-pill" :class="modePill.cls">{{ modePill.text }}</span>
 			<el-select
 				v-if="sessions && sessions.length > 0"
 				:model-value="session?.sessionId"
@@ -10,20 +12,26 @@
 				class="session-select"
 				@change="(v: string) => emit('select-session', v)"
 			>
-				<el-option v-for="sess in sessions" :key="sess.sessionId" :value="sess.sessionId"
-					:label="formatSessionLabel(sess)">
-					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
-					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
-				</el-option>
+				<el-option-group v-if="adjustSessionList.length" label="调整会话">
+					<el-option v-for="sess in adjustSessionList" :key="sess.sessionId" :value="sess.sessionId"
+						:label="formatSessionLabel(sess)">
+						<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
+						<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
+					</el-option>
+				</el-option-group>
+				<el-option-group v-if="generateSessionList.length" label="生成会话">
+					<el-option v-for="sess in generateSessionList" :key="sess.sessionId" :value="sess.sessionId"
+						:label="formatSessionLabel(sess)">
+						<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
+						<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
+					</el-option>
+				</el-option-group>
 			</el-select>
 			<span v-else class="panel-title">{{ session?.title || (mode === 'adjust' ? 'AI 调整模板' : 'AI 生成模板') }}</span>
-			<el-button v-if="mode === 'adjust'" size="small" text type="primary" :loading="creatingSession"
+			<el-button size="small" text type="primary" :loading="creatingSession"
 				@click="emit('new-session')">
 				<el-icon><ele-Plus /></el-icon>新建会话
 			</el-button>
-			<el-tag v-if="mode === 'adjust'" size="small" type="warning">直接修改正式模板</el-tag>
-		<el-tag v-if="mode === 'generate' && isApplied" size="small" type="success">已应用（仅回看）</el-tag>
-			<el-tag v-if="mode === 'generate' && isFailed" size="small" type="danger">生成失败</el-tag>
 		</div>
 
 		<!-- 旧模板「样式组件化升级」横幅（面板顶部）：保留网站功能（JS/元素锚点/FreeMarker），组件库 CSS 焕新视觉。
@@ -232,17 +240,8 @@
 			<div class="files-header">
 				<span>{{ mode === 'adjust' ? '本轮 AI 修改的文件（' + state.files.length + '）' : '生成文件（' + state.files.length + '）' }}</span>
 				<div>
-					<el-button v-if="mode === 'adjust'" size="small" text type="danger" @click="onRollback" :loading="state.rollingBack">
-						<el-icon><ele-RefreshLeft /></el-icon>回滚最近一次修改
-					</el-button>
-						<el-button size="small" text @click="onPreviewTemplate">
+					<el-button size="small" text @click="onPreviewTemplate">
 						<el-icon><ele-View /></el-icon>预览
-					</el-button>
-					<el-button v-if="mode === 'generate' && !isApplied && !sessionActive && state.files.length > 0" size="small" text type="primary" @click="emit('edit-files')">
-						<el-icon><ele-Edit /></el-icon>编辑文件
-					</el-button>
-					<el-button v-if="mode === 'generate' && !isApplied" type="success" size="small" @click="onApplyTemplate" :loading="state.applying">
-						<el-icon><ele-Check /></el-icon>应用模板
 					</el-button>
 				</div>
 			</div>
@@ -256,9 +255,11 @@
 						</el-tag>
 					</template>
 				</el-table-column>
-				<el-table-column label="操作" width="70">
+				<el-table-column label="操作" width="110">
 					<template #default="scope">
 						<el-button size="small" text type="primary" @click="onViewFile(scope.row)">查看</el-button>
+						<!-- 编辑文件桥（仅调整会话）：把 AI 的改动接回手动编辑视图继续打磨 -->
+						<el-button v-if="mode === 'adjust'" size="small" text type="primary" @click="emit('edit-file', scope.row.filePath)">编辑</el-button>
 					</template>
 				</el-table-column>
 			</el-table>
@@ -302,12 +303,10 @@ const props = defineProps<{
 	focusSection?: string;
 	/** 选区锁定的元素语义提示（如 标题「散养土鸡蛋」），随消息发送 */
 	focusElementHint?: string;
-	/** 可切换的会话列表（父组件管理，为空时面板头部只显示标题） */
+	/** 可切换的会话列表（父组件管理，含调整与生成全部会话，本组件按类型分组展示） */
 	sessions?: any[];
 	/** 新建会话请求进行中（按钮 loading） */
 	creatingSession?: boolean;
-	/** 父组件已处于会话编辑模式：隐藏「编辑文件」入口（已在编辑，点击反而会清空当前编辑文件） */
-	sessionActive?: boolean;
 	/** 换图模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
 	imagePickMode?: boolean;
 	/** 选区模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
@@ -323,8 +322,8 @@ const emit = defineEmits<{
 	(e: 'switch-file', path: string): void;
 	/** 生成型会话应用模板成功（templateId：应用后的正式模板 ID，父组件据此无缝切换编辑目标） */
 	(e: 'applied', templateId: string): void;
-	/** 进入会话编辑模式（父组件把文件树/编辑器/预览切到会话工作目录） */
-	(e: 'edit-files'): void;
+	/** 「编辑文件」桥（调整会话文件行）：父组件切到手动编辑视图并打开该文件 */
+	(e: 'edit-file', filePath: string): void;
 	/** 切换会话（sessionId） */
 	(e: 'select-session', sessionId: string): void;
 	/** 新建会话 */
@@ -355,6 +354,22 @@ const isFailed = computed(() => {
 const isFailMessage = (msg: any) => {
 	return msg?.role === 'assistant' && String(msg.content || '').startsWith(FAIL_MSG_PREFIX);
 };
+
+/**
+ * modePill 四态：调整会话（直写正式模板）/ 会话工作目录 / 已应用（仅回看）/ 生成失败。
+ * 「失败」是会话期瞬时态（本轮 SSE 失败未落库），刷新后回退为「会话工作目录」
+ */
+const modePill = computed(() => {
+	if (props.mode === 'adjust') return { text: 'AI 调整 · 直写正式模板', cls: 'adjust' };
+	if (isApplied.value) return { text: '已应用 · 仅回看', cls: 'applied' };
+	if (isFailed.value) return { text: '生成失败', cls: 'failed' };
+	return { text: '会话工作目录', cls: 'generate' };
+});
+
+/** 会话下拉按类型分组（各组内按创建时间倒序，最近的在前） */
+const sortByCreatedDesc = (a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime();
+const adjustSessionList = computed(() => (props.sessions || []).filter((s: any) => s.templateId).sort(sortByCreatedDesc));
+const generateSessionList = computed(() => (props.sessions || []).filter((s: any) => !s.templateId).sort(sortByCreatedDesc));
 
 /** token 数量格式化：原样输出完整数字，不用 w 等缩写 */
 const formatTokenCount = (n: any): string => {
@@ -426,8 +441,6 @@ const state = reactive({
 	stopping: false,
 	files: [] as any[],
 	loadingFiles: false,
-	applying: false,
-	rollingBack: false,
 	// 旧模板样式组件化升级：探测结果（目录有 html 无 _pagespec.json 且升级未完成）与执行中状态
 	legacyUpgradable: false,
 	upgrading: false,
@@ -458,8 +471,8 @@ const state = reactive({
 	viewingFile: null as any,
 });
 
-/** 点选工具（换图/选区）可见：仅预览列存在的模式（adjust / 会话编辑视图）下才有可点选的预览页 */
-const pickToolsVisible = computed(() => props.mode === 'adjust' || !!props.sessionActive);
+/** 点选工具（换图/选区）可见：AI 工作台内预览列常驻，调整会话与生成会话均可点选预览页 */
+const pickToolsVisible = computed(() => !!props.session?.sessionId || props.mode === 'adjust');
 
 /** 全量注入开关切换：持久化；开启时的警示常驻输入框下方提示行（不走弹出框） */
 const onFullInjectChange = (val: any) => {
@@ -652,7 +665,7 @@ const autoSend = async (input: string) => {
 	onSend();
 };
 
-defineExpose({ autoSend, isChatting: () => state.chatting });
+defineExpose({ autoSend, isChatting: () => state.chatting, loadSessionData, isFailed: () => isFailed.value });
 
 // ==================== 旧模板样式组件化升级 / 焕新动作（下沉 useLegacyUpgrade） ====================
 // 三个动作均走标准 chat 流：确认对话框收集参数后预填输入框 + 置 pending* 标志，委托 onSend 发出
@@ -722,54 +735,6 @@ const onConfirmReject = async (msg: any) => {
 		input,
 		displayText: input ? `驳回设计稿：${input}` : '驳回设计稿，重新设计',
 	});
-};
-
-const onRollback = () => {
-	if (!props.session?.sessionId) return;
-	ElMessageBox.confirm(
-		'将把最近一轮 AI 修改的文件恢复到该轮修改前的状态（此后各轮对这些文件的改动也会一并撤销），是否继续？',
-		'回滚最近一次修改',
-		{ confirmButtonText: '回 滚', cancelButtonText: '取 消', type: 'warning' }
-	).then(async () => {
-		state.rollingBack = true;
-		try {
-			const res = await templateApi.rollbackLast(props.session.sessionId);
-			if (res.data) {
-				ElMessage.success(res.data);
-				await loadSessionData();
-				emit('files-changed');
-			} else if (res.msg) {
-				ElMessage.error(res.msg);
-			}
-		} catch (e: any) {
-			ElMessage.error(e?.message || '回滚失败');
-		} finally {
-			state.rollingBack = false;
-		}
-	}).catch(() => {});
-};
-
-const onApplyTemplate = () => {
-	if (!props.session?.sessionId) return;
-	ElMessageBox.confirm('确认将此模板应用到正式模板目录？应用后将切换到正式模板编辑。', '提示', {
-		type: 'warning',
-	}).then(async () => {
-		state.applying = true;
-		try {
-			const res = await templateApi.applyTemplate(props.session.sessionId);
-			if (res.data) {
-				// 后端返回 ApplyResult：{ message, templateId }（应用后的正式模板 ID）
-				ElMessage.success(res.data.message || '应用成功');
-				emit('applied', res.data.templateId);
-			} else if (res.msg) {
-				ElMessage.error(res.msg);
-			}
-		} catch (e: any) {
-			ElMessage.error(e?.message || '应用失败');
-		} finally {
-			state.applying = false;
-		}
-	}).catch(() => {});
 };
 
 const onPreviewTemplate = () => {
@@ -854,6 +819,47 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 	align-items: center;
 	gap: 8px;
 	margin-bottom: 10px;
+
+	// modePill 四态：圆点 + 状态文案（adjust 橙 / generate 蓝 / applied 绿 / failed 红）
+	.mode-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+		padding: 3px 10px;
+		border-radius: 999px;
+		font-size: 12px;
+		line-height: 1;
+		white-space: nowrap;
+
+		&::before {
+			content: '';
+			width: 6px;
+			height: 6px;
+			border-radius: 50%;
+			background: currentColor;
+		}
+
+		&.adjust {
+			color: var(--el-color-warning);
+			background: var(--el-color-warning-light-9);
+		}
+
+		&.generate {
+			color: var(--el-color-primary);
+			background: var(--el-color-primary-light-9);
+		}
+
+		&.applied {
+			color: var(--el-color-success);
+			background: var(--el-color-success-light-9);
+		}
+
+		&.failed {
+			color: var(--el-color-danger);
+			background: var(--el-color-danger-light-9);
+		}
+	}
 
 	.session-select {
 		flex: 1;
