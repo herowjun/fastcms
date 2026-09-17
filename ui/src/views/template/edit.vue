@@ -119,7 +119,8 @@
                       :template-list="state.templateList" :height="state.clientHeight"
                       :active="currentView === 'ai'"
                       @scope-change="onScopeChange" @files-changed="onWorkbenchFilesChanged"
-                      @edit-file="onEditAiFile" @applied="onAiTemplateApplied" />
+                      @edit-file="onEditAiFile" @applied="onAiTemplateApplied"
+                      @edit-applied="onEditAppliedTemplate" />
     </el-card>
 </div>
 </template>
@@ -329,6 +330,23 @@ const onAiTemplateApplied = (templateId?: string) => {
             duration: 8000,
             onClick: () => { currentView.value = 'edit'; }
         });
+    };
+    if (checkDirty()) {
+        confirmDiscard().then(doLoad).catch(() => {});
+    } else {
+        doLoad();
+    }
+};
+
+/**
+ * AI 工作台「编辑此模板」（已应用回看态）：把应用后的正式模板加载到主编辑视图
+ * 并切到手动编辑——重新编辑应用后的模板；有未保存修改先确认，取消则留在工作台
+ */
+const onEditAppliedTemplate = (templateId: string) => {
+    const doLoad = () => {
+        loadTemplateList(templateId);
+        currentView.value = 'edit';
+        ElMessage.success('已加载该模板，可继续编辑');
     };
     if (checkDirty()) {
         confirmDiscard().then(doLoad).catch(() => {});

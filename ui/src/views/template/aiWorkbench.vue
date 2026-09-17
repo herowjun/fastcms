@@ -14,6 +14,10 @@
             <el-button v-if="showApply" type="success" :loading="applying" @click="onApplyTemplate">
                 <el-icon><ele-Check /></el-icon>应用模板
             </el-button>
+            <el-button v-if="showEditApplied" type="primary" plain @click="onEditApplied"
+                       title="把应用后的正式模板加载到主编辑视图继续修改">
+                <el-icon><ele-EditPen /></el-icon>编辑此模板
+            </el-button>
             <span class="prev-hint">预览指向：{{ prevHint }}</span>
         </div>
 
@@ -75,7 +79,7 @@
                              :image-pick-mode="pickMode" :section-select-mode="sectionMode"
                              @select-session="onSelectAiSession" @new-session="onNewAiSession"
                              @files-changed="onAiFilesChanged" @file-written="onAiFileWritten"
-                             @switch-file="onAiSwitchFile" @applied="onAiTemplateApplied"
+                             @switch-file="onAiSwitchFile"
                              @edit-file="onEditSessionFile"
                              @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
                 </div>
@@ -131,6 +135,8 @@ const emit = defineEmits<{
     (e: 'edit-file', filePath: string): void;
     /** 生成型会话应用成功（templateId：应用后的正式模板 ID，父组件加载并提示跳转） */
     (e: 'applied', templateId?: string): void;
+    /** 「编辑此模板」桥（已应用回看态）：父组件把该正式模板加载到主编辑视图并切手动编辑 */
+    (e: 'edit-applied', templateId: string): void;
 }>();
 
 const aiApi = AiTemplateApi();
@@ -174,6 +180,9 @@ const sessionReadonly = computed(() => sessionView.value && currentSession.value
 const canRollback = computed(() => aiMode.value === 'adjust' && !!currentSession.value?.sessionId);
 const showApply = computed(() => aiMode.value === 'generate' && !!currentSession.value?.sessionId
     && currentSession.value?.status !== 'applied');
+/** 已应用会话回看态：提供「编辑此模板」一键回到主编辑视图（重新编辑应用后的正式模板） */
+const showEditApplied = computed(() => aiMode.value === 'generate' && currentSession.value?.status === 'applied'
+    && !!currentSession.value?.templateName);
 
 const prevHint = computed(() => {
     if (sessionView.value && currentSession.value?.templateName) {
@@ -185,7 +194,7 @@ const prevHint = computed(() => {
 // ==================== 文件树 / 实时预览 / 点选钩子 ====================
 
 // 独立树实例：调整模式=作用模板目录树，会话视图=会话工作目录树
-const { tree, findIndexNode, load: loadScopeTree, loadSession, clearSession } = useTemplateFileTree();
+const { tree, findIndexNode, load: loadScopeTree, loadSession } = useTemplateFileTree();
 
 const currentTreeData = computed<any[]>(() => (sessionView.value ? tree.sessionData : tree.data) as any[]);
 
@@ -523,11 +532,18 @@ const onApplyTemplate = () => {
     }).catch(() => {});
 };
 
-/** 生成型会话应用成功（保留会话回看，不强制跳转；父组件加载新模板并给出跳转入口） */
-const onAiTemplateApplied = (templateId?: string) => {
-    sessionView.value = false;
-    clearSession();
-    emit('applied', templateId);
+/**
+ * 「编辑此模板」（已应用回看态）：按会话 templateName 找到对应正式模板，
+ * 通知父组件加载到主编辑视图（重新编辑应用后的模板）
+ */
+const onEditApplied = () => {
+    const name = currentSession.value?.templateName;
+    const tpl = (props.templateList || []).find((i: any) => i.name === name);
+    if (!tpl) {
+        ElMessage.warning('未找到对应的正式模板，请从主编辑视图的模板下拉中选择');
+        return;
+    }
+    emit('edit-applied', String(tpl.id));
 };
 
 // ==================== 工具条对话框入口 ====================
