@@ -78,6 +78,13 @@
                         </div>
                     </el-card>
                 </div>
+                <div class="edit-col-preview">
+                    <!-- 内联预览（中列）：预览已保存内容，保存成功后自动刷新 -->
+                    <TemplatePreviewPanel v-model:entry="manualPreview.entry"
+                                          :page-options="manualPreviewOptions" :url="manualPreviewUrl"
+                                          :empty-tip="manualPreviewTip" v-model:viewport="manualViewport"
+                                          @refresh="refreshManualPreview" />
+                </div>
                 <div class="edit-col-mid" :class="{ collapsed: midCollapsed }">
                     <!-- 收起/展开切换按钮条（收起后预览列自动吃满剩余空间） -->
                     <div class="mid-collapse-bar">
@@ -103,13 +110,6 @@
                                 v-bind="$attrs"
                                 :extensions="extensions" />
                     </div>
-                </div>
-                <div class="edit-col-preview">
-                    <!-- 内联预览：预览已保存内容，保存成功后自动刷新 -->
-                    <TemplatePreviewPanel v-model:entry="manualPreview.entry"
-                                          :page-options="manualPreviewOptions" :url="manualPreviewUrl"
-                                          :empty-tip="manualPreviewTip" v-model:viewport="manualViewport"
-                                          @refresh="refreshManualPreview" />
                 </div>
             </div>
         </div>
@@ -822,7 +822,7 @@ onActivated(() => {
     }
 }
 
-// ===== 手动编辑三列：树 | 代码编辑（可收起 38px）| 内联预览 =====
+// ===== 手动编辑三列：树 | 内联预览（中，flex:1）| 代码编辑（右，可收起 38px） =====
 .edit-columns {
     display: flex;
     gap: 12px;

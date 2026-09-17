@@ -1,5 +1,5 @@
 <template>
-    <!-- AI 工作台视图：与手动编辑同构的三列布局（树 | AI 对话 | 内联预览）。
+    <!-- AI 工作台视图：与手动编辑同构的三列布局（树 | 内联预览 | AI 对话）。
          会话编排自 edit.vue 迁入：本组件持有 AI 会话状态与预览点选钩子，
          模板作用对象（scope）经 props.templateId 与父组件双向同步（scope-change） -->
     <div class="ai-workbench" :style="{ height: height }">
@@ -24,7 +24,7 @@
             <span class="prev-hint">预览指向：{{ prevHint }}</span>
         </div>
 
-        <!-- 三列骨架：左文件树（作用对象+聚焦导航）| 中 AI 对话（可收起）| 右内联预览 -->
+        <!-- 三列骨架：左文件树（作用对象+聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
         <div class="wb-columns">
             <div class="wb-col-tree">
                 <el-select :model-value="templateId" size="small" filterable placeholder="作用模板"
@@ -33,7 +33,6 @@
                     <el-option v-for="item in templateList" :key="item.id" :value="item.id"
                                :label="item.name + (item.active ? '（使用中）' : '')" />
                 </el-select>
-                <el-input v-model="treeFilter" size="small" clearable placeholder="搜索文件" class="tree-filter" />
                 <el-card shadow="hover" class="tree-card">
                     <template #header>
                         <div class="tree-card-header">
@@ -43,6 +42,13 @@
                             </el-button>
                         </div>
                     </template>
+                    <div class="tree-filter">
+                        <el-input v-model="treeFilter" size="small" clearable placeholder="输入关键字过滤文件">
+                            <template #prefix>
+                                <el-icon><ele-Search /></el-icon>
+                            </template>
+                        </el-input>
+                    </div>
                     <div v-loading="tree.loading" class="tree-body">
                         <!-- 文件树不渲染代码内容：点文件 = 告诉 AI 聚焦该文件（经 current-file 注入对话），
                              选中可路由 HTML 页面时预览列联动切页 -->
@@ -52,6 +58,13 @@
                                  @node-click="onTreeNodeClick" />
                     </div>
                 </el-card>
+            </div>
+
+            <div class="wb-col-preview">
+                <TemplatePreviewPanel ref="previewPanelRef" v-model:entry="preview.entry"
+                                      :page-options="previewPageOptions" :url="aiPreviewUrl"
+                                      :empty-tip="previewEmptyTip" v-model:viewport="viewport"
+                                      @refresh="refreshAiPreview" @frame-load="onPreviewFrameLoad" />
             </div>
 
             <div class="wb-col-chat" :class="{ collapsed: chatCollapsed }">
@@ -84,15 +97,8 @@
                              @files-changed="onAiFilesChanged" @file-written="onAiFileWritten"
                              @switch-file="onAiSwitchFile"
                              @edit-file="onEditSessionFile"
-                             @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
+                              @toggle-image-pick="toggleImagePickMode" @toggle-section-select="toggleSectionSelectMode" />
                 </div>
-            </div>
-
-            <div class="wb-col-preview">
-                <TemplatePreviewPanel ref="previewPanelRef" v-model:entry="preview.entry"
-                                      :page-options="previewPageOptions" :url="aiPreviewUrl"
-                                      :empty-tip="previewEmptyTip" v-model:viewport="viewport"
-                                      @refresh="refreshAiPreview" @frame-load="onPreviewFrameLoad" />
             </div>
         </div>
 
@@ -679,15 +685,16 @@ onBeforeUnmount(() => {
             margin-bottom: 8px;
         }
 
-        .tree-filter {
-            margin-bottom: 8px;
-        }
-
         .tree-card {
             flex: 1;
             min-height: 0;
             display: flex;
             flex-direction: column;
+
+            // 树卡片内搜索框：与手动编辑文件树同一布局（卡片内、树列表上方）
+            .tree-filter {
+                padding: 8px 10px 4px;
+            }
 
             :deep(.el-card__body) {
                 flex: 1;
