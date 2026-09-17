@@ -29,6 +29,7 @@
                     <el-option v-for="item in templateList" :key="item.id" :value="item.id"
                                :label="item.name + (item.active ? '（使用中）' : '')" />
                 </el-select>
+                <el-input v-model="treeFilter" size="small" clearable placeholder="搜索文件" class="tree-filter" />
                 <el-card shadow="hover" class="tree-card">
                     <template #header>
                         <div class="tree-card-header">
@@ -39,9 +40,11 @@
                         </div>
                     </template>
                     <div v-loading="tree.loading" class="tree-body">
-                        <!-- 文件树不渲染代码内容：点文件 = 告诉 AI 聚焦该文件（经 current-file 注入对话） -->
+                        <!-- 文件树不渲染代码内容：点文件 = 告诉 AI 聚焦该文件（经 current-file 注入对话），
+                             选中可路由 HTML 页面时预览列联动切页 -->
                         <el-tree ref="wbTreeRef" :data="currentTreeData" node-key="filePath" highlight-current
                                  :default-expanded-keys="tree.expandedKeys" :props="tree.defaultProps"
+                                 :filter-node-method="filterTreeNode"
                                  @node-click="onTreeNodeClick" />
                     </div>
                 </el-card>
@@ -71,7 +74,7 @@
                              :current-file="aiMode === 'adjust' ? selectedFile : ''"
                              :focus-section="selectedSection?.sectionId || ''"
                              :focus-element-hint="selectedSection?.elementHint || ''"
-                             :sessions="allSessions" :creating-session="creatingAiSession"
+                             :sessions="dropdownSessions" :creating-session="creatingAiSession"
                              :image-pick-mode="pickMode" :section-select-mode="sectionMode"
                              @select-session="onSelectAiSession" @new-session="onNewAiSession"
                              @files-changed="onAiFilesChanged" @file-written="onAiFileWritten"
@@ -185,11 +188,25 @@ const prevHint = computed(() => {
 // ==================== 文件树 / 实时预览 / 点选钩子 ====================
 
 // 独立树实例：调整模式=作用模板目录树，会话视图=会话工作目录树
-const { tree, load: loadScopeTree, loadSession, clearSession } = useTemplateFileTree();
+const { tree, findIndexNode, load: loadScopeTree, loadSession, clearSession } = useTemplateFileTree();
 
 const currentTreeData = computed<any[]>(() => (sessionView.value ? tree.sessionData : tree.data) as any[]);
 
 const loadSessionFileTree = () => loadSession(currentSession.value?.sessionId);
+
+// 文件树关键字过滤：按文件/目录名模糊匹配（与手动编辑文件树同一交互）
+const treeFilter = ref('');
+const filterTreeNode = (value: string, data: any) => {
+    if (!value) return true;
+    return String(data.label || '').toLowerCase().includes(value.toLowerCase());
+};
+watch(treeFilter, (val) => {
+    wbTreeRef.value?.filter(val);
+});
+
+// 对话头会话下拉数据源：全部生成会话 + 当前作用模板的调整会话（其他模板的调整会话与本工作台无关）
+const dropdownSessions = computed(() =>
+    (allSessions.value || []).filter((s: any) => !s.templateId || s.templateId === props.templateId));
 
 // 实时预览（入口页面/刷新键/预览地址），getter 注入树与会话上下文
 const { preview, previewPageOptions, aiPreviewUrl, previewEmptyTip, initEntry: initPreviewEntry, refresh: refreshAiPreview } = useAiPreview({
@@ -232,12 +249,30 @@ const onRefreshTree = () => {
 };
 
 /**
- * 文件树点选：聚焦该文件（对话头 current-file 注入），树高亮选中。
- * AI 工作台不写代码，选中的意义是让 AI 知道用户在看哪个页面
+ * 文件树点选：聚焦该文件（对话头 current-file 注入），树高亮选中；
+ * 选中可路由 HTML 页面时预览列联动切到该页面
  */
 const onTreeNodeClick = (node: any) => {
     if (node.sortNum === 0) return;
     selectedFile.value = node.filePath;
+    if (isRoutableHtml(node.filePath)) {
+        preview.entry = node.filePath;
+    }
+};
+
+/**
+ * 树加载后默认选中入口文件（index.html）：聚焦 AI 的当前文件 + 预览指向入口页，
+ * 用户进来就能看到首页效果并直接对话调整
+ */
+const selectDefaultEntry = () => {
+    const idx = findIndexNode(currentTreeData.value || []);
+    if (idx && idx.sortNum !== 0) {
+        selectedFile.value = idx.filePath;
+        if (isRoutableHtml(idx.filePath)) {
+            preview.entry = idx.filePath;
+        }
+        nextTick(() => wbTreeRef.value?.setCurrentKey(idx.filePath));
+    }
 };
 
 /** AI 正在写/刚写完的文件自动在树中选中高亮（树路径含模板目录前缀，按后缀匹配） */
@@ -311,11 +346,11 @@ const ensureAdjustSession = async () => {
 /**
  * 新建会话（对话头 ＋ 按钮）：调整模式建空白调整会话；生成模式弹新建模板对话框
  */
+/**
+ * 新建会话（对话头 ＋ 按钮）：新建当前模板的空白调整会话并进入对话。
+ * 生成完整模板的入口收敛到工具条「✦ 新建模板」，避免这里重复弹生成对话框
+ */
 const onNewAiSession = async () => {
-    if (aiMode.value === 'generate') {
-        openCreateDialog();
-        return;
-    }
     if (!props.templateId) return;
     creatingAiSession.value = true;
     try {
@@ -327,7 +362,11 @@ const onNewAiSession = async () => {
         allSessions.value = [res.data, ...allSessions.value];
         sessionView.value = false;
         applySession(res.data);
-        initPreviewEntry();
+        // 从生成会话切回调整模式时树可能尚未加载/已过期，统一重载后初始化预览与默认选中
+        loadScopeTree(props.templateId).then(() => {
+            initPreviewEntry();
+            selectDefaultEntry();
+        });
     } catch (e: any) {
         ElMessage.error(e?.message || '创建会话失败');
     } finally {
@@ -345,11 +384,17 @@ const onSelectAiSession = (sessionId: string) => {
     if (session.templateId) {
         sessionView.value = false;
         // 作用模板树就绪后初始化预览入口（从生成会话切回时树可能尚未加载）
-        loadScopeTree(session.templateId).then(() => initPreviewEntry());
+        loadScopeTree(session.templateId).then(() => {
+            initPreviewEntry();
+            selectDefaultEntry();
+        });
         return;
     }
     sessionView.value = true;
-    loadSessionFileTree().then(() => initPreviewEntry());
+    loadSessionFileTree().then(() => {
+        initPreviewEntry();
+        selectDefaultEntry();
+    });
 };
 
 /** 新建模板对话框创建会话成功：进入会话视图并自动发送首条消息 */
@@ -363,7 +408,10 @@ const onCreateDialogCreated = async (session: any, firstMessage: string) => {
     }
     applySession(session);
     // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
-    loadSessionFileTree().then(() => initPreviewEntry());
+    loadSessionFileTree().then(() => {
+        initPreviewEntry();
+        selectDefaultEntry();
+    });
     nextTick(() => {
         aiChatRef.value?.autoSend(firstMessage);
     });
@@ -374,7 +422,10 @@ const onOpenHistorySession = (row: any, sessions: any[]) => {
     allSessions.value = sessions;
     sessionView.value = true;
     applySession(row);
-    loadSessionFileTree().then(() => initPreviewEntry());
+    loadSessionFileTree().then(() => {
+        initPreviewEntry();
+        selectDefaultEntry();
+    });
 };
 
 /**
@@ -534,6 +585,8 @@ const enterAdjustContext = () => {
         } else {
             initPreviewEntry();
         }
+        // 树就绪后默认选中入口文件（聚焦 AI + 预览指向首页）
+        selectDefaultEntry();
     });
 };
 
@@ -552,6 +605,8 @@ const onMqChange = () => {
 };
 
 onMounted(() => {
+    // 页面默认打开在 AI 视图时 active 初始即为 true，watch 不会触发，这里补一次初始化
+    if (props.active) enterAdjustContext();
     if (typeof window.matchMedia === 'function') {
         narrowMq = window.matchMedia('(max-width: 768px)');
         if (narrowMq.addEventListener) {
@@ -605,6 +660,10 @@ onBeforeUnmount(() => {
         min-height: 0;
 
         .scope-select {
+            margin-bottom: 8px;
+        }
+
+        .tree-filter {
             margin-bottom: 8px;
         }
 

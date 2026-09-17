@@ -324,6 +324,8 @@ const sessionBadge = (row: any): { text: string; type: 'primary' | 'danger' | 'w
  */
 const onOpenHistorySession = (row: any) => {
     emit('open-session', row, dialog.sessions);
+    // 会话已进入工作台恢复，对话框完成使命即关闭
+    visible.value = false;
 };
 
 /** 历史记录创建时间格式化（月-日 时:分） */

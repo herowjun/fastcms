@@ -154,8 +154,8 @@ const editRowRef = ref();
 let editorHeightObserver: ResizeObserver | null = null;
 
 const templateApi = TemplateApi();
-// 视图切换：手动编辑（默认，保持既有入口行为）/ AI 工作台（v-show 保活，切换不丢状态）
-const currentView = ref<'edit' | 'ai'>('edit');
+// 视图切换：默认 AI 工作台（对齐原型），手动编辑 v-show 保活，切换不丢状态
+const currentView = ref<'edit' | 'ai'>('ai');
 // 代码编辑列收起状态（收起后预览列吃满剩余空间）
 const midCollapsed = ref(false);
 // 窄屏媒体查询：进入窄屏时默认收起中列（手动编辑列与 AI 工作台对话列同一交互）
