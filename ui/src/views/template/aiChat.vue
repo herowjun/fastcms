@@ -245,27 +245,27 @@
 			</div>
 		</div>
 
-		<!-- 文件列表区域：对话下方（限高滚动） -->
+		<!-- 本轮文件入口：对话下方一行链接，点击弹出文件清单对话框（列表收进弹窗，不再挤占对话区） -->
 		<div class="files-area" v-if="state.files.length > 0">
-			<div class="files-header">
-				<span>{{ mode === 'adjust' ? '本轮 AI 修改的文件（' + state.files.length + '）' : '生成文件（' + state.files.length + '）' }}</span>
-				<div>
-					<el-button size="small" text @click="onPreviewTemplate">
-						<el-icon><ele-View /></el-icon>预览
-					</el-button>
-				</div>
-			</div>
-			<!-- 限高 180px 内部滚动，避免长列表把输入区挤出视口 -->
-			<el-table :data="state.files" stripe size="small" :max-height="180">
-				<el-table-column prop="filePath" label="文件路径" min-width="200" show-overflow-tooltip />
-				<el-table-column prop="action" label="操作" width="90">
+			<span class="files-toggle" @click="state.filesDialogVisible = true">
+				<el-icon><ele-View /></el-icon>
+				{{ mode === 'adjust' ? '查看本轮 AI 修改的文件（' + state.files.length + '）' : '查看生成文件（' + state.files.length + '）' }}
+			</span>
+		</div>
+
+		<!-- 本轮文件清单对话框：文件路径 + 新建/修改类型 + 查看/编辑（编辑仅调整会话） -->
+		<el-dialog :title="mode === 'adjust' ? '本轮 AI 修改的文件' : '生成文件'" v-model="state.filesDialogVisible"
+		           width="640px" append-to-body>
+			<el-table :data="state.files" stripe size="small" max-height="420">
+				<el-table-column prop="filePath" label="文件路径" min-width="260" show-overflow-tooltip />
+				<el-table-column prop="action" label="类型" width="90">
 					<template #default="scope">
 						<el-tag size="small" :type="scope.row.action === 'create' ? 'success' : scope.row.action === 'modify' ? 'warning' : 'danger'">
 							{{ scope.row.action }}
 						</el-tag>
 					</template>
 				</el-table-column>
-				<el-table-column label="操作" width="110">
+				<el-table-column label="操作" width="120">
 					<template #default="scope">
 						<el-button size="small" text type="primary" @click="onViewFile(scope.row)">查看</el-button>
 						<!-- 编辑文件桥（仅调整会话）：把 AI 的改动接回手动编辑视图继续打磨 -->
@@ -273,7 +273,7 @@
 					</template>
 				</el-table-column>
 			</el-table>
-		</div>
+		</el-dialog>
 
 		<!-- 文件查看对话框 -->
 		<el-dialog :title="state.viewingFile?.filePath || '文件内容'" v-model="state.fileDialogVisible" width="80%" top="5vh" append-to-body>
@@ -482,6 +482,8 @@ const state = reactive({
 	fullInject: Local.get('ai-template-full-inject') === true,
 	fileDialogVisible: false,
 	viewingFile: null as any,
+	// 本轮文件清单对话框
+	filesDialogVisible: false,
 });
 
 /** 点选工具（换图/选区）可见：AI 工作台内预览列常驻，调整会话与生成会话均可点选预览页 */
@@ -748,28 +750,6 @@ const onConfirmReject = async (msg: any) => {
 		input,
 		displayText: input ? `驳回设计稿：${input}` : '驳回设计稿，重新设计',
 	});
-};
-
-const onPreviewTemplate = () => {
-	if (!props.session?.templateName) return;
-	// 调整型会话工作目录即正式模板目录，直接预览首页；
-	// 生成型会话从文件列表解析入口页
-	let entry = 'index.html';
-	if (props.mode === 'generate') {
-		const htmlFiles: string[] = state.files
-			.map((f: any) => f.filePath)
-			.filter((p: any) => {
-				if (!p || !p.toLowerCase().endsWith('.html')) return false;
-				return !p.split('/').pop()!.startsWith('_');
-			});
-		if (htmlFiles.length === 0) {
-			ElMessage.warning('当前会话没有可预览的 HTML 页面文件');
-			return;
-		}
-		entry = htmlFiles.includes('index.html') ? 'index.html' : htmlFiles[0];
-	}
-	const url = templateApi.previewUrl(props.session.sessionId, props.session.templateName, entry);
-	window.open(url, '_blank');
 };
 
 const onViewFile = (file: any) => {
@@ -1342,14 +1322,20 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 .files-area {
 	margin-top: 12px;
 
-	.files-header {
-		display: flex;
-		justify-content: space-between;
+	// 可点击入口：主色链接样式（悬浮加深），点击弹出本轮文件清单对话框
+	.files-toggle {
+		display: inline-flex;
 		align-items: center;
-		flex-wrap: wrap;
-		gap: 6px;
-		margin-bottom: 8px;
+		gap: 4px;
+		font-size: 13px;
 		font-weight: 500;
+		color: var(--el-color-primary);
+		cursor: pointer;
+		user-select: none;
+
+		&:hover {
+			color: var(--el-color-primary-light-3);
+		}
 	}
 }
 
