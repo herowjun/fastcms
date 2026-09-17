@@ -8,9 +8,6 @@
             <el-button type="warning" plain @click="openCreateDialog">
                 <el-icon><ele-MagicStick /></el-icon>新建模板
             </el-button>
-            <el-button @click="openHistoryDialog">
-                <el-icon><ele-Clock /></el-icon>历史记录
-            </el-button>
             <el-button v-if="canRollback" type="danger" plain :loading="rollingBack" @click="onRollback">
                 <el-icon><ele-RefreshLeft /></el-icon>回滚最近
             </el-button>
@@ -96,9 +93,9 @@
         <ImagePickDialog ref="imagePickDialogRef" v-model:visible="pickDialogVisible"
                          :session-id="currentSession?.sessionId || ''" @applied="onPickApplied" />
 
-        <!-- AI 新建模板对话框（含历史生成记录入口，工具条两个入口分别落到表单页/历史页） -->
+        <!-- AI 新建模板对话框（生成完整模板的唯一入口） -->
         <CreateTemplateDialog ref="createDialogRef" v-model:visible="createDialogVisible"
-                              @created="onCreateDialogCreated" @open-session="onOpenHistorySession" />
+                              @created="onCreateDialogCreated" />
     </div>
 </template>
 
@@ -417,17 +414,6 @@ const onCreateDialogCreated = async (session: any, firstMessage: string) => {
     });
 };
 
-/** 打开历史生成会话：进入会话视图恢复（不自动发送消息），未应用可续聊，已应用只读回看 */
-const onOpenHistorySession = (row: any, sessions: any[]) => {
-    allSessions.value = sessions;
-    sessionView.value = true;
-    applySession(row);
-    loadSessionFileTree().then(() => {
-        initPreviewEntry();
-        selectDefaultEntry();
-    });
-};
-
 /**
  * AI 写盘后联动：
  * - 会话视图：AI 改的是会话工作目录 → 刷新会话文件树（预览页面下拉随之更新）
@@ -549,13 +535,6 @@ const onAiTemplateApplied = (templateId?: string) => {
 /** 新建模板：打开新建表单 */
 const openCreateDialog = () => {
     createDialogRef.value?.open();
-};
-
-/** 历史记录：打开历史生成记录页（对正在跑/刚失败的会话用内存状态覆盖徽章） */
-const openHistoryDialog = () => {
-    const runningId = aiChatRef.value?.isChatting?.() ? currentSession.value?.sessionId : '';
-    const failedId = !runningId && aiChatRef.value?.isFailed?.() ? currentSession.value?.sessionId : '';
-    createDialogRef.value?.open('history', { runningId, failedId });
 };
 
 // ==================== 视图激活与作用模板联动 ====================

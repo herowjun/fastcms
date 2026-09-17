@@ -12,20 +12,30 @@
 				class="session-select"
 				@change="(v: string) => emit('select-session', v)"
 			>
-				<el-option-group v-if="adjustSessionList.length" label="调整会话">
-					<el-option v-for="sess in adjustSessionList" :key="sess.sessionId" :value="sess.sessionId"
-						:label="formatSessionLabel(sess)">
-						<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
-						<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
-					</el-option>
-				</el-option-group>
-				<el-option-group v-if="generateSessionList.length" label="生成会话">
-					<el-option v-for="sess in generateSessionList" :key="sess.sessionId" :value="sess.sessionId"
-						:label="formatSessionLabel(sess)">
-						<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
-						<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
-					</el-option>
-				</el-option-group>
+			<el-option-group v-if="adjustSessionList.length" label="调整会话">
+				<el-option v-for="sess in adjustSessionList" :key="sess.sessionId" :value="sess.sessionId"
+					:label="formatSessionLabel(sess)">
+					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
+					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
+				</el-option>
+			</el-option-group>
+			<!-- 生成会话按应用状态分组：未应用=活跃工作集（可续聊/重新生成/应用），已应用=仅回看 -->
+			<el-option-group v-if="pendingSessionList.length" label="未应用模板">
+				<el-option v-for="sess in pendingSessionList" :key="sess.sessionId" :value="sess.sessionId"
+					:label="formatSessionLabel(sess)" :title="sess.requirement">
+					<el-tag size="small" type="warning" class="session-option-tag">待应用</el-tag>
+					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
+					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
+				</el-option>
+			</el-option-group>
+			<el-option-group v-if="appliedSessionList.length" label="已应用模板">
+				<el-option v-for="sess in appliedSessionList" :key="sess.sessionId" :value="sess.sessionId"
+					:label="formatSessionLabel(sess)" :title="sess.requirement">
+					<el-tag size="small" type="success" class="session-option-tag">已应用</el-tag>
+					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
+					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
+				</el-option>
+			</el-option-group>
 			</el-select>
 			<span v-else class="panel-title">{{ session?.title || (mode === 'adjust' ? 'AI 调整模板' : 'AI 生成模板') }}</span>
 			<el-button size="small" text type="primary" :loading="creatingSession"
@@ -366,10 +376,13 @@ const modePill = computed(() => {
 	return { text: '会话工作目录', cls: 'generate' };
 });
 
-/** 会话下拉按类型分组（各组内按创建时间倒序，最近的在前） */
+/** 会话下拉分组（各组内按创建时间倒序，最近的在前）：调整会话 / 生成会话按应用状态拆两组 */
 const sortByCreatedDesc = (a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime();
 const adjustSessionList = computed(() => (props.sessions || []).filter((s: any) => s.templateId).sort(sortByCreatedDesc));
-const generateSessionList = computed(() => (props.sessions || []).filter((s: any) => !s.templateId).sort(sortByCreatedDesc));
+const pendingSessionList = computed(() =>
+    (props.sessions || []).filter((s: any) => !s.templateId && s.status !== 'applied').sort(sortByCreatedDesc));
+const appliedSessionList = computed(() =>
+    (props.sessions || []).filter((s: any) => !s.templateId && s.status === 'applied').sort(sortByCreatedDesc));
 
 /** token 数量格式化：原样输出完整数字，不用 w 等缩写 */
 const formatTokenCount = (n: any): string => {
@@ -1360,5 +1373,9 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 	color: var(--el-text-color-secondary);
 	font-size: 12px;
 	margin-left: 16px;
+}
+// 分组选项状态徽章（待应用/已应用）：紧跟标题左侧
+.el-select-dropdown .session-option-tag {
+	margin-right: 6px;
 }
 </style>
