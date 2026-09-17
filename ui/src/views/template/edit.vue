@@ -85,26 +85,31 @@
                                           :empty-tip="manualPreviewTip" v-model:viewport="manualViewport"
                                           @refresh="refreshManualPreview" />
                 </div>
-                <div class="edit-col-mid" :class="{ collapsed: midCollapsed }">
-                    <!-- 收起/展开切换按钮条（收起后预览列自动吃满剩余空间） -->
-                    <div class="mid-collapse-bar">
-                        <el-button size="small" text :title="midCollapsed ? '展开代码编辑' : '收起代码编辑'"
+                <div class="edit-col-mid" :class="{ collapsed: midCollapsed, 'editor-fullscreen': editorFullscreen }">
+                    <!-- 侧边把手条（贴右缘竖条）：展开态=收起+全屏按钮，收起态=展开按钮+竖排「代码」，全屏态=退出全屏 -->
+                    <div class="mid-side-bar">
+                        <el-button v-if="!editorFullscreen" size="small" text
+                                   :title="midCollapsed ? '展开代码编辑' : '收起代码编辑'"
                                    @click="midCollapsed = !midCollapsed">
-                            <el-icon :size="16">
-                                <ele-Fold v-if="!midCollapsed" />
-                                <ele-Expand v-else />
+                            <el-icon :size="14">
+                                <ele-DArrowLeft v-if="midCollapsed" />
+                                <ele-DArrowRight v-else />
                             </el-icon>
                         </el-button>
-                        <span v-if="midCollapsed" class="collapsed-label">代码</span>
+                        <el-button size="small" text :title="editorFullscreen ? '退出全屏' : '编辑器全屏'"
+                                   @click="toggleEditorFullscreen">
+                            <el-icon :size="14"><ele-FullScreen /></el-icon>
+                        </el-button>
+                        <span v-if="midCollapsed && !editorFullscreen" class="collapsed-label">代码</span>
                     </div>
-                    <div class="edit-col-mid-inner" v-show="!midCollapsed">
+                    <div class="edit-col-mid-inner" v-show="!midCollapsed || editorFullscreen">
                         <!-- 图片工作台：文件树点选图片文件时覆盖代码编辑器（左原图 / 右生成结果对比，确认后应用） -->
                         <ImageWorkbench v-if="workbenchVisible" v-model:visible="workbenchVisible" :template-id="state.loadedTemplateId"
-                                        :file-path="workbenchFile" :height="state.clientHeight" @refresh-tree="loadFileTree" />
+                                        :file-path="workbenchFile" :height="editorHeight" @refresh-tree="loadFileTree" />
                         <Codemirror
                                 v-else
                                 v-model="state.content"
-                                :style="{ height: state.clientHeight, width: '100%' }"
+                                :style="{ height: editorHeight, width: '100%' }"
                                 :autofocus="true"
                                 @change="onChange"
                                 v-bind="$attrs"
@@ -159,6 +164,14 @@ const templateApi = TemplateApi();
 const currentView = ref<'edit' | 'ai'>('ai');
 // 代码编辑列收起状态（收起后预览列吃满剩余空间）
 const midCollapsed = ref(false);
+// 编辑器全屏（fixed 覆盖视口；与收起互斥，切视图自动退出）
+const editorFullscreen = ref(false);
+// 编辑器高度：全屏时占满视口（把手条与内边距留 16px），否则用实测的自适应高度
+const editorHeight = computed(() => (editorFullscreen.value ? 'calc(100vh - 16px)' : state.clientHeight));
+const toggleEditorFullscreen = () => {
+    if (!editorFullscreen.value) midCollapsed.value = false;
+    editorFullscreen.value = !editorFullscreen.value;
+};
 // 窄屏媒体查询：进入窄屏时默认收起中列（手动编辑列与 AI 工作台对话列同一交互）
 let narrowMq: MediaQueryList | null = null;
 const onNarrowMqChange = () => {
@@ -687,9 +700,11 @@ onMounted(() => {
     }
 });
 
-// 切回手动编辑视图时重算高度（隐藏期间布局可能变化，且 display:none 下无法实测）
+// 切回手动编辑视图时重算高度（隐藏期间布局可能变化，且 display:none 下无法实测）；
+// 切到 AI 工作台时退出编辑器全屏，避免 fixed 覆盖层残留
 watch(currentView, (view) => {
     if (view === 'edit') nextTick(() => updateEditorHeight());
+    else editorFullscreen.value = false;
 });
 
 // 选区锁定/换图模式的 ESC 与生命周期清理随钩子内聚到 aiWorkbench 组件
@@ -702,8 +717,8 @@ watch(currentView, (view) => {
 const updateEditorHeight = () => {
     const rowEl = editRowRef.value?.$el || editRowRef.value;
     if (!rowEl) return;
-    // 视图隐藏（v-show display:none）时 getBoundingClientRect 全为 0，跳过本次计算沿用旧值
-    if (currentView.value !== 'edit') return;
+    // 视图隐藏（v-show display:none）或编辑器全屏（fixed 布局脱离文档流）时跳过，沿用旧值
+    if (currentView.value !== 'edit' || editorFullscreen.value) return;
     const viewportW = document.documentElement.clientWidth;
     if (viewportW < 768) {
         state.clientHeight = '600px';
@@ -718,6 +733,11 @@ const updateEditorHeight = () => {
 
 /** Ctrl/Cmd + S 快捷保存：AI 工作台视图下忽略（工作台内对话框自管快捷键语境） */
 const onSaveShortcut = (e: KeyboardEvent) => {
+    // Esc 退出编辑器全屏（全屏仅在手动编辑视图存在）
+    if (e.key === 'Escape') {
+        if (editorFullscreen.value) editorFullscreen.value = false;
+        return;
+    }
     if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
     e.preventDefault();
     if (currentView.value !== 'edit') return;
@@ -838,24 +858,48 @@ onActivated(() => {
 
 .edit-col-mid {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     flex: 0 0 30%;
     min-width: 0;
     min-height: 0;
 
-    // 收起态：变成一条窄竖条，显示切换按钮 + 竖排「代码」标签，预览列吃满剩余空间
+    // 侧边把手条（贴右缘竖条）：展开态放收起/全屏按钮，收起态整列变窄竖条
+    .mid-side-bar {
+        flex: 0 0 22px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 6px 0 10px;
+        gap: 6px;
+        border-left: 1px solid var(--el-border-color-lighter);
+        border-radius: 0 6px 6px 0;
+        background: var(--el-fill-color-lighter);
+
+        .el-button {
+            width: 100%;
+            padding: 4px 0;
+        }
+    }
+
+    .edit-col-mid-inner {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    // 收起态：整列变 38px 竖条，展开按钮 + 竖排「代码」标签，预览列吃满剩余空间
     &.collapsed {
         flex: 0 0 38px;
         max-width: 38px;
 
-        .mid-collapse-bar {
-            flex-direction: column;
-            justify-content: flex-start;
-            align-items: center;
+        .mid-side-bar {
+            flex-basis: 38px;
+            border-left: none;
+            border: 1px solid var(--el-border-color-lighter);
+            border-radius: 6px;
+            background: var(--el-bg-color);
             padding: 10px 0 12px;
             gap: 12px;
-            border-bottom: none;
-            margin-bottom: 0;
 
             .collapsed-label {
                 writing-mode: vertical-rl;
@@ -867,19 +911,21 @@ onActivated(() => {
         }
     }
 
-    // 顶部收起按钮条（展开态：靠右显示）
-    .mid-collapse-bar {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        padding: 2px 8px 6px;
-        border-bottom: 1px solid var(--el-border-color-lighter);
-        margin-bottom: 8px;
-    }
+    // 全屏态：fixed 覆盖视口（把手条保留「退出全屏」按钮，Esc 同效）
+    &.editor-fullscreen {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        flex: none;
+        max-width: none;
+        padding: 8px;
+        background: var(--el-bg-color);
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
 
-    .edit-col-mid-inner {
-        flex: 1;
-        min-height: 0;
+        .mid-side-bar {
+            flex-basis: 30px;
+            border-left: none;
+        }
     }
 }
 

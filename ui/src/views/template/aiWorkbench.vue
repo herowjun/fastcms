@@ -68,13 +68,13 @@
             </div>
 
             <div class="wb-col-chat" :class="{ collapsed: chatCollapsed }">
-                <!-- 收缩/展开切换按钮条（与手动编辑中列收起同一套交互） -->
-                <div class="chat-collapse-bar">
+                <!-- 侧边把手条（贴右缘竖条）：展开态=收起按钮，收起态=展开按钮+竖排 AI 标签 -->
+                <div class="chat-side-bar">
                     <el-button size="small" text :title="chatCollapsed ? '展开 AI 对话' : '收起 AI 对话'"
                                @click="chatCollapsed = !chatCollapsed">
-                        <el-icon :size="16">
-                            <ele-Fold v-if="!chatCollapsed" />
-                            <ele-Expand v-else />
+                        <el-icon :size="14">
+                            <ele-DArrowLeft v-if="chatCollapsed" />
+                            <ele-DArrowRight v-else />
                         </el-icon>
                     </el-button>
                     <span v-if="chatCollapsed" class="collapsed-label">AI</span>
@@ -723,52 +723,35 @@ onBeforeUnmount(() => {
         }
     }
 
-    // ===== 中列：AI 对话（30%，可收起 38px） =====
+    // ===== 右列：AI 对话（30%，可收起 38px） =====
     .wb-col-chat {
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         flex: 0 0 30%;
         min-width: 0;
         min-height: 0;
 
-        // 收缩态：变成一条窄竖条，显示切换按钮 + 竖排 AI 标签
-        &.collapsed {
-            flex: 0 0 38px;
-            max-width: 38px;
-            border: 1px solid var(--el-border-color-lighter);
-            border-radius: 6px;
-            background: var(--el-bg-color);
-
-            .chat-collapse-bar {
-                flex-direction: column;
-                justify-content: flex-start;
-                align-items: center;
-                padding: 10px 0 12px;
-                gap: 12px;
-                border-bottom: none;
-                margin-bottom: 0;
-
-                .collapsed-label {
-                    writing-mode: vertical-rl;
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: var(--el-color-primary);
-                    letter-spacing: 3px;
-                }
-            }
-        }
-
-        .chat-collapse-bar {
+        // 侧边把手条（贴右缘竖条）：与手动编辑编辑器列同一套交互
+        .chat-side-bar {
+            flex: 0 0 22px;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: flex-end;
-            padding: 2px 8px 6px;
-            border-bottom: 1px solid var(--el-border-color-lighter);
-            margin-bottom: 8px;
+            padding: 6px 0 10px;
+            gap: 6px;
+            border-left: 1px solid var(--el-border-color-lighter);
+            border-radius: 0 6px 6px 0;
+            background: var(--el-fill-color-lighter);
+
+            .el-button {
+                width: 100%;
+                padding: 4px 0;
+            }
         }
 
         .wb-col-chat-inner {
             flex: 1;
+            min-width: 0;
             min-height: 0;
             display: flex;
             flex-direction: column;
@@ -777,6 +760,30 @@ onBeforeUnmount(() => {
             > :deep(.ai-chat-panel) {
                 flex: 1;
                 min-height: 0;
+            }
+        }
+
+        // 收缩态：整列变 38px 竖条，展开按钮 + 竖排 AI 标签，预览列吃满剩余空间
+        &.collapsed {
+            flex: 0 0 38px;
+            max-width: 38px;
+
+            .chat-side-bar {
+                flex-basis: 38px;
+                border-left: none;
+                border: 1px solid var(--el-border-color-lighter);
+                border-radius: 6px;
+                background: var(--el-bg-color);
+                padding: 10px 0 12px;
+                gap: 12px;
+
+                .collapsed-label {
+                    writing-mode: vertical-rl;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: var(--el-color-primary);
+                    letter-spacing: 3px;
+                }
             }
         }
 
