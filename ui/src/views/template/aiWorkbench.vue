@@ -8,6 +8,36 @@
             <el-button type="warning" plain @click="openCreateDialog">
                 <el-icon><ele-MagicStick /></el-icon>新建模板
             </el-button>
+            <!-- 历史生成模板清单：未应用=活跃工作集（续聊/应用），已应用=回看后可「编辑此模板」 -->
+            <el-dropdown trigger="click" @command="(id: string) => onSelectAiSession(id)">
+                <el-button>
+                    <el-icon><ele-FolderOpened /></el-icon>生成模板
+                    <el-icon class="el-icon--right"><ele-ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                    <el-dropdown-menu>
+                        <el-dropdown-item v-if="!pendingTemplates.length && !appliedTemplates.length" disabled>
+                            暂无生成模板
+                        </el-dropdown-item>
+                        <template v-if="pendingTemplates.length">
+                            <el-dropdown-item disabled class="dd-group">未应用模板（{{ pendingTemplates.length }}）</el-dropdown-item>
+                            <el-dropdown-item v-for="s in pendingTemplates" :key="s.sessionId" :command="s.sessionId"
+                                              :title="s.requirement">
+                                <el-tag size="small" type="warning" style="margin-right: 6px">待应用</el-tag>
+                                {{ s.templateName || s.title }} · {{ fmtTime(s.created) }}
+                            </el-dropdown-item>
+                        </template>
+                        <template v-if="appliedTemplates.length">
+                            <el-dropdown-item disabled class="dd-group">已应用模板（{{ appliedTemplates.length }}）</el-dropdown-item>
+                            <el-dropdown-item v-for="s in appliedTemplates" :key="s.sessionId" :command="s.sessionId"
+                                              :title="s.requirement">
+                                <el-tag size="small" type="success" style="margin-right: 6px">已应用</el-tag>
+                                {{ s.templateName || s.title }} · {{ fmtTime(s.created) }}
+                            </el-dropdown-item>
+                        </template>
+                    </el-dropdown-menu>
+                </template>
+            </el-dropdown>
             <el-button v-if="canRollback" type="danger" plain :loading="rollingBack" @click="onRollback">
                 <el-icon><ele-RefreshLeft /></el-icon>回滚最近
             </el-button>
@@ -183,6 +213,23 @@ const showApply = computed(() => aiMode.value === 'generate' && !!currentSession
 /** 已应用会话回看态：提供「编辑此模板」一键回到主编辑视图（重新编辑应用后的正式模板） */
 const showEditApplied = computed(() => aiMode.value === 'generate' && currentSession.value?.status === 'applied'
     && !!currentSession.value?.templateName);
+
+/** 历史生成模板（工具条「生成模板」下拉数据源）：未应用/已应用两组，按创建时间倒序 */
+const pendingTemplates = computed(() =>
+    (allSessions.value || []).filter((s: any) => !s.templateId && s.status !== 'applied')
+        .sort((a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+const appliedTemplates = computed(() =>
+    (allSessions.value || []).filter((s: any) => !s.templateId && s.status === 'applied')
+        .sort((a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+
+/** 模板清单时间格式化（月-日 时:分） */
+const fmtTime = (created: any) => {
+    if (!created) return '';
+    const d = new Date(created);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 const prevHint = computed(() => {
     if (sessionView.value && currentSession.value?.templateName) {
