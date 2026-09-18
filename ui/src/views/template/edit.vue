@@ -72,13 +72,14 @@
                 </div>
             </div>
         </div>
-        <!-- 手动编辑视图：树 | 代码编辑（可收起）| 内联预览 三列（flex 布局，与 AI 工作台同一套收起交互） -->
+        <!-- 手动编辑视图：树 | 代码编辑（可收起）| 内联预览 三列（flex 布局，与 AI 工作台同一套收起交互）；
+             列区显式注入高度（与 AI 工作台根高度同机制）：各列经 stretch 拉满，预览列 height:100% 可靠解析 -->
         <div v-show="currentView === 'edit'" style="padding-top: 5px;">
-            <div ref="editRowRef" class="edit-columns">
+            <div ref="editRowRef" class="edit-columns" :style="editColumnsStyle">
                 <div class="edit-col-tree" :class="{ collapsed: treeCollapsed }">
-                    <!-- 树卡片与右侧编辑器等高（高度内联注入），内部 flex 让树占满卡片剩余空间；
+                    <!-- 树卡片经列区 stretch 拉满高度（高度随列区显式注入），内部 flex 让树占满卡片剩余空间；
                          收起态整列变 38px 竖条（与编辑器列收起交互同构） -->
-                    <el-card v-show="!treeCollapsed" shadow="hover" class="tree-card" :style="{ height: state.clientHeight }">
+                    <el-card v-show="!treeCollapsed" shadow="hover" class="tree-card">
                         <template #header>
                             <div class="tree-card-header">
                                 <span>模板文件树</span>
@@ -215,13 +216,18 @@ const treeCollapsed = ref(false);
 const editorFullscreen = ref(false);
 // 编辑器高度：全屏时占满视口（把手条与内边距留 16px），否则用实测的自适应高度
 const editorHeight = computed(() => (editorFullscreen.value ? 'calc(100vh - 16px)' : state.clientHeight));
+// 列区显式高度：与 AI 工作台根高度同机制（窄屏堆叠时退回 auto，让三列按各自内容高度堆叠）
+const editColumnsStyle = computed(() => (isNarrow.value ? undefined : { height: state.clientHeight }));
 const toggleEditorFullscreen = () => {
     if (!editorFullscreen.value) midCollapsed.value = false;
     editorFullscreen.value = !editorFullscreen.value;
 };
 // 窄屏媒体查询：进入窄屏时默认收起中列（手动编辑列与 AI 工作台对话列同一交互）
 let narrowMq: MediaQueryList | null = null;
+// 窄屏标记：列区高度注入退回 auto（堆叠布局按内容高），供 editColumnsStyle 使用
+const isNarrow = ref(false);
 const onNarrowMqChange = () => {
+    isNarrow.value = !!narrowMq?.matches;
     if (narrowMq?.matches) midCollapsed.value = true;
 };
 // 手动编辑预览视口档位
@@ -1079,6 +1085,11 @@ onActivated(() => {
 
     .edit-col-preview {
         min-height: 420px;
+    }
+
+    // 窄屏列区高度退回 auto（堆叠），树卡片按内容高保底
+    .edit-col-tree .tree-card {
+        min-height: 260px;
     }
 }
 
