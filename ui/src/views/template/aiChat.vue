@@ -19,19 +19,11 @@
 					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
 				</el-option>
 			</el-option-group>
-			<!-- 生成会话按应用状态分组：未应用=活跃工作集（可续聊/重新生成/应用），已应用=仅回看 -->
-			<el-option-group v-if="pendingSessionList.length" label="未应用模板">
-				<el-option v-for="sess in pendingSessionList" :key="sess.sessionId" :value="sess.sessionId"
+			<!-- 生成会话：对话记录视角（一次对话一条），失败会话加 tag 便于识别 -->
+			<el-option-group v-if="generateSessionList.length" label="生成会话">
+				<el-option v-for="sess in generateSessionList" :key="sess.sessionId" :value="sess.sessionId"
 					:label="formatSessionLabel(sess)" :title="sess.requirement">
-					<el-tag size="small" type="warning" class="session-option-tag">待应用</el-tag>
-					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
-					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
-				</el-option>
-			</el-option-group>
-			<el-option-group v-if="appliedSessionList.length" label="已应用模板">
-				<el-option v-for="sess in appliedSessionList" :key="sess.sessionId" :value="sess.sessionId"
-					:label="formatSessionLabel(sess)" :title="sess.requirement">
-					<el-tag size="small" type="success" class="session-option-tag">已应用</el-tag>
+					<el-tag v-if="sess.status === 'failed'" size="small" type="danger" class="session-option-tag">失败</el-tag>
 					<span>{{ sess.title || sess.templateName || sess.sessionId }}</span>
 					<span class="session-option-time">{{ formatSessionTime(sess.created) }}</span>
 				</el-option>
@@ -376,13 +368,11 @@ const modePill = computed(() => {
 	return { text: '会话工作目录', cls: 'generate' };
 });
 
-/** 会话下拉分组（各组内按创建时间倒序，最近的在前）：调整会话 / 生成会话按应用状态拆两组 */
+/** 会话下拉分组（各组内按创建时间倒序，最近的在前）：对话记录视角，按对话性质分「调整会话/生成会话」两组 */
 const sortByCreatedDesc = (a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime();
 const adjustSessionList = computed(() => (props.sessions || []).filter((s: any) => s.templateId).sort(sortByCreatedDesc));
-const pendingSessionList = computed(() =>
-    (props.sessions || []).filter((s: any) => !s.templateId && s.status !== 'applied').sort(sortByCreatedDesc));
-const appliedSessionList = computed(() =>
-    (props.sessions || []).filter((s: any) => !s.templateId && s.status === 'applied').sort(sortByCreatedDesc));
+const generateSessionList = computed(() =>
+	(props.sessions || []).filter((s: any) => !s.templateId).sort(sortByCreatedDesc));
 
 /** token 数量格式化：原样输出完整数字，不用 w 等缩写 */
 const formatTokenCount = (n: any): string => {
