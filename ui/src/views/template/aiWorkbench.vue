@@ -1,37 +1,10 @@
 <template>
     <!-- AI 工作台视图：与手动编辑同构的三列布局（树 | 内联预览 | AI 对话）。
-         会话编排自 edit.vue 迁入：本组件持有 AI 会话状态与预览点选钩子，
-         模板作用对象（scope）经 props.templateId 与父组件双向同步（scope-change） -->
+         会话编排自 edit.vue 迁入：本组件持有 AI 会话状态与预览点选钩子；
+         工具条（作用模板下拉+按钮排）上移到父组件 toolbar-row 统一排版（与手动编辑工具行同位同高），
+         按钮逻辑经 defineExpose 暴露给父组件调用 -->
     <div class="ai-workbench" :style="{ height: height }">
-        <!-- 工具条：作用模板下拉 + 新建/历史/回滚/应用 + 预览指向提示（布局同手动编辑工具栏行） -->
-        <div class="wb-toolbar">
-            <el-select :model-value="templateId" filterable placeholder="作用模板" class="scope-select"
-                       title="切换 AI 调整的作用模板（主编辑视图同步切换）"
-                       @change="(v: string) => emit('scope-change', v)">
-                <el-option v-for="item in templateList" :key="item.id" :value="item.id"
-                           :label="item.name + (item.active ? '（使用中）' : '')" />
-            </el-select>
-            <el-divider direction="vertical" />
-            <el-button type="warning" plain @click="openCreateDialog">
-                <el-icon><ele-MagicStick /></el-icon>新建模板
-            </el-button>
-            <el-button @click="openHistoryDialog">
-                <el-icon><ele-Clock /></el-icon>历史记录
-            </el-button>
-            <el-button v-if="canRollback" type="danger" plain :loading="rollingBack" @click="onRollback">
-                <el-icon><ele-RefreshLeft /></el-icon>回滚最近
-            </el-button>
-            <el-button v-if="showApply" type="success" :loading="applying" @click="onApplyTemplate">
-                <el-icon><ele-Check /></el-icon>应用模板
-            </el-button>
-            <el-button v-if="showEditApplied" type="primary" plain @click="onEditApplied"
-                       title="把应用后的正式模板加载到主编辑视图继续修改">
-                <el-icon><ele-EditPen /></el-icon>编辑此模板
-            </el-button>
-            <span class="prev-hint">预览指向：{{ prevHint }}</span>
-        </div>
-
-        <!-- 三列骨架：左文件树（作用对象+聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
+        <!-- 三列骨架：左文件树（聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
         <div class="wb-columns">
             <div class="wb-col-tree">
                 <el-card shadow="hover" class="tree-card">
@@ -126,9 +99,9 @@ import { useAiPreview, isRoutableHtml } from '/@/views/template/composables/useA
 import { usePreviewIframeHooks } from '/@/views/template/composables/usePreviewIframeHooks';
 
 const props = defineProps<{
-    /** 作用模板 ID（与主编辑视图同步：scope-change 通知父组件切换，父组件切换后回流） */
+    /** 作用模板 ID（与主编辑视图同步：切换由父组件工具栏行的作用模板下拉发起，切换后回流） */
     templateId: string;
-    /** 模板列表（作用模板下拉数据源，与主编辑视图共用） */
+    /** 模板列表（父组件工具栏行作用模板下拉数据源 + 编辑此模板回定位用） */
     templateList?: any[];
     /** 工作区高度（与手动编辑视图同源注入） */
     height?: string;
@@ -137,8 +110,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    /** 用户切换作用模板 → 父组件按未保存修改流程切换主编辑视图的模板 */
-    (e: 'scope-change', templateId: string): void;
     /** AI 直写正式模板目录（调整会话）→ 父组件刷新主编辑文件树与当前编辑文件 */
     (e: 'files-changed'): void;
     /** 「编辑文件」桥：切到手动编辑视图并打开该文件 */
@@ -644,6 +615,22 @@ onBeforeUnmount(() => {
         narrowMq.removeEventListener('change', onMqChange);
     }
 });
+
+// 工具条逻辑暴露：工具条 UI 上移到父组件 toolbar-row 统一排版（与手动编辑工具行同位同高），
+// 按钮点击/状态显示由父组件经模板 ref 调用（exposed ref 自动解包）
+defineExpose({
+    openCreateDialog,
+    openHistoryDialog,
+    onRollback,
+    onApplyTemplate,
+    onEditApplied,
+    canRollback,
+    showApply,
+    showEditApplied,
+    rollingBack,
+    applying,
+    prevHint,
+});
 </script>
 
 <style lang="scss" scoped>
@@ -651,25 +638,6 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     min-height: 0;
-
-    .wb-toolbar {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0;
-        padding: 2px 0 10px;
-
-        // 作用模板下拉：default 尺寸 + 固定宽度，与手动编辑工具栏行同风格
-        .scope-select {
-            width: 220px;
-        }
-
-        .prev-hint {
-            margin-left: auto;
-            font-size: 12px;
-            color: var(--el-text-color-secondary);
-        }
-    }
 
     .wb-columns {
         display: flex;

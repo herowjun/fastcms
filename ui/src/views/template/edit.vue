@@ -11,17 +11,22 @@
                     <el-icon><ele-Edit /></el-icon>手动编辑
                 </span>
             </div>
-            <!-- 工具栏行：AI 视图下隐形占位（visibility:hidden），保证两个视图下编辑区起点恒等，
-                 高度实测对两视图通用（AI 视图首进即可正确计算，无需先切手动编辑） -->
-            <el-row :gutter="35" class="toolbar-row" :class="{ 'ghost-row': currentView !== 'edit' }">
+            <!-- 工具栏行：一个容器两套内容按视图切换（同位同高），两视图编辑区起点恒等，
+                 高度实测对两视图通用（AI 视图首进即可正确计算）；下拉列两视图共用，仅绑定值区分 -->
+            <el-row :gutter="35" class="toolbar-row">
                 <el-col :sm="5" class="mb20">
-                    <el-select v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
+                    <el-select v-if="currentView === 'edit'" v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
+                        <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
+                                   :label="item.name + (item.active ? '（使用中）' : '')" />
+                    </el-select>
+                    <el-select v-else :model-value="state.loadedTemplateId" placeholder="作用模板" filterable style="width: 100%"
+                               title="切换 AI 调整的作用模板（会话编排随切换刷新）" @change="onScopeChange">
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
                                    :label="item.name + (item.active ? '（使用中）' : '')" />
                     </el-select>
                 </el-col>
                 <el-col :sm="19" class="mb20">
-                    <div class="toolbar-actions">
+                    <div v-if="currentView === 'edit'" class="toolbar-actions">
                         <el-upload
                             class="upload-btn"
                             :action="state.uploadUrl"
@@ -39,6 +44,29 @@
                         <el-button type="primary" @click="onSaveFile" :disabled="!state.currEditFile">保 存</el-button>
                         <el-button type="danger" @click="onDelFile" :disabled="!state.currEditFile">删 除</el-button>
                         <span v-if="state.isDirty" class="dirty-tip">● 有未保存的修改</span>
+                    </div>
+                    <!-- AI 工作台工具条：按钮逻辑来自 aiWorkbench 的 defineExpose（模板 ref 访问自动解包） -->
+                    <div v-else class="toolbar-actions">
+                        <el-button type="warning" plain @click="aiWorkbenchRef?.openCreateDialog()">
+                            <el-icon><ele-MagicStick /></el-icon>新建模板
+                        </el-button>
+                        <el-button @click="aiWorkbenchRef?.openHistoryDialog()">
+                            <el-icon><ele-Clock /></el-icon>历史记录
+                        </el-button>
+                        <el-button v-if="aiWorkbenchRef?.canRollback" type="danger" plain :loading="aiWorkbenchRef?.rollingBack"
+                                   @click="aiWorkbenchRef?.onRollback()">
+                            <el-icon><ele-RefreshLeft /></el-icon>回滚最近
+                        </el-button>
+                        <el-button v-if="aiWorkbenchRef?.showApply" type="success" :loading="aiWorkbenchRef?.applying"
+                                   @click="aiWorkbenchRef?.onApplyTemplate()">
+                            <el-icon><ele-Check /></el-icon>应用模板
+                        </el-button>
+                        <el-button v-if="aiWorkbenchRef?.showEditApplied" type="primary" plain
+                                   title="把应用后的正式模板加载到主编辑视图继续修改"
+                                   @click="aiWorkbenchRef?.onEditApplied()">
+                            <el-icon><ele-EditPen /></el-icon>编辑此模板
+                        </el-button>
+                        <span class="prev-hint">预览指向：{{ aiWorkbenchRef?.prevHint }}</span>
                     </div>
                 </el-col>
             </el-row>
@@ -121,11 +149,11 @@
             </div>
         </div>
 
-        <!-- AI 工作台视图：工具条（作用模板下拉+按钮排）+ 树|对话|预览 三列（会话编排内聚在组件内） -->
+        <!-- AI 工作台视图：树|对话|预览 三列（会话编排内聚在组件内，工具条逻辑经 defineExpose 由上方工具栏行调用） -->
         <ai-workbench v-show="currentView === 'ai'" ref="aiWorkbenchRef" :template-id="state.loadedTemplateId"
                       :template-list="state.templateList" :height="state.clientHeight"
                       :active="currentView === 'ai'"
-                      @scope-change="onScopeChange" @files-changed="onWorkbenchFilesChanged"
+                      @files-changed="onWorkbenchFilesChanged"
                       @edit-file="onEditAiFile" @applied="onAiTemplateApplied"
                       @edit-applied="onEditAppliedTemplate" />
     </el-card>
@@ -786,11 +814,6 @@ onActivated(() => {
 
     .toolbar-row {
         width: 100%;
-
-        // AI 视图下隐形占位：布局高度保持不变，两视图编辑区起点恒等（供高度实测通用）
-        &.ghost-row {
-            visibility: hidden;
-        }
     }
 }
 .toolbar-actions {
@@ -798,6 +821,13 @@ onActivated(() => {
     align-items: center;
     flex-wrap: wrap;
     gap: 0;
+
+    // AI 工作台工具条右侧的预览指向提示
+    .prev-hint {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+    }
 }
 // 文件树卡片：高度与右侧编辑器一致（内联注入），flex 让树占满 header 之外的剩余空间
 .tree-card {
@@ -831,6 +861,8 @@ onActivated(() => {
     display: flex;
     align-items: center;
     gap: 4px;
+    // 与下方工具栏行拉开间距（手动/AI 两视图共用此间距，下拉/按钮行不再贴住 tab 下边框）
+    margin-bottom: 14px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--el-border-color-lighter);
 
