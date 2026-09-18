@@ -309,6 +309,8 @@ const props = defineProps<{
 	sessions?: any[];
 	/** 新建会话请求进行中（按钮 loading） */
 	creatingSession?: boolean;
+	/** 草稿会话懒创建（可空）：会话无 sessionId 时首条真实对话发出前回调，返回落库后的会话 */
+	ensureSession?: () => Promise<any>;
 	/** 换图模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
 	imagePickMode?: boolean;
 	/** 选区模式开启状态（控制按钮高亮与提示条；模式开关与预览 iframe 钩子注入由父组件处理） */
@@ -495,7 +497,8 @@ const { onSend, onStop, observeRunning, applyLegacyStatus } = useAiRunStream({
 	getProps: () => props,
 	emit,
 	loadSessionData: () => loadSessionData(),
-	scrollToBottom: () => scrollToBottom()
+	scrollToBottom: () => scrollToBottom(),
+	ensureSession: () => props.ensureSession?.()
 });
 
 /**

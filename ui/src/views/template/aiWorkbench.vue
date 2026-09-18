@@ -78,6 +78,7 @@
                              :focus-section="selectedSection?.sectionId || ''"
                              :focus-element-hint="selectedSection?.elementHint || ''"
                              :sessions="dropdownSessions" :creating-session="creatingAiSession"
+                             :ensure-session="ensureSessionBeforeSend"
                              :image-pick-mode="pickMode" :section-select-mode="sectionMode"
                              @select-session="onSelectAiSession" @new-session="onNewAiSession"
                              @files-changed="onAiFilesChanged" @file-written="onAiFileWritten"
@@ -309,9 +310,51 @@ const applySession = (session: any) => {
 };
 
 /**
- * 确保当前作用模板存在可用的调整会话：复用最新一个，没有则新建。
- * 首次激活 AI 视图或切换作用模板时触发
+ * 进入草稿会话（不落库）：点「新建会话」/ 无历史调整会话时的前端占位状态，
+ * 用户真实发起首条 AI 对话时才创建会话落库（ensureSessionBeforeSend）。
+ * 草稿对象绑定当前作用模板，树/预览按调整模式初始化
  */
+const enterDraftSession = () => {
+    sessionView.value = false;
+    currentSession.value = {
+        sessionId: null,
+        templateId: props.templateId,
+        status: 'draft',
+        created: new Date().toISOString(),
+        title: '',
+    };
+    // 从生成会话切回调整模式时树可能尚未加载/已过期，统一重载后初始化预览与默认选中
+    loadScopeTree(props.templateId).then(() => {
+        initPreviewEntry();
+        selectDefaultEntry();
+    });
+};
+
+/**
+ * 草稿会话懒创建：首条真实 AI 对话发出前回调（useAiRunStream onSend 前置钩子）。
+ * 已是真实会话原样返回；草稿会话此时才调用 createSession 落库并切换上下文。
+ * ensuringSession 互斥：连点发送时并发请求只创建一条会话
+ */
+let ensuringSession = false;
+const ensureSessionBeforeSend = async (): Promise<any> => {
+    const s = currentSession.value;
+    if (s?.sessionId) return s;
+    if (ensuringSession || !props.templateId) return null;
+    ensuringSession = true;
+    try {
+        const res = await aiApi.createSession({ templateId: props.templateId });
+        if (!res.data) {
+            ElMessage.error(res.msg || '创建会话失败');
+            return null;
+        }
+        allSessions.value = [res.data, ...allSessions.value];
+        applySession(res.data);
+        return res.data;
+    } finally {
+        ensuringSession = false;
+    }
+};
+
 let ensuring = false;
 const ensureAdjustSession = async () => {
     if (ensuring || !props.templateId) return;
@@ -327,14 +370,8 @@ const ensureAdjustSession = async () => {
         if (adjustSessions.length > 0) {
             applySession(adjustSessions[0]);
         } else {
-            // 尚无该模板的调整型会话：创建一个（requirement 为空，后续对话即调整需求）
-            const created = await aiApi.createSession({ templateId: props.templateId });
-            if (!created.data) {
-                ElMessage.error(created.msg || '创建调整会话失败');
-                return;
-            }
-            allSessions.value = [created.data, ...allSessions.value];
-            applySession(created.data);
+            // 尚无该模板的调整型会话：进入草稿会话（不落库，首条真实对话时才创建）
+            enterDraftSession();
         }
         initPreviewEntry();
     } catch (e: any) {
@@ -351,28 +388,13 @@ const ensureAdjustSession = async () => {
  * 新建会话（对话头 ＋ 按钮）：新建当前模板的空白调整会话并进入对话。
  * 生成完整模板的入口收敛到工具条「✦ 新建模板」，避免这里重复弹生成对话框
  */
-const onNewAiSession = async () => {
+/**
+ * 新建会话（对话头 ＋ 按钮）：进入当前模板的草稿会话（不落库）。
+ * 生成完整模板的入口收敛到工具条「✦ 新建模板」，避免这里重复弹生成对话框
+ */
+const onNewAiSession = () => {
     if (!props.templateId) return;
-    creatingAiSession.value = true;
-    try {
-        const res = await aiApi.createSession({ templateId: props.templateId });
-        if (!res.data) {
-            ElMessage.error(res.msg || '创建会话失败');
-            return;
-        }
-        allSessions.value = [res.data, ...allSessions.value];
-        sessionView.value = false;
-        applySession(res.data);
-        // 从生成会话切回调整模式时树可能尚未加载/已过期，统一重载后初始化预览与默认选中
-        loadScopeTree(props.templateId).then(() => {
-            initPreviewEntry();
-            selectDefaultEntry();
-        });
-    } catch (e: any) {
-        ElMessage.error(e?.message || '创建会话失败');
-    } finally {
-        creatingAiSession.value = false;
-    }
+    enterDraftSession();
 };
 
 /**

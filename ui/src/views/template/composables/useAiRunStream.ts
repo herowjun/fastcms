@@ -27,6 +27,9 @@ export function useAiRunStream(options: {
     loadSessionData: () => any;
     /** 对话区滚底跟随（流式节流渲染时调用；惰性 getter） */
     scrollToBottom: () => void;
+    /** 草稿会话懒创建（可空）：会话无 sessionId 时在首条真实对话发出前回调，
+     * 返回含 sessionId 的会话（父组件同步切换上下文）；返回空则中断本次发送 */
+    ensureSession?: () => Promise<any>;
 }) {
     const state = options.state;
     const templateApi = options.templateApi;
@@ -477,7 +480,15 @@ const observeRunning = async (since: number) => {
 const onSend = async (rawOpts?: any) => {
     const opts = isConfirmOpts(rawOpts) ? rawOpts : null;
     // 普通对话需有输入；确认动作（APPROVE 空输入）由卡片按钮触发，绕过空输入检查
-    if ((!opts && !state.inputText.trim()) || !getProps().session?.sessionId) return;
+    if (!opts && !state.inputText.trim()) return;
+    // 草稿会话（未落库，点「新建会话」仅前端占位）：首条真实对话发出前先创建会话，
+    // 父组件在钩子内切换到真实会话（props 更新），失败则中断本次发送
+    let session = getProps().session;
+    if (!session?.sessionId && options.ensureSession) {
+        session = await options.ensureSession();
+        if (!session?.sessionId) return;
+    }
+    if (!session?.sessionId) return;
 
     // 新一轮对话回到自动跟随模式
     userScrolledUp.value = false;
@@ -511,7 +522,7 @@ const onSend = async (rawOpts?: any) => {
 
     try {
         const token = Local.get('token') as string | undefined;
-        const resp = await fetch(templateApi.chatUrl(getProps().session.sessionId), {
+        const resp = await fetch(templateApi.chatUrl(session.sessionId), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
