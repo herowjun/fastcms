@@ -11,7 +11,9 @@
                     <el-icon><ele-Edit /></el-icon>手动编辑
                 </span>
             </div>
-            <el-row v-show="currentView === 'edit'" :gutter="35" class="toolbar-row" ref="toolbarRowRef">
+            <!-- 工具栏行：AI 视图下隐形占位（visibility:hidden），保证两个视图下编辑区起点恒等，
+                 高度实测对两视图通用（AI 视图首进即可正确计算，无需先切手动编辑） -->
+            <el-row :gutter="35" class="toolbar-row" :class="{ 'ghost-row': currentView !== 'edit' }">
                 <el-col :sm="5" class="mb20">
                     <el-select v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
@@ -119,11 +121,9 @@
             </div>
         </div>
 
-        <!-- AI 工作台视图：工具条 + 树|对话|预览 三列（会话编排内聚在组件内）；
-             高度补偿：AI 视图比手动编辑少一行工具栏，补上后两视图列区域贴底对齐 -->
-        <ai-workbench v-show="currentView === 'ai'" :template-id="state.loadedTemplateId"
-                      :template-list="state.templateList"
-                      :height="`calc(${state.clientHeight} + ${state.toolbarRowHeight}px)`"
+        <!-- AI 工作台视图：工具条（作用模板下拉+按钮排）+ 树|对话|预览 三列（会话编排内聚在组件内） -->
+        <ai-workbench v-show="currentView === 'ai'" ref="aiWorkbenchRef" :template-id="state.loadedTemplateId"
+                      :template-list="state.templateList" :height="state.clientHeight"
                       :active="currentView === 'ai'"
                       @scope-change="onScopeChange" @files-changed="onWorkbenchFilesChanged"
                       @edit-file="onEditAiFile" @applied="onAiTemplateApplied"
@@ -156,10 +156,10 @@ import { search } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 const treeTable = ref();
-// 编辑区行（左树 + 中编辑器 + 右预览）：用于实测编辑区起点，计算高度自适应
+// 编辑区行（左树 + 中编辑器 + 右预览）：手动编辑视图下的高度实测容器
 const editRowRef = ref();
-// 手动视图工具栏行（上传/保存按钮行）：实测高度供 AI 工作台高度补偿
-const toolbarRowRef = ref();
+// AI 工作台根：AI 视图下的高度实测容器（与手动编辑列起点恒等，见 toolbar-row ghost-row 注释）
+const aiWorkbenchRef = ref();
 // 布局容器尺寸变化观察器（keep-alive 缓存页切回时 onMounted 不会重跑，靠 onActivated 兜底重算）
 let editorHeightObserver: ResizeObserver | null = null;
 
@@ -188,8 +188,6 @@ const workbenchVisible = ref(false);
 const workbenchFile = ref('');
 const state = reactive({
     clientHeight: "600px",
-    // 手动视图工具栏行高度缓存（AI 工作台高度补偿用，隐藏时沿用缓存值）
-    toolbarRowHeight: 40,
     // 模板选择（可编辑非激活模板）
     templateList: [] as any[],
     templateId: '',
@@ -706,11 +704,11 @@ onMounted(() => {
     }
 });
 
-// 切回手动编辑视图时重算高度（隐藏期间布局可能变化，且 display:none 下无法实测）；
-// 切到 AI 工作台时退出编辑器全屏，避免 fixed 覆盖层残留
-watch(currentView, (view) => {
-    if (view === 'edit') nextTick(() => updateEditorHeight());
-    else editorFullscreen.value = false;
+// 切换视图时重算高度（隐藏期间布局可能变化；toolbar-row 已隐形占位，两视图起点恒等，
+// AI 工作台可见时同样可实测）；切到 AI 工作台时退出编辑器全屏，避免 fixed 覆盖层残留
+watch(currentView, () => {
+    if (editorFullscreen.value && currentView.value !== 'edit') editorFullscreen.value = false;
+    nextTick(() => updateEditorHeight());
 });
 
 // 选区锁定/换图模式的 ESC 与生命周期清理随钩子内聚到 aiWorkbench 组件
@@ -718,13 +716,16 @@ watch(currentView, (view) => {
 /**
  * 编辑器高度自适应：视口高度 - 编辑区起点到视口顶的距离（含布局头部、tagsview、工具栏等占位） - 底部留白。
  * 以 DOM 实测代替写死高度，保证左树卡片与右编辑器等高、页面整体不出现整页滚动；
+ * 实测容器按当前视图选择（手动编辑列 / AI 工作台根，toolbar-row 隐形占位保证两者 top 恒等）；
  * 窄屏（<768px）左右栏堆叠时退回固定高度，避免编辑器被压得过高过矮。
  */
 const updateEditorHeight = () => {
-    const rowEl = editRowRef.value?.$el || editRowRef.value;
-    if (!rowEl) return;
-    // 视图隐藏（v-show display:none）或编辑器全屏（fixed 布局脱离文档流）时跳过，沿用旧值
-    if (currentView.value !== 'edit' || editorFullscreen.value) return;
+    // 编辑器全屏（fixed 布局脱离文档流）时跳过，沿用旧值
+    if (editorFullscreen.value) return;
+    const measureRef = currentView.value === 'ai' ? aiWorkbenchRef : editRowRef;
+    const rowEl = measureRef.value?.$el || measureRef.value;
+    // 容器未挂载或当前视图下不可见（display:none 实测无效）时跳过
+    if (!rowEl || !rowEl.offsetHeight) return;
     const viewportW = document.documentElement.clientWidth;
     if (viewportW < 768) {
         state.clientHeight = '600px';
@@ -735,12 +736,6 @@ const updateEditorHeight = () => {
     // 底部留白覆盖：el-col 的 mb20 + 页面级 el-card body 的 padding（合计约 40px）+ 少量呼吸空间
     const height = viewportH - top - 48;
     state.clientHeight = Math.max(400, height) + 'px';
-    // 缓存手动视图工具栏行高度（隐藏时不可实测，沿用缓存）：
-    // AI 工作台比手动编辑少这一行，高度补偿后两视图列区域贴底对齐
-    const toolbarRowEl = toolbarRowRef.value?.$el || toolbarRowRef.value;
-    if (toolbarRowEl && toolbarRowEl.offsetHeight > 0) {
-        state.toolbarRowHeight = toolbarRowEl.offsetHeight;
-    }
 };
 
 /** Ctrl/Cmd + S 快捷保存：AI 工作台视图下忽略（工作台内对话框自管快捷键语境） */
@@ -791,6 +786,11 @@ onActivated(() => {
 
     .toolbar-row {
         width: 100%;
+
+        // AI 视图下隐形占位：布局高度保持不变，两视图编辑区起点恒等（供高度实测通用）
+        &.ghost-row {
+            visibility: hidden;
+        }
     }
 }
 .toolbar-actions {

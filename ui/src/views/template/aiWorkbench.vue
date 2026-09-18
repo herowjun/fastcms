@@ -3,8 +3,15 @@
          会话编排自 edit.vue 迁入：本组件持有 AI 会话状态与预览点选钩子，
          模板作用对象（scope）经 props.templateId 与父组件双向同步（scope-change） -->
     <div class="ai-workbench" :style="{ height: height }">
-        <!-- 工具条：新建/历史/回滚/应用 + 预览指向提示 -->
+        <!-- 工具条：作用模板下拉 + 新建/历史/回滚/应用 + 预览指向提示（布局同手动编辑工具栏行） -->
         <div class="wb-toolbar">
+            <el-select :model-value="templateId" filterable placeholder="作用模板" class="scope-select"
+                       title="切换 AI 调整的作用模板（主编辑视图同步切换）"
+                       @change="(v: string) => emit('scope-change', v)">
+                <el-option v-for="item in templateList" :key="item.id" :value="item.id"
+                           :label="item.name + (item.active ? '（使用中）' : '')" />
+            </el-select>
+            <el-divider direction="vertical" />
             <el-button type="warning" plain @click="openCreateDialog">
                 <el-icon><ele-MagicStick /></el-icon>新建模板
             </el-button>
@@ -27,12 +34,6 @@
         <!-- 三列骨架：左文件树（作用对象+聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
         <div class="wb-columns">
             <div class="wb-col-tree">
-                <el-select :model-value="templateId" size="small" filterable placeholder="作用模板"
-                           class="scope-select" title="切换 AI 调整的作用模板（主编辑视图同步切换）"
-                           @change="(v: string) => emit('scope-change', v)">
-                    <el-option v-for="item in templateList" :key="item.id" :value="item.id"
-                               :label="item.name + (item.active ? '（使用中）' : '')" />
-                </el-select>
                 <el-card shadow="hover" class="tree-card">
                     <template #header>
                         <div class="tree-card-header">
@@ -658,6 +659,11 @@ onBeforeUnmount(() => {
         gap: 0;
         padding: 2px 0 10px;
 
+        // 作用模板下拉：default 尺寸 + 固定宽度，与手动编辑工具栏行同风格
+        .scope-select {
+            width: 220px;
+        }
+
         .prev-hint {
             margin-left: auto;
             font-size: 12px;
@@ -680,10 +686,6 @@ onBeforeUnmount(() => {
         display: flex;
         flex-direction: column;
         min-height: 0;
-
-        .scope-select {
-            margin-bottom: 8px;
-        }
 
         .tree-card {
             flex: 1;
