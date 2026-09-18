@@ -30,6 +30,8 @@ export function useAiRunStream(options: {
     /** 草稿会话懒创建（可空）：会话无 sessionId 时在首条真实对话发出前回调，
      * 返回含 sessionId 的会话（父组件同步切换上下文）；返回空则中断本次发送 */
     ensureSession?: () => Promise<any>;
+    /** 对话区滚动跟随状态 ref（可空）：发送新一轮时复位为自动跟随 */
+    userScrolledUp?: { value: boolean };
 }) {
     const state = options.state;
     const templateApi = options.templateApi;
@@ -490,8 +492,8 @@ const onSend = async (rawOpts?: any) => {
     }
     if (!session?.sessionId) return;
 
-    // 新一轮对话回到自动跟随模式
-    userScrolledUp.value = false;
+    // 新一轮对话回到自动跟随模式（滚动跟随状态由组件持有，经 options 注入）
+    if (options.userScrolledUp) options.userScrolledUp.value = false;
 
     // 先把用户输入加入消息列表（UI 即时反馈；确认动作用自然语言展示，历史可读）
     state.messages.push({

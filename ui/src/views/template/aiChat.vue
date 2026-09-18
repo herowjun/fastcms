@@ -491,6 +491,8 @@ const pickDisabled = computed(() => state.chatting || isApplied.value || !props.
 // ==================== AI 对话运行流（SSE 发送/续看/停止，下沉 useAiRunStream） ====================
 // loadSessionData/scrollToBottom 以惰性 getter 传入（二者声明在后方，箭头延后求值规避 setup TDZ）；
 // observeRunning（续看后台任务）/applyLegacyStatus（升级横幅状态）反向供本组件使用
+/** 用户滚动状态：距底部超过 40px 视为"正在查看历史"，暂停自动跟随（发送流内复位跟随，经 options 注入） */
+const userScrolledUp = ref(false);
 const { onSend, onStop, observeRunning, applyLegacyStatus } = useAiRunStream({
 	state,
 	templateApi,
@@ -498,7 +500,8 @@ const { onSend, onStop, observeRunning, applyLegacyStatus } = useAiRunStream({
 	emit,
 	loadSessionData: () => loadSessionData(),
 	scrollToBottom: () => scrollToBottom(),
-	ensureSession: () => props.ensureSession?.()
+	ensureSession: () => props.ensureSession?.(),
+	userScrolledUp
 });
 
 /**
@@ -767,8 +770,6 @@ const scrollToBottom = () => {
 	});
 };
 
-/** 用户滚动状态：距底部超过 40px 视为"正在查看历史"，暂停自动跟随 */
-const userScrolledUp = ref(false);
 const onChatAreaScroll = () => {
 	const el = chatAreaRef.value;
 	if (!el) return;
