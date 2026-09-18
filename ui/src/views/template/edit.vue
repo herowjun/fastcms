@@ -15,16 +15,16 @@
                  高度实测对两视图通用（AI 视图首进即可正确计算）；
                  下拉列宽与文件树列同公式（flex 20% + min-width 190px + gap 12px），面板宽度完全对齐 -->
             <div class="toolbar-row">
+                <!-- 统一工作对象选择器（单按钮，双视图共用）：当前对象 = 正式模板 或 生成会话（草稿/已应用），
+                     点击弹"选择工作对象"对话框（正式模板/未应用/已应用三页签）；四态展示见 wobj computed -->
                 <div class="tb-col-template">
-                    <el-select v-if="currentView === 'edit'" v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
-                        <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
-                                   :label="item.name + (item.active ? '（使用中）' : '')" />
-                    </el-select>
-                    <el-select v-else :model-value="state.loadedTemplateId" placeholder="作用模板" filterable style="width: 100%"
-                               title="切换 AI 调整的作用模板（会话编排随切换刷新）" @change="onScopeChange">
-                        <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
-                                   :label="item.name + (item.active ? '（使用中）' : '')" />
-                    </el-select>
+                    <button type="button" class="selbtn" :class="wobj.cls"
+                            title="点击选择工作对象（正式模板 / 生成会话）" @click="openWorkObjectDialog">
+                        <span class="s-ico">{{ wobj.icon }}</span>
+                        <span class="s-name">{{ wobj.name }}</span>
+                        <span class="s-tag">{{ wobj.tag }}</span>
+                        <el-icon class="s-caret"><ele-ArrowDown /></el-icon>
+                    </button>
                 </div>
                 <div class="tb-col-actions">
                     <div v-if="currentView === 'edit'" class="toolbar-actions">
@@ -50,9 +50,6 @@
                     <div v-else class="toolbar-actions">
                         <el-button type="warning" plain @click="aiWorkbenchRef?.openCreateDialog()">
                             <el-icon><ele-MagicStick /></el-icon>新建模板
-                        </el-button>
-                        <el-button @click="aiWorkbenchRef?.openHistoryDialog()">
-                            <el-icon><ele-Clock /></el-icon>历史记录
                         </el-button>
                         <el-button v-if="aiWorkbenchRef?.canRollback" type="danger" plain :loading="aiWorkbenchRef?.rollingBack"
                                    @click="aiWorkbenchRef?.onRollback()">
@@ -166,10 +163,19 @@
         <!-- AI 工作台视图：树|对话|预览 三列（会话编排内聚在组件内，工具条逻辑经 defineExpose 由上方工具栏行调用） -->
         <ai-workbench v-show="currentView === 'ai'" ref="aiWorkbenchRef" :template-id="state.loadedTemplateId"
                       :template-list="state.templateList" :height="state.clientHeight"
+                      :sessions="state.allSessions"
                       :active="currentView === 'ai'"
                       @files-changed="onWorkbenchFilesChanged"
                       @edit-file="onEditAiFile" @applied="onAiTemplateApplied"
-                      @edit-applied="onEditAppliedTemplate" />
+                      @edit-applied="onEditAppliedTemplate"
+                      @sessions-changed="refreshSessions" />
+
+        <!-- 统一工作对象选择器对话框：正式模板 / 未应用草稿 / 已应用回看 三页签（对象切换唯一入口） -->
+        <WorkObjectDialog v-model:visible="wobjDialogVisible" :template-list="state.templateList"
+                          :sessions="state.allSessions" :badge-ctx="aiWorkbenchRef?.getSessionBadgeCtx?.() || {}"
+                          :current="currentWorkObject"
+                          @select="onWobjSelect" @create="onWobjCreate"
+                          @apply="onWobjApply" @goto-template="onWobjGotoTemplate" />
     </el-card>
 </div>
 </template>
@@ -180,10 +186,12 @@ import { onBeforeRouteLeave } from 'vue-router';
 import { ElMessageBox, ElMessage, ElNotification } from 'element-plus';
 import { Local } from '/@/utils/storage';
 import { TemplateApi } from '/@/api/template/index';
+import { AiTemplateApi } from '/@/api/ai/index';
 
 import ImageWorkbench from '/@/views/template/ImageWorkbench.vue';
 
 import AiWorkbench from '/@/views/template/aiWorkbench.vue';
+import WorkObjectDialog from '/@/views/template/WorkObjectDialog.vue';
 
 import TemplatePreviewPanel from '/@/views/template/TemplatePreviewPanel.vue';
 
@@ -206,6 +214,7 @@ const aiWorkbenchRef = ref();
 let editorHeightObserver: ResizeObserver | null = null;
 
 const templateApi = TemplateApi();
+const aiApi = AiTemplateApi();
 // 视图切换：默认 AI 工作台（对齐原型），手动编辑 v-show 保活，切换不丢状态
 const currentView = ref<'edit' | 'ai'>('ai');
 // 代码编辑列收起状态（收起后预览列吃满剩余空间）
@@ -239,8 +248,10 @@ const state = reactive({
     clientHeight: "600px",
     // 模板选择（可编辑非激活模板）
     templateList: [] as any[],
-    templateId: '',
     loadedTemplateId: '',
+    // 全部 AI 会话（调整 + 生成）：本组件统一持有与刷新（单一数据源），
+    // 经 props 注入 AI 工作台（对话头下拉）与工作对象选择器对话框
+    allSessions: [] as any[],
     currEditFile: "",
     content: '',
     // 最后一次保存/加载的内容，用于判断是否有未保存修改
@@ -302,14 +313,138 @@ const uploadData = computed(() => ({ dirName: state.uploadParam.dirName, templat
 const uploadTargetTip = computed(() =>
     state.uploadParam.dirName ? `将上传到目录：${state.uploadParam.dirName}` : '未选择目录，将上传到模板根目录');
 
+// ==================== 统一工作对象选择器（顶栏单按钮 + 对话框，对象切换唯一入口） ====================
+
+// 工作对象选择器对话框
+const wobjDialogVisible = ref(false);
+
 /**
- * AI 工作台作用模板切换：走与手动编辑模板下拉同一套切换流程（未保存修改确认 + 失败还原）。
- * 切换成功后 loadedTemplateId 变化经 props 回流工作台，其文件树/预览/调整会话随之切换
+ * 刷新全部会话（单一数据源）：页面初始化、对话框打开前、会话创建/应用成功等时机调用；
+ * 子组件不自拉，经 sessions-changed 通知这里统一重拉
  */
-const onScopeChange = (val: string) => {
-    // 作用模板下拉未绑定 state.templateId，先同步主工具栏下拉选中项（取消切换时由 doSwitch 还原）
-    state.templateId = val;
-    onTemplateChange(val);
+const refreshSessions = () => {
+    aiApi.listSessions().then((res: any) => {
+        state.allSessions = res.data || [];
+    }).catch(() => {
+        // 拉取失败不阻断页面（对话框展示空态，稍后重开即重试）
+    });
+};
+
+/** 打开工作对象对话框：先刷新会话列表，保证"未应用/已应用"页签数据新鲜 */
+const openWorkObjectDialog = () => {
+    refreshSessions();
+    wobjDialogVisible.value = true;
+};
+
+/**
+ * 当前工作对象（单一事实来源，从 AI 工作台会话状态推导）：
+ * 会话视图 → 生成会话（草稿/已应用）；否则 → 当前作用正式模板
+ */
+const currentWorkObject = computed(() =>
+    aiWorkbenchRef.value?.sessionView && aiWorkbenchRef.value?.currentSession
+        ? { kind: 'session', session: aiWorkbenchRef.value.currentSession }
+        : { kind: 'template', templateId: state.loadedTemplateId });
+
+/** 选择器按钮四态：正式模板（默认蓝）/ 生成中·草稿（紫）/ 已应用回看（绿），图标/文案对齐交互原型 */
+const wobj = computed(() => {
+    const cur = currentWorkObject.value as any;
+    if (cur.kind === 'session') {
+        const s = cur.session || {};
+        if (s.status === 'applied') {
+            return { icon: '✓', name: s.templateName || '已应用会话', tag: '已应用 · 只读回看', cls: 'applied' };
+        }
+        const badgeCtx = aiWorkbenchRef.value?.getSessionBadgeCtx?.() || {};
+        const running = !!badgeCtx.runningId && badgeCtx.runningId === s.sessionId;
+        return { icon: '✦', name: s.templateName || '草稿会话', tag: running ? '生成中 · 会话工作目录' : '草稿 · 会话工作目录', cls: 'draft' };
+    }
+    const tpl = state.templateList.find((t: any) => t.id === cur.templateId);
+    return { icon: '▦', name: tpl?.name || '未选择模板', tag: tpl?.active ? '使用中' : '正式模板', cls: '' };
+});
+
+/**
+ * 切换正式模板并重置编辑状态（不含未保存确认：确认统一由调用方处理，避免二次弹窗）
+ */
+const doSwitchTemplate = (val: string) => {
+    state.loadedTemplateId = val;
+    state.uploadParam.templateId = val;
+    state.currEditFile = '';
+    state.content = '';
+    state.savedContent = '';
+    state.uploadParam.dirName = '';
+    checkDirty();
+    workbenchVisible.value = false;
+    loadFileTree(true);
+};
+
+/**
+ * 统一工作对象选择器唯一写入口：
+ * - 生成会话 → 只能落 AI 工作台（草稿无正式目录），复用工作台"打开会话"链路（未应用续聊/已应用只读回看）
+ * - 正式模板 → 先退出会话视图（恢复调整上下文），再切换模板（未保存确认）；view 指定落点：
+ *   行点击默认 AI 调整，「手动编辑」按钮落手动编辑
+ */
+const selectWorkObject = (obj: any, view?: 'edit' | 'ai') => {
+    if (obj?.kind === 'session') {
+        const doOpen = () => {
+            currentView.value = 'ai';
+            aiWorkbenchRef.value?.openSessionByRow(obj.session);
+        };
+        if (checkDirty()) {
+            confirmDiscard().then(doOpen).catch(() => {});
+        } else {
+            doOpen();
+        }
+        return;
+    }
+    const templateId = obj?.templateId;
+    if (!templateId) return;
+    const doSwitch = () => {
+        // 先退出会话视图（enterAdjustContext 对 sessionView 有 early-return，退出后切换链路才完整）
+        aiWorkbenchRef.value?.exitSessionView();
+        doSwitchTemplate(templateId);
+        currentView.value = view || 'ai';
+    };
+    if (checkDirty()) {
+        confirmDiscard().then(doSwitch).catch(() => {});
+    } else {
+        doSwitch();
+    }
+};
+
+/** 工作对象对话框：行点击/行按钮选择 → 统一写入口 */
+const onWobjSelect = (payload: { obj: any; view?: 'edit' | 'ai' }) => {
+    wobjDialogVisible.value = false;
+    selectWorkObject(payload.obj, payload.view);
+};
+
+/** 工作对象对话框：新建模板 → 关本框，打开既有"新建模板"对话框（独立表单，不内嵌本对话框） */
+const onWobjCreate = () => {
+    wobjDialogVisible.value = false;
+    aiWorkbenchRef.value?.openCreateDialog();
+};
+
+/** 工作对象对话框：未应用行「应用」→ 先打开该会话，再走工作台既有应用链路（确认弹窗在工作台） */
+const onWobjApply = (session: any) => {
+    wobjDialogVisible.value = false;
+    selectWorkObject({ kind: 'session', session });
+    aiWorkbenchRef.value?.onApplyTemplate();
+};
+
+/**
+ * 工作对象对话框：已应用行「去正式模板」→ 优先会话持久化指针 appliedTemplateId
+ * （应用成功时后端回写），存量会话无指针时回退按目录名匹配；落 AI 调整视图
+ */
+const onWobjGotoTemplate = (session: any) => {
+    wobjDialogVisible.value = false;
+    let templateId = session?.appliedTemplateId ? String(session.appliedTemplateId) : '';
+    if (!templateId) {
+        const tpl = state.templateList.find((t: any) => t.name === session?.templateName);
+        templateId = tpl ? String(tpl.id) : '';
+    }
+    if (!templateId) {
+        ElMessage.warning('未找到对应的正式模板，请从"正式模板"页签中选择');
+        return;
+    }
+    selectWorkObject({ kind: 'template', templateId }, 'ai');
 };
 
 /**
@@ -388,6 +523,8 @@ const onEditAiFile = (filePath: string) => {
  */
 const onAiTemplateApplied = (templateId?: string) => {
     const doLoad = () => {
+        // 会话状态已变为"已应用"，统一重拉（选择器按钮/对话框页签数据随之更新）
+        refreshSessions();
         loadTemplateList(templateId || undefined);
         ElNotification({
             title: '模板已应用',
@@ -444,7 +581,6 @@ const loadTemplateList = (preferId?: string) => {
         const active = state.templateList.find((item: any) => item.active);
         const target = preferred || active || state.templateList[0];
         if (target) {
-            state.templateId = target.id;
             state.loadedTemplateId = target.id;
             state.uploadParam.templateId = target.id;
         }
@@ -633,30 +769,6 @@ const onNodeClick = (node: any) => {
     }
 }
 
-const onTemplateChange = (val: string) => {
-    const prevTemplateId = state.loadedTemplateId;
-    const doSwitch = () => {
-        state.loadedTemplateId = val;
-        state.uploadParam.templateId = val;
-        state.currEditFile = '';
-        state.content = '';
-        state.savedContent = '';
-        state.uploadParam.dirName = '';
-        checkDirty();
-        workbenchVisible.value = false;
-        loadFileTree(true);
-    };
-
-    if(checkDirty()) {
-        confirmDiscard().then(doSwitch).catch(() => {
-            // 用户取消切换，还原下拉选中项
-            state.templateId = prevTemplateId;
-        });
-    } else {
-        doSwitch();
-    }
-}
-
 // 上传结果聚合：multiple 批量上传时 el-upload 对每个文件各触发一次成功/失败回调，
 // 计数 + 短防抖合并为一次提示与一次文件树刷新（避免 N 条消息 + N 次接口请求）
 let uploadSuccessCount = 0;
@@ -729,6 +841,8 @@ onBeforeRouteLeave((to, from, next) => {
 
 onMounted(() => {
     loadTemplateList();
+    // 会话数据（单一数据源）：页面初始化即拉取，供 AI 工作台下拉与工作对象选择器对话框
+    refreshSessions();
     // 高度自适应：初始计算 + 窗口变化时重算（编辑器/文件树等高，页面不整页滚动）
     updateEditorHeight();
     // 冷启动收敛兜底：首帧布局未定型实测偏小，布局定型后重读（见 scheduleHeightSettle 注释）
@@ -866,6 +980,76 @@ onActivated(() => {
             flex: 1;
             min-width: 0;
         }
+    }
+}
+
+// 统一工作对象选择器按钮（对齐交互原型 .selbtn）：三态 = 默认（正式模板，蓝）/
+// .draft（草稿·会话工作目录，紫）/ .applied（已应用回看，绿）；列宽沿用工具栏列公式
+// （flex 20% + min-width 190px，与文件树列对齐），按钮撑满列宽，超长名称/标签内部截断
+.selbtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--el-color-primary-light-7);
+    border-radius: 4px;
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:hover, &:focus-visible {
+        border-color: var(--el-color-primary);
+        outline: none;
+    }
+
+    .s-ico {
+        flex: none;
+        font-size: 14px;
+    }
+
+    .s-name {
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    .s-tag {
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        opacity: 0.75;
+    }
+
+    .s-caret {
+        flex: none;
+        margin-left: auto;
+        font-size: 12px;
+        opacity: 0.6;
+    }
+
+    // 草稿态（生成中/未应用草稿）：紫
+    &.draft {
+        border-color: #d8b4fe;
+        background: #faf5ff;
+        color: #7e22ce;
+    }
+
+    // 已应用回看态：绿
+    &.applied {
+        border-color: #b3e19d;
+        background: #f0f9eb;
+        color: #529b2e;
     }
 }
 .toolbar-actions {

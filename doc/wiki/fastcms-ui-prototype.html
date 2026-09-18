@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FastCMS UI 原型 · AI 风格改版</title>
+<style>
+/* ========== 设计 token ========== */
+:root{
+  --primary:#3b82f6;
+  --primary-2:#6366f1;
+  --grad:linear-gradient(135deg,#3b82f6 0%,#6366f1 100%);
+  --ink:#0f172a;
+  --ink-2:#475569;
+  --ink-3:#94a3b8;
+  --line:#e2e8f0;
+  --bg:#f1f5f9;
+  --card:#ffffff;
+  --side:#0f172a;
+  --side-2:#1e293b;
+  --ok:#10b981;
+  --warn:#f59e0b;
+  --danger:#ef4444;
+  --r-lg:14px;
+  --r-md:10px;
+  --r-sm:8px;
+  --shadow:0 8px 30px rgba(15,23,42,.06);
+  --shadow-lg:0 16px 48px rgba(15,23,42,.12);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  color:var(--ink);background:var(--bg);font-size:14px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer}
+input{font-family:inherit}
+a{text-decoration:none;color:inherit}
+
+/* 原型分区说明条 */
+.proto-note{
+  max-width:1280px;margin:0 auto;padding:28px 24px 4px;color:var(--ink-2);font-size:13px;
+  display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+}
+.proto-note b{color:var(--ink);font-size:14px}
+.proto-note .tag{
+  font-size:11px;padding:2px 8px;border-radius:99px;background:#eff6ff;color:#2563eb;
+  border:1px solid #dbeafe;
+}
+.frame-label{
+  max-width:1280px;margin:18px auto 8px;padding:0 24px;
+  font-size:12px;letter-spacing:.12em;color:var(--ink-3);text-transform:uppercase;
+  display:flex;align-items:center;gap:12px;
+}
+.frame-label::after{content:"";flex:1;height:1px;background:var(--line)}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+/* ========== 1. 登录页 ========== */
+.login{
+  max-width:1280px;margin:0 auto 0;padding:0 24px;
+  display:grid;grid-template-columns:1.25fr 1fr;
+  min-height:620px;border-radius:var(--r-lg);overflow:hidden;
+  box-shadow:var(--shadow-lg);background:#fff;
+}
+.login-left{
+  position:relative;overflow:hidden;
+  background:radial-gradient(1200px 600px at -10% -20%,#1e3a8a 0%,transparent 55%),
+             radial-gradient(900px 500px at 110% 120%,#1e40af 0%,transparent 50%),
+             #0b1020;
+  color:#e2e8f0;padding:48px 44px;display:flex;flex-direction:column;
+}
+/* 动态光斑（纯 CSS，克制的两点） */
+.orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;pointer-events:none}
+.orb-a{width:340px;height:340px;left:-90px;top:-70px;background:rgba(59,130,246,.55);animation:drift 14s ease-in-out infinite alternate}
+.orb-b{width:300px;height:300px;right:-80px;bottom:-60px;background:rgba(37,99,235,.4);animation:drift 18s ease-in-out infinite alternate-reverse}
+@keyframes drift{from{transform:translate(0,0)}to{transform:translate(40px,28px)}}
+/* 细网格底纹 */
+.login-left::before{
+  content:"";position:absolute;inset:0;
+  background-image:linear-gradient(rgba(148,163,184,.07) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(148,163,184,.07) 1px,transparent 1px);
+  background-size:44px 44px;
+  mask-image:radial-gradient(700px 500px at 40% 30%,#000 30%,transparent 75%);
+  -webkit-mask-image:radial-gradient(700px 500px at 40% 30%,#000 30%,transparent 75%);
+}
+.login-left>:not(.orb){position:relative;z-index:1}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-mark{
+  width:34px;height:34px;border-radius:9px;background:var(--grad);
+  display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;
+  box-shadow:0 4px 14px rgba(37,99,235,.4);
+}
+.logo-name{font-size:18px;font-weight:700;color:#fff;letter-spacing:.02em}
+.logo-name small{font-weight:400;font-size:11px;color:#a5b3c9;margin-left:8px;letter-spacing:.08em}
+.login-headline{margin-top:64px}
+.login-headline h1{
+  font-size:34px;line-height:1.35;font-weight:700;color:#f8fafc;
+  letter-spacing:.01em;
+}
+.login-headline h1 em{
+  font-style:normal;
+  background:linear-gradient(90deg,#60a5fa,#818cf8);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.login-headline p{margin-top:12px;color:#aab8cc;font-size:14.5px;max-width:400px}
+/* AI 对话示意卡（产品截图感，非装饰插画） */
+.ai-demo{
+  margin-top:36px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.18);
+  border-radius:12px;padding:16px 18px;max-width:420px;
+  backdrop-filter:blur(6px);
+}
+.ai-demo-user{
+  margin-left:auto;max-width:78%;
+  background:var(--grad);color:#fff;
+  padding:8px 12px;border-radius:10px 10px 2px 10px;font-size:13px;
+}
+.ai-demo-ai{margin-top:12px;display:flex;gap:10px}
+.ai-demo-ai .dot{
+  flex:none;width:24px;height:24px;border-radius:7px;background:var(--grad);
+  display:grid;place-items:center;font-size:12px;color:#fff;font-weight:700;
+}
+.ai-demo-ai .body{
+  background:rgba(30,41,59,.8);border:1px solid rgba(148,163,184,.15);
+  border-radius:2px 10px 10px 10px;padding:9px 12px;font-size:12.5px;color:#cbd5e1;
+}
+.ai-demo-ai .body b{color:#93c5fd;font-weight:600}
+.ai-demo-ai .bar{
+  margin-top:8px;height:4px;border-radius:2px;background:rgba(148,163,184,.15);overflow:hidden;
+}
+.ai-demo-ai .bar i{
+  display:block;height:100%;width:64%;background:var(--grad);border-radius:2px;
+  animation:gen 2.4s ease-in-out infinite;
+}
+@keyframes gen{0%{width:12%}55%{width:82%}100%{width:64%}}
+.ai-demo-ai .tip{margin-top:6px;font-size:11.5px;color:#64748b}
+/* 登录右侧表单 */
+.login-right{display:flex;align-items:center;justify-content:center;padding:48px 44px;background:#fff}
+.login-box{width:100%;max-width:340px}
+.login-box h2{font-size:22px;font-weight:700;color:var(--ink)}
+.login-box .sub{margin-top:6px;color:var(--ink-3);font-size:13px}
+.login-tabs{display:flex;gap:24px;margin-top:26px;border-bottom:1px solid var(--line)}
+.login-tabs button{
+  background:none;border:none;padding:0 2px 10px;font-size:14px;color:var(--ink-3);
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s;
+}
+.login-tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--primary)}
+.field{margin-top:16px;position:relative}
+.field .fi{
+  position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ink-3);
+  display:flex;pointer-events:none;
+}
+.field input{
+  width:100%;height:44px;padding:0 12px 0 38px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:14px;color:var(--ink);background:#fff;outline:none;transition:.2s;
+}
+.field input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.login-btn{
+  margin-top:24px;width:100%;height:44px;border:none;border-radius:var(--r-sm);
+  background:var(--grad);color:#fff;font-size:15px;font-weight:600;letter-spacing:.1em;
+  box-shadow:0 6px 18px rgba(37,99,235,.3);transition:.2s;
+}
+.login-btn:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(37,99,235,.4)}
+.login-links{margin-top:18px;display:flex;justify-content:space-between;font-size:13px}
+.login-links a{color:var(--ink-3);transition:.15s}
+.login-links a:hover{color:var(--primary)}
+.login-scan{margin-top:26px;display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:12px}
+.login-scan::before,.login-scan::after{content:"";flex:1;height:1px;background:var(--line)}
+.login-scan button{
+  border:1px solid var(--line);background:#fff;border-radius:99px;
+  padding:5px 14px;font-size:12.5px;color:var(--ink-2);transition:.15s;
+}
+.login-scan button:hover{border-color:var(--primary);color:var(--primary)}
+@media (max-width:960px){
+  .login{grid-template-columns:1fr;min-height:0}
+  .login-left{padding:40px 32px}
+  .login-headline{margin-top:36px}
+}
+
+/* ========== 2. 后台框架 ========== */
+.dash{
+  max-width:1280px;margin:0 auto;padding:0 24px 40px;
+  display:grid;grid-template-columns:220px 1fr;
+  height:720px;border-radius:var(--r-lg);overflow:hidden;
+  box-shadow:var(--shadow-lg);background:#fff;
+}
+/* 侧边栏：深空蓝黑 + 渐变激活指示条 */
+.side{
+  background:var(--side);color:#cbd5e1;display:flex;flex-direction:column;
+  border-right:1px solid rgba(148,163,184,.08);
+}
+.side-logo{
+  height:56px;display:flex;align-items:center;gap:10px;padding:0 18px;
+  border-bottom:1px solid rgba(148,163,184,.1);flex:none;
+}
+.side-logo .logo-mark{width:30px;height:30px;border-radius:8px;font-size:13px}
+.side-logo b{color:#fff;font-size:15.5px;letter-spacing:.02em}
+.side-nav{flex:1;overflow-y:auto;padding:14px 0}
+.side-nav::-webkit-scrollbar{width:4px}
+.side-nav::-webkit-scrollbar-thumb{background:rgba(148,163,184,.2);border-radius:2px}
+.side-group{
+  padding:14px 20px 6px;font-size:11px;letter-spacing:.1em;color:#475569;
+  font-weight:600;
+}
+.side-item{
+  display:flex;align-items:center;gap:11px;padding:9px 14px;margin:1px 10px;
+  border-radius:8px;font-size:13.5px;color:#94a3b8;cursor:pointer;position:relative;
+  transition:.15s;
+}
+.side-item svg{flex:none;opacity:.85}
+.side-item:hover{color:#e2e8f0;background:rgba(148,163,184,.08)}
+.side-item.on{color:#fff;font-weight:600;background:rgba(59,130,246,.14)}
+.side-item.on::before{
+  content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--grad);
+}
+.side-item .ai-badge{
+  margin-left:auto;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;
+  background:var(--grad);color:#fff;letter-spacing:.04em;
+}
+.side-item .count{
+  margin-left:auto;font-size:11px;color:#64748b;background:rgba(148,163,184,.12);
+  padding:0 7px;border-radius:99px;line-height:17px;
+}
+.side-foot{
+  flex:none;padding:12px 20px;border-top:1px solid rgba(148,163,184,.1);
+  font-size:11.5px;color:#475569;display:flex;align-items:center;gap:8px;
+}
+.side-foot .ver{
+  font-size:10px;color:#60a5fa;border:1px solid rgba(96,165,250,.35);
+  padding:0 6px;border-radius:99px;
+}
+
+/* 主区 */
+.main{display:flex;flex-direction:column;background:var(--bg);min-width:0}
+.topbar{
+  height:56px;flex:none;background:#fff;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;padding:0 20px;
+}
+.crumbs{font-size:13px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.crumbs b{color:var(--ink);font-weight:600}
+.topbar .sp{flex:1}
+.icon-btn{
+  width:34px;height:34px;border-radius:8px;border:none;background:none;
+  display:grid;place-items:center;color:var(--ink-2);cursor:pointer;transition:.15s;
+}
+.icon-btn:hover{background:var(--bg);color:var(--ink)}
+.ai-entry{
+  display:flex;align-items:center;gap:8px;height:34px;padding:0 14px;
+  border:none;border-radius:99px;background:var(--grad);color:#fff;
+  font-size:13px;font-weight:600;box-shadow:0 3px 10px rgba(37,99,235,.3);
+  transition:.2s;
+}
+.ai-entry:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(37,99,235,.35)}
+.avatar{
+  width:32px;height:32px;border-radius:50%;background:#e2e8f0;
+  display:grid;place-items:center;font-size:12.5px;font-weight:700;color:var(--ink-2);
+  border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;
+}
+/* tagsview 简化行 */
+.tagbar{
+  height:38px;flex:none;background:#fff;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;padding:0 20px;overflow:hidden;
+}
+.tag{
+  display:flex;align-items:center;gap:7px;height:26px;padding:0 12px;
+  border-radius:7px;font-size:12.5px;color:var(--ink-2);background:var(--bg);
+  border:1px solid transparent;cursor:pointer;
+}
+.tag.on{background:#eff6ff;color:#2563eb;border-color:#dbeafe;font-weight:500}
+.tag .x{font-size:11px;color:var(--ink-3);display:none}
+.tag.on .x{display:block}
+
+/* 内容区 */
+.content{flex:1;overflow-y:auto;padding:20px}
+.content::-webkit-scrollbar{width:6px}
+.content::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+/* AI 渐变横幅（含真实入口，非装饰） */
+.hero{
+  position:relative;overflow:hidden;border-radius:var(--r-lg);
+  background:var(--grad);color:#fff;padding:22px 26px;
+  display:flex;align-items:center;gap:18px;
+}
+.hero::before{
+  content:"";position:absolute;inset:0;
+  background-image:radial-gradient(rgba(255,255,255,.14) 1px,transparent 1px);
+  background-size:22px 22px;
+  mask-image:linear-gradient(100deg,transparent 30%,#000 90%);
+  -webkit-mask-image:linear-gradient(100deg,transparent 30%,#000 90%);
+}
+.hero>*{position:relative}
+.hero .hi{
+  flex:none;width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);
+  display:grid;place-items:center;border:1px solid rgba(255,255,255,.25);
+}
+.hero h3{font-size:17px;font-weight:700}
+.hero p{font-size:12.5px;opacity:.85;margin-top:2px}
+.hero .sp{flex:1}
+.hero .go{
+  flex:none;display:flex;align-items:center;gap:8px;height:38px;padding:0 18px;
+  border-radius:99px;background:#fff;color:#2563eb;font-size:13px;font-weight:600;
+  transition:.2s;
+}
+.hero .go:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.25)}
+/* 统计卡：白卡 + 渐变图标底 + 真实环比 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px}
+.stat{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:16px 18px;box-shadow:var(--shadow);
+}
+.stat .t{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.stat .t .ic{
+  width:26px;height:26px;border-radius:7px;background:#eff6ff;color:#2563eb;
+  display:grid;place-items:center;
+}
+.stat .v{margin-top:10px;font-size:26px;font-weight:700;letter-spacing:.01em;
+  font-variant-numeric:tabular-nums;}
+.stat .d{margin-top:4px;font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.stat .up{color:var(--ok);font-weight:600}
+.stat .down{color:var(--danger);font-weight:600}
+/* 下排两卡：左生成记录（真数据源），右文章排行 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;
+}
+.card-h{
+  flex:none;padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;
+}
+.card-h .more{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-weight:400;cursor:pointer}
+.card-h .more:hover{color:var(--primary)}
+.card-b{padding:6px 0;flex:1}
+/* 生成记录行 */
+.gen-row{display:flex;align-items:center;gap:12px;padding:10px 18px;transition:.15s;cursor:pointer}
+.gen-row:hover{background:#f8fafc}
+.gen-ic{
+  flex:none;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#fff;
+}
+.gen-ic.g1{background:linear-gradient(135deg,#3b82f6,#6366f1)}
+.gen-ic.g2{background:linear-gradient(135deg,#0ea5e9,#2563eb)}
+.gen-ic.g3{background:linear-gradient(135deg,#10b981,#0ea5e9)}
+.gen-main{flex:1;min-width:0}
+.gen-main b{display:block;font-size:13.5px;font-weight:600;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gen-main span{display:block;font-size:12px;color:var(--ink-3);margin-top:1px}
+.st{flex:none;font-size:11.5px;padding:2px 10px;border-radius:99px;font-weight:500}
+.st.done{background:#ecfdf5;color:#059669}
+.st.run{background:#eff6ff;color:#2563eb}
+.st.applied{background:#f1f5f9;color:#64748b}
+.st.run .pulse{
+  display:inline-block;width:6px;height:6px;border-radius:50%;background:#2563eb;
+  margin-right:5px;animation:pu 1.2s ease-in-out infinite;
+}
+@keyframes pu{0%,100%{opacity:.3}50%{opacity:1}}
+/* 文章排行表 */
+.rank{width:100%;border-collapse:collapse;font-size:13px}
+.rank th{
+  text-align:left;font-size:12px;color:var(--ink-3);font-weight:500;
+  padding:9px 18px;border-bottom:1px solid var(--line);background:#fafbfc;
+}
+.rank td{padding:10px 18px;border-bottom:1px solid #f1f5f9;color:var(--ink-2)}
+.rank tr:last-child td{border-bottom:none}
+.rank .no{
+  width:22px;height:22px;border-radius:6px;background:var(--bg);color:var(--ink-3);
+  font-size:11.5px;font-weight:700;display:grid;place-items:center;font-style:normal;
+}
+.rank tr:nth-child(1) .no{background:#eff6ff;color:#2563eb}
+.rank tr:nth-child(2) .no{background:#f0f9ff;color:#0284c7}
+.rank .tt{color:var(--ink);font-weight:500;cursor:pointer}
+.rank .tt:hover{color:var(--primary)}
+.rank .vv{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+@media (max-width:1080px){
+  .dash{grid-template-columns:190px 1fr;height:auto}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .grid2{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .dash{grid-template-columns:1fr}
+  .side{display:none}
+}
+</style>
+</head>
+<body>
+<p class="proto-note">
+  <b>FastCMS UI 改版原型</b>
+  <span class="tag">深空蓝渐变 #3b82f6→#6366f1</span>
+  <span class="tag">侧边栏 #0f172a</span>
+  <span class="tag">圆角 8–14px</span>
+  两个画面：登录页（营销面）+ 后台首页（监控面）。数字为原型示意，落库时走真实接口。
+</p>
+
+<!-- ==================== 画面一：登录页 ==================== -->
+<div class="frame-label">01 · 登录页 /login</div>
+<div class="login">
+  <div class="login-left">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="logo">
+      <div class="logo-mark">F</div>
+      <div class="logo-name">FastCMS <small>AI-POWERED CONTENT</small></div>
+    </div>
+    <div class="login-headline">
+      <h1>用一句话，<br>生成一个<em>会生长</em>的网站</h1>
+      <p>AI 模板引擎 + 组件编排，从需求描述到可发布站点，分钟级交付；内容、订单、评论在同一后台统一管理。</p>
+    </div>
+    <div class="ai-demo">
+      <div class="ai-demo-user">企业官网模板，蓝色调，响应式设计</div>
+      <div class="ai-demo-ai">
+        <div class="dot">F</div>
+        <div class="body">
+          正在生成 <b>my-company</b> 模板… 已编排 5/6 个组件（导航 · 首页 Hero · 产品 · 关于 · 联系），正在定向润色视觉细节。
+          <div class="bar"><i></i></div>
+          <div class="tip">预计还需 40 秒 · 生成完成后可在编辑器中继续对话调整</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="login-right">
+    <div class="login-box">
+      <h2>欢迎回来</h2>
+      <p class="sub">登录你的 FastCMS 控制台</p>
+      <div class="login-tabs">
+        <button class="on">账号密码</button>
+        <button>手机登录</button>
+      </div>
+      <div class="field">
+        <span class="fi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg></span>
+        <input type="text" placeholder="账号 / 邮箱 / 手机号" value="admin">
+      </div>
+      <div class="field">
+        <span class="fi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+        <input type="password" placeholder="密码" value="••••••••">
+      </div>
+      <button class="login-btn">登 录</button>
+      <div class="login-links">
+        <a href="javascript:;">忘记密码？</a>
+        <a href="javascript:;">注册账号</a>
+      </div>
+      <div class="login-scan"><button>微信扫码登录</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 画面二：后台首页 ==================== -->
+<div class="frame-label">02 · 后台首页 /home</div>
+<div class="dash">
+  <!-- 侧边栏：按域分组 -->
+  <aside class="side">
+    <div class="side-logo">
+      <div class="logo-mark">F</div>
+      <b>FastCMS</b>
+    </div>
+    <nav class="side-nav">
+      <div class="side-group">概览</div>
+      <div class="side-item on">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/></svg>
+        首页
+      </div>
+      <div class="side-group">内容管理</div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+        文章
+        <span class="count">911</span>
+      </div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h5"/></svg>
+        页面
+      </div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z" rx="2"/><path d="m4 7 8 6 8-6"/></svg>
+        评论
+        <span class="count">23</span>
+      </div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+        附件
+      </div>
+      <div class="side-group">模板与 AI</div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+        模板
+        <span class="ai-badge">AI</span>
+      </div>
+      <div class="side-group">经营</div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/><path d="M3 4h2l2.5 11.5a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6"/></svg>
+        订单
+      </div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M7 8.5C7 6.6 9.2 6 12 6s5 .7 5 2.5S14.8 11 12 11s-5 .6-5 2.5S9.2 16 12 16s5-.6 5-2.5"/></svg>
+        支付
+      </div>
+      <div class="side-group">站点设置</div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M18.5 3.5a2.1 2.1 0 0 1 3 3L12 16l-4 1 1-4 9.5-9.5Z"/></svg>
+        设置
+      </div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+        插件
+      </div>
+      <div class="side-group">系统</div>
+      <div class="side-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/></svg>
+        权限
+      </div>
+    </nav>
+    <div class="side-foot">v1.8.0 <span class="ver">AI CORE</span></div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="topbar">
+      <span class="crumbs">首页 <b>/</b> 工作台</span>
+      <span class="sp"></span>
+      <button class="icon-btn" title="全局搜索"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+      <button class="icon-btn" title="消息"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7.5-2.5 7.5h17S18 15 18 9Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg></button>
+      <button class="ai-entry"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5 14 9l6.5 2L14 13l-2 6.5L10 13l-6.5-2L10 9l2-6.5Z"/></svg>AI 助手</button>
+      <div class="avatar">A</div>
+    </div>
+    <div class="tagbar">
+      <div class="tag on">首页 <span class="x">×</span></div>
+      <div class="tag">文章管理</div>
+      <div class="tag">模板管理</div>
+      <div class="tag">订单管理</div>
+    </div>
+    <div class="content">
+      <!-- AI 横幅：真实入口，非装饰 -->
+      <div class="hero">
+        <div class="hi"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5 14 9l6.5 2L14 13l-2 6.5L10 13l-6.5-2L10 9l2-6.5Z"/></svg></div>
+        <div>
+          <h3>早上好，admin</h3>
+          <p>3 个模板生成任务进行中 · 23 条评论待处理，让 AI 帮你批量回复？</p>
+        </div>
+        <span class="sp"></span>
+        <button class="go">AI 新建模板 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+      </div>
+      <!-- 统计卡：白卡 + 渐变图标 + 真实环比 -->
+      <div class="stats">
+        <div class="stat">
+          <div class="t"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 8h6M9 12h6"/></svg></span>今日新增文章</div>
+          <div class="v">12</div>
+          <div class="d"><span class="up">▲ 18%</span> 较昨日 · 总数 911</div>
+        </div>
+        <div class="stat">
+          <div class="t"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>今日浏览量</div>
+          <div class="v">1,284</div>
+          <div class="d"><span class="up">▲ 6.2%</span> 较昨日 · 总数 86.4k</div>
+        </div>
+        <div class="stat">
+          <div class="t"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/><path d="M3 4h2l2.5 11.5a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6"/></svg></span>今日新增订单</div>
+          <div class="v">7</div>
+          <div class="d"><span class="down">▼ 12%</span> 较昨日 · 总数 342</div>
+        </div>
+        <div class="stat">
+          <div class="t"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.5 14 9l6.5 2L14 13l-2 6.5L10 13l-6.5-2L10 9l2-6.5Z"/></svg></span>AI 模板（累计）</div>
+          <div class="v">14</div>
+          <div class="d"><span class="up">● 3 生成中</span> · 11 已应用</div>
+        </div>
+      </div>
+      <!-- 下排：生成记录（替代原假"动态"）+ 文章排行（真实数据源） -->
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="color:#0284c7"><path d="M12 2.5 14 9l6.5 2L14 13l-2 6.5L10 13l-6.5-2L10 9l2-6.5Z"/></svg>
+            最近模板生成
+            <span class="more">全部记录 →</span>
+          </div>
+          <div class="card-b">
+            <div class="gen-row">
+              <div class="gen-ic g1">MC</div>
+              <div class="gen-main"><b>my-company · 企业官网</b><span>组件编排 · 6 组件 · 蓝色调 · 响应式</span></div>
+              <span class="st run"><span class="pulse"></span>润色中 82%</span>
+            </div>
+            <div class="gen-row">
+              <div class="gen-ic g2">ED</div>
+              <div class="gen-main"><b>edu-site · 教育机构</b><span>AI 自主仿写 · 参考 edu.example.com</span></div>
+              <span class="st done">已生成</span>
+            </div>
+            <div class="gen-row">
+              <div class="gen-ic g3">PB</div>
+              <div class="gen-main"><b>personal-blog · 个人博客</b><span>组件编排 · 4 组件 · 浅色</span></div>
+              <span class="st applied">已应用</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:#6366f1"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg>
+            文章浏览排行
+            <span class="more">文章管理 →</span>
+          </div>
+          <div class="card-b">
+            <table class="rank">
+              <thead><tr><th style="width:44px">#</th><th>标题</th><th style="text-align:right">浏览</th></tr></thead>
+              <tbody>
+                <tr><td><i class="no">1</i></td><td class="tt">FastCMS v1.8 AI 模板引擎发布说明</td><td class="vv">2,841</td></tr>
+                <tr><td><i class="no">2</i></td><td class="tt">用一句话生成企业官网：实战指南</td><td class="vv">2,107</td></tr>
+                <tr><td><i class="no">3</i></td><td class="tt">响应式模板的移动端适配实践</td><td class="vv">1,662</td></tr>
+                <tr><td><i class="no">4</i></td><td class="tt">插件市场接入规范（2026 修订）</td><td class="vv">1,204</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 登录 tabs 切换（示意）
+document.querySelectorAll('.login-tabs').forEach(function(tabs){
+  tabs.addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    tabs.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});
+    b.classList.add('on');
+  });
+});
+</script>
+</body>
+</html>

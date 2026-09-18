@@ -20,3 +20,11 @@ ALTER TABLE ai_template_session ADD COLUMN design_direction varchar(64) DEFAULT 
 
 ALTER TABLE ai_template_session ADD COLUMN confirm_auto tinyint(1) DEFAULT 1
   COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）' AFTER design_direction;
+
+-- ----------------------------
+-- 统一工作对象选择器：会话增加应用后正式模板指针字段
+-- 生成型会话应用成功时由 applyTemplate 回写（前端"去正式模板/编辑此模板"据此直达）；
+-- 存量数据 NULL = 无指针，前端回退按目录名（template_name）匹配，行为与升级前一致
+-- ----------------------------
+ALTER TABLE ai_template_session ADD COLUMN applied_template_id varchar(64) DEFAULT NULL
+  COMMENT '应用后生成的正式模板ID（应用成功时回写；NULL=存量数据或未应用，前端回退按目录名匹配）' AFTER template_id;

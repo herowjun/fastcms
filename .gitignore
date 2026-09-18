@@ -48,3 +48,4 @@ build/
 
 ### Trae 临时调试产物 ###
 .trae-tmp/
+.tmp-verify/

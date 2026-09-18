@@ -836,6 +836,7 @@ CREATE TABLE `ai_template_session` (
   `user_id` bigint DEFAULT NULL COMMENT '创建用户ID',
   `work_dir` varchar(512) DEFAULT NULL COMMENT '会话工作目录绝对路径',
   `template_id` varchar(64) DEFAULT NULL COMMENT '绑定的正式模板ID（非空表示调整型会话，AI 输出直写正式模板目录）',
+  `applied_template_id` varchar(64) DEFAULT NULL COMMENT '应用后生成的正式模板ID（应用成功时回写；NULL=存量数据或未应用，前端回退按目录名匹配）',
   `plan_files` text DEFAULT NULL COMMENT '分批流水线规划文件清单（JSON 数组，用于进度恢复与断点续传）',
   `mobile_adaptive` tinyint(1) DEFAULT 1 COMMENT '是否适配移动端（1=响应式布局，null 视为 1）',
   `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行',
@@ -857,6 +858,8 @@ CREATE TABLE `ai_template_session` (
 -- ALTER TABLE `ai_template_session` ADD COLUMN `create_mode` varchar(16) DEFAULT NULL COMMENT '创建模式: NULL/pipeline=组件管线(默认) design=设计稿先行' AFTER `mobile_adaptive`;
 -- ALTER TABLE `ai_template_session` ADD COLUMN `design_direction` varchar(64) DEFAULT NULL COMMENT '设计模式方向资产 key（如 modern-business / feedback-brighten，命中 DesignDirectionLibrary）' AFTER `create_mode`;
 -- ALTER TABLE `ai_template_session` ADD COLUMN `confirm_auto` tinyint(1) DEFAULT 1 COMMENT '设计模式：机器审计通过后是否自动转化（1=自动，0=等用户确认；null 视为 1）' AFTER `design_direction`;
+-- 已有环境升级（1.0.0）：为 ai_template_session 增加应用后正式模板指针字段（详见 fastcms-1.0.0.sql）
+-- ALTER TABLE `ai_template_session` ADD COLUMN `applied_template_id` varchar(64) DEFAULT NULL COMMENT '应用后生成的正式模板ID（应用成功时回写；NULL=存量数据或未应用，前端回退按目录名匹配）' AFTER `template_id`;
 
 -- AI 模板生成对话消息表
 DROP TABLE IF EXISTS `ai_template_message`;

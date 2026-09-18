@@ -93,9 +93,9 @@
         <ImagePickDialog ref="imagePickDialogRef" v-model:visible="pickDialogVisible"
                          :session-id="currentSession?.sessionId || ''" @applied="onPickApplied" />
 
-        <!-- AI 新建模板对话框（新建表单 + 历史生成记录双视图） -->
+        <!-- AI 新建模板对话框（新建表单视图；历史生成记录已由父组件"工作对象选择器"对话框接管） -->
         <CreateTemplateDialog ref="createDialogRef" v-model:visible="createDialogVisible"
-                              @created="onCreateDialogCreated" @open-session="onOpenHistorySession" />
+                              @created="onCreateDialogCreated" />
     </div>
 </template>
 
@@ -116,6 +116,8 @@ const props = defineProps<{
     templateId: string;
     /** 模板列表（父组件工具栏行作用模板下拉数据源 + 编辑此模板回定位用） */
     templateList?: any[];
+    /** 全部会话（父组件统一持有与刷新，单一数据源；本组件只读，变更经 sessions-changed 通知父组件重拉） */
+    sessions?: any[];
     /** 工作区高度（与手动编辑视图同源注入） */
     height?: string;
     /** 视图是否激活（首次激活时初始化调整会话，避免页面加载就产生会话副作用） */
@@ -131,6 +133,8 @@ const emit = defineEmits<{
     (e: 'applied', templateId?: string): void;
     /** 「编辑此模板」桥（已应用回看态）：父组件把该正式模板加载到主编辑视图并切手动编辑 */
     (e: 'edit-applied', templateId: string): void;
+    /** 会话数据变化（创建会话等）→ 父组件统一重拉会话列表（单一数据源，父组件 refreshSessions） */
+    (e: 'sessions-changed'): void;
 }>();
 
 const aiApi = AiTemplateApi();
@@ -148,8 +152,9 @@ const imagePickDialogRef = ref();
 const createDialogVisible = ref(false);
 const createDialogRef = ref();
 
-// 全部会话（调整 + 生成），对话头下拉按类型分组
-const allSessions = ref<any[]>([]);
+// 全部会话（调整 + 生成）：父组件统一持有（props 注入，单一数据源）。
+// 本组件不再自拉/自写会话列表，任何会话变化经 emit('sessions-changed') 由父组件 refreshSessions 重拉
+const allSessions = computed<any[]>(() => props.sessions || []);
 const currentSession = ref<any>(null);
 // 会话编辑视图：预览与文件树走会话工作目录（生成型会话应用前）
 const sessionView = ref(false);
@@ -206,9 +211,12 @@ watch(treeFilter, (val) => {
     wbTreeRef.value?.filter(val);
 });
 
-// 对话头会话下拉数据源：全部生成会话 + 当前作用模板的调整会话（其他模板的调整会话与本工作台无关）
+// 对话头会话下拉数据源（收窄）：仅当前作用模板的调整会话。
+// 生成会话（草稿/已应用）的切换统一走顶栏"工作对象选择器"对话框，避免同一批数据在两个入口重复；
+// 会话视图下传空数组 → aiChat 按 v-if 自动隐藏下拉、显示会话标题（切换生成会话走顶栏选择器）
 const dropdownSessions = computed(() =>
-    (allSessions.value || []).filter((s: any) => !s.templateId || s.templateId === props.templateId));
+    sessionView.value ? [] :
+    (allSessions.value || []).filter((s: any) => s.templateId === props.templateId));
 
 // 实时预览（入口页面/刷新键/预览地址），getter 注入树与会话上下文
 const { preview, previewPageOptions, aiPreviewUrl, previewEmptyTip, initEntry: initPreviewEntry, refresh: refreshAiPreview } = useAiPreview({
@@ -347,7 +355,8 @@ const ensureSessionBeforeSend = async (): Promise<any> => {
             ElMessage.error(res.msg || '创建会话失败');
             return null;
         }
-        allSessions.value = [res.data, ...allSessions.value];
+        // 会话列表由父组件统一持有，通知其重拉（单一数据源）
+        emit('sessions-changed');
         applySession(res.data);
         return res.data;
     } finally {
@@ -361,8 +370,7 @@ const ensureAdjustSession = async () => {
     ensuring = true;
     sessionView.value = false;
     try {
-        const res = await aiApi.listSessions();
-        allSessions.value = res.data || [];
+        // 会话数据改由父组件 props 注入（单一数据源），这里只做筛选不再自拉
         // 按创建时间倒序（最近的在最前）
         const adjustSessions = allSessions.value
             .filter((s: any) => s.templateId === props.templateId)
@@ -423,12 +431,8 @@ const onSelectAiSession = (sessionId: string) => {
 /** 新建模板对话框创建会话成功：进入会话视图并自动发送首条消息 */
 const onCreateDialogCreated = async (session: any, firstMessage: string) => {
     sessionView.value = true;
-    try {
-        const listRes = await aiApi.listSessions();
-        allSessions.value = listRes.data || [];
-    } catch (e) {
-        // 会话列表刷新失败不阻断进入会话（下拉列表稍旧，下次打开会重拉）
-    }
+    // 会话列表由父组件统一持有，通知其重拉（单一数据源；不阻断进入会话）
+    emit('sessions-changed');
     applySession(session);
     // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
     loadSessionFileTree().then(() => {
@@ -440,9 +444,8 @@ const onCreateDialogCreated = async (session: any, firstMessage: string) => {
     });
 };
 
-/** 打开历史生成会话（历史记录弹窗行点击/操作列）：进入会话视图恢复，未应用可续聊，已应用只读回看 */
-const onOpenHistorySession = (row: any, sessions: any[]) => {
-    allSessions.value = sessions;
+/** 统一工作对象选择器入口：打开生成会话（未应用续聊 / 已应用只读回看），会话数据取 props（单一数据源） */
+const openSessionByRow = (row: any) => {
     sessionView.value = true;
     applySession(row);
     loadSessionFileTree().then(() => {
@@ -561,14 +564,18 @@ const onApplyTemplate = () => {
 };
 
 /**
- * 「编辑此模板」（已应用回看态）：按会话 templateName 找到对应正式模板，
- * 通知父组件加载到主编辑视图（重新编辑应用后的模板）
+ * 「编辑此模板」（已应用回看态）：优先用会话持久化的 appliedTemplateId 直达正式模板
+ * （应用成功时后端回写的指针）；存量会话无指针时回退按目录名匹配
  */
 const onEditApplied = () => {
-    const name = currentSession.value?.templateName;
-    const tpl = (props.templateList || []).find((i: any) => i.name === name);
+    const s = currentSession.value;
+    if (s?.appliedTemplateId) {
+        emit('edit-applied', String(s.appliedTemplateId));
+        return;
+    }
+    const tpl = (props.templateList || []).find((i: any) => i.name === s?.templateName);
     if (!tpl) {
-        ElMessage.warning('未找到对应的正式模板，请从主编辑视图的模板下拉中选择');
+        ElMessage.warning('未找到对应的正式模板，请从"工作对象选择器"的正式模板页签中选择');
         return;
     }
     emit('edit-applied', String(tpl.id));
@@ -581,11 +588,26 @@ const openCreateDialog = () => {
     createDialogRef.value?.open();
 };
 
-/** 历史记录：打开历史生成记录弹窗（对正在跑/刚失败的会话用内存状态覆盖徽章） */
-const openHistoryDialog = () => {
-    const runningId = aiChatRef.value?.isChatting?.() ? currentSession.value?.sessionId : '';
-    const failedId = !runningId && aiChatRef.value?.isFailed?.() ? currentSession.value?.sessionId : '';
-    createDialogRef.value?.open('history', { runningId, failedId });
+/** 会话期瞬时态徽章上下文（生成中/失败，不落库）：供父组件选择器按钮与工作对象对话框读取 */
+const getSessionBadgeCtx = () => {
+    const running = aiChatRef.value?.isChatting?.();
+    const failed = !running && aiChatRef.value?.isFailed?.();
+    return {
+        runningId: running ? currentSession.value?.sessionId || '' : '',
+        failedId: failed ? currentSession.value?.sessionId || '' : ''
+    };
+};
+
+/**
+ * 退出会话视图（父组件"工作对象选择器"切回正式模板时调用）：
+ * 清空会话上下文并恢复当前作用模板的调整上下文（树/预览/调整会话）
+ */
+const exitSessionView = () => {
+    if (!sessionView.value) return;
+    sessionView.value = false;
+    applySession(null);
+    // 复用视图激活链路：重载作用模板树 + 确保调整会话可用 + 初始化预览入口
+    enterAdjustContext();
 };
 
 // ==================== 视图激活与作用模板联动 ====================
@@ -656,7 +678,6 @@ onBeforeUnmount(() => {
 // 按钮点击/状态显示由父组件经模板 ref 调用（exposed ref 自动解包）
 defineExpose({
     openCreateDialog,
-    openHistoryDialog,
     onRollback,
     onApplyTemplate,
     onEditApplied,
@@ -666,6 +687,16 @@ defineExpose({
     rollingBack,
     applying,
     prevHint,
+    // ===== 统一工作对象选择器支撑 =====
+    /** 打开生成会话（未应用续聊 / 已应用只读回看） */
+    openSessionByRow,
+    /** 退出会话视图，恢复当前作用模板的调整上下文 */
+    exitSessionView,
+    /** 会话期瞬时态徽章上下文（生成中/失败） */
+    getSessionBadgeCtx,
+    /** 会话视图标记 / 当前会话（父组件推导"当前工作对象"用） */
+    sessionView,
+    currentSession,
 });
 </script>
 

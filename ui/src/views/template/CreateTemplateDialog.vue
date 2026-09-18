@@ -1,8 +1,6 @@
 <template>
-    <el-dialog v-model="visible"
-               :title="dialog.view === 'history' ? '历史生成记录' : 'AI 新建模板'"
-               :width="dialog.view === 'history' ? '680px' : '520px'" :close-on-click-modal="false">
-        <el-form v-if="dialog.view === 'create'" ref="createFormRef" :model="dialog"
+    <el-dialog v-model="visible" title="AI 新建模板" width="520px" :close-on-click-modal="false">
+        <el-form ref="createFormRef" :model="dialog"
                  :rules="createFormRules" label-width="90px">
             <el-form-item label="模板目录名" prop="templateName">
                 <el-input v-model="dialog.templateName" placeholder="英文目录名，以字母开头，如 my-company"
@@ -55,76 +53,12 @@
                 <el-checkbox v-model="dialog.mobileAdaptive">生成响应式布局（多端断点 + 移动端汉堡菜单）</el-checkbox>
             </el-form-item>
         </el-form>
-        <template v-else>
-            <!-- 已应用/未应用分页签：未应用是活跃工作集（默认），已应用仅回看 -->
-            <el-tabs v-model="dialog.historyTab">
-                <el-tab-pane name="pending">
-                    <template #label>
-                        未应用<el-badge v-if="pendingSessions.length" :value="pendingSessions.length" type="warning" class="history-tab-badge" />
-                    </template>
-                    <el-table :data="pendingSessions" v-loading="dialog.historyLoading" stripe size="small"
-                              max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
-                        <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
-                        <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
-                        <el-table-column label="状态" width="86">
-                            <template #default="scope">
-                                <el-tag size="small" :type="sessionBadge(scope.row).type">{{ sessionBadge(scope.row).text }}</el-tag>
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="创建时间" width="130">
-                            <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
-                        </el-table-column>
-                        <el-table-column label="操作" width="70">
-                            <template #default="scope">
-                                <el-button size="small" text type="primary" @click.stop="onOpenHistorySession(scope.row)">打开</el-button>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                    <el-empty v-if="!dialog.historyLoading && pendingSessions.length === 0"
-                              description="暂无未应用的生成记录" :image-size="60" />
-                </el-tab-pane>
-                <el-tab-pane name="applied">
-                    <template #label>
-                        已应用<el-badge v-if="appliedSessions.length" :value="appliedSessions.length" type="success" class="history-tab-badge" />
-                    </template>
-                    <el-table :data="appliedSessions" v-loading="dialog.historyLoading" stripe size="small"
-                              max-height="420" highlight-current-row class="history-session-table" @row-click="onOpenHistorySession">
-                        <el-table-column prop="templateName" label="模板目录" min-width="110" show-overflow-tooltip />
-                        <el-table-column prop="requirement" label="需求描述" min-width="200" show-overflow-tooltip />
-                        <el-table-column label="状态" width="86">
-                            <template #default="scope">
-                                <el-tag size="small" :type="sessionBadge(scope.row).type">{{ sessionBadge(scope.row).text }}</el-tag>
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="创建时间" width="130">
-                            <template #default="scope">{{ formatHistoryTime(scope.row.created) }}</template>
-                        </el-table-column>
-                        <el-table-column label="操作" width="70">
-                            <template #default="scope">
-                                <el-button size="small" text type="primary" @click.stop="onOpenHistorySession(scope.row)">回看</el-button>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                    <el-empty v-if="!dialog.historyLoading && appliedSessions.length === 0"
-                              description="暂无已应用的生成记录" :image-size="60" />
-                </el-tab-pane>
-            </el-tabs>
-            <div class="history-tip">点击记录或「打开 / 回看」进入 AI 工作台：未应用的可继续打磨、重新生成或应用；已应用的仅回看</div>
-        </template>
+        <!-- 历史生成记录视图已删除：由父组件"工作对象选择器"对话框（WorkObjectDialog）的未应用/已应用页签接管 -->
         <template #footer>
-            <template v-if="dialog.view === 'create'">
-                <el-button text type="primary" @click="onShowHistory">
-                    <el-icon><ele-Clock /></el-icon>历史生成记录
-                </el-button>
-                <el-button @click="visible = false">取 消</el-button>
-                <el-button type="primary" :loading="dialog.loading" @click="onCreateConfirm">
-                    开始生成
-                </el-button>
-            </template>
-            <template v-else>
-                <el-button @click="dialog.view = 'create'">返回新建</el-button>
-                <el-button type="primary" @click="visible = false">关 闭</el-button>
-            </template>
+            <el-button @click="visible = false">取 消</el-button>
+            <el-button type="primary" :loading="dialog.loading" @click="onCreateConfirm">
+                开始生成
+            </el-button>
         </template>
     </el-dialog>
 </template>
@@ -146,7 +80,6 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'update:visible', v: boolean): void;
     (e: 'created', session: any, firstMessage: string): void;
-    (e: 'open-session', row: any, sessions: any[]): void;
 }>();
 
 const aiApi = AiTemplateApi();
@@ -156,15 +89,8 @@ const visible = computed({
     set: (v: boolean) => emit('update:visible', v)
 });
 
-// 对话框状态（create：新建表单；history：历史生成记录列表）
+// 对话框状态（新建表单；历史生成记录视图已删除，由 WorkObjectDialog 接管）
 const dialog = reactive({
-    view: 'create' as 'create' | 'history',
-    // 历史记录页签（pending：未应用，默认；applied：已应用仅回看）
-    historyTab: 'pending' as 'pending' | 'applied',
-    // 状态徽章覆盖上下文（open 传入快照）：正在跑的会话显示「生成中」、本轮失败的显示「生成失败」；
-    // 两者均为会话期瞬时态（后端无此状态值，不落库），刷新后回退为「待应用」
-    runningId: '',
-    failedId: '',
     templateName: '',
     requirement: '',
     // 是否适配移动端（默认开启：响应式布局 + 移动端汉堡菜单）
@@ -179,10 +105,7 @@ const dialog = reactive({
     // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 uploadReference 提交）
     importFile: null as File | null,
     importFileList: [] as any[],
-    loading: false,
-    // 历史生成型会话列表（未绑定 templateId，含已应用/未应用）
-    sessions: [] as any[],
-    historyLoading: false
+    loading: false
 });
 // 设计稿模式选项（打开对话框时拉取）：directions=方向资产清单
 const designOptions = reactive({
@@ -234,24 +157,13 @@ const loadDesignOptions = async () => {
 };
 
 /**
- * 打开 AI 新建模板对话框（generate 模式）
- *
- * @param view 落地页签：create=新建表单（默认）；history=历史生成记录（工具条「历史记录」入口）
- * @param badgeCtx 状态徽章覆盖上下文（打开时快照）：runningId=正在生成的会话，failedId=本轮失败的会话
+ * 打开 AI 新建模板对话框（新建表单视图；每次打开重置全部字段，避免上次选择残留）
  */
-const open = (view: 'create' | 'history' = 'create', badgeCtx?: { runningId?: string; failedId?: string }) => {
-    dialog.runningId = badgeCtx?.runningId || '';
-    dialog.failedId = badgeCtx?.failedId || '';
-    if (view === 'history') {
-        onShowHistory();
-        visible.value = true;
-        return;
-    }
-    dialog.view = 'create';
+const open = () => {
     dialog.templateName = '';
     dialog.requirement = '';
     dialog.mobileAdaptive = true;
-    // 设计模式三字段每次重置（避免上次选择残留：默认管线、方向 AI 自选、审计通过自动转化）
+    // 设计模式三字段每次重置（默认管线、方向 AI 自选、审计通过自动转化）
     dialog.createMode = 'pipeline';
     dialog.designDirection = '';
     dialog.confirmAuto = true;
@@ -282,59 +194,6 @@ const onImportFileExceed = (files: any[]) => {
     if (!file) return;
     dialog.importFile = file;
     dialog.importFileList = [{ name: file.name }];
-};
-
-/**
- * 查看历史生成记录：加载生成型会话（未绑定 templateId），
- * 已应用/未应用全部显示，点击记录可回到抽屉继续处理
- */
-const onShowHistory = async () => {
-    dialog.view = 'history';
-    // 默认展示未应用页签（活跃工作集），每次打开重置避免上次停留页签造成误导
-    dialog.historyTab = 'pending';
-    dialog.historyLoading = true;
-    try {
-        const res = await aiApi.listSessions();
-        dialog.sessions = (res.data || []).filter((s: any) => !s.templateId);
-    } catch (e: any) {
-        ElMessage.error(e?.message || '加载历史记录失败');
-    } finally {
-        dialog.historyLoading = false;
-    }
-};
-
-/** 历史记录按状态分流：未应用（可继续打磨/应用）与已应用（仅回看） */
-const pendingSessions = computed(() => dialog.sessions.filter((s: any) => s.status !== 'applied'));
-const appliedSessions = computed(() => dialog.sessions.filter((s: any) => s.status === 'applied'));
-
-/**
- * 状态徽章四态：生成中（蓝）/ 生成失败（红）为会话期瞬时态（内存覆盖，open 时快照）；
- * 待应用（黄）/ 已应用（绿）按落库 status 映射
- */
-const sessionBadge = (row: any): { text: string; type: 'primary' | 'danger' | 'warning' | 'success' } => {
-    if (row.sessionId && row.sessionId === dialog.runningId) return { text: '生成中', type: 'primary' };
-    if (row.sessionId && row.sessionId === dialog.failedId) return { text: '生成失败', type: 'danger' };
-    if (row.status === 'applied') return { text: '已应用', type: 'success' };
-    return { text: '待应用', type: 'warning' };
-};
-
-/**
- * 打开历史生成会话：通知父组件进入会话编辑视图恢复会话（不自动发送消息）；
- * 未应用的可继续对话打磨，已应用的只读回看（预览照常显示）
- */
-const onOpenHistorySession = (row: any) => {
-    emit('open-session', row, dialog.sessions);
-    // 会话已进入工作台恢复，对话框完成使命即关闭
-    visible.value = false;
-};
-
-/** 历史记录创建时间格式化（月-日 时:分） */
-const formatHistoryTime = (created: any) => {
-    if (!created) return '';
-    const d = new Date(created);
-    if (isNaN(d.getTime())) return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
 /**
@@ -397,27 +256,3 @@ const onCreateConfirm = async () => {
 
 defineExpose({ open });
 </script>
-
-<style lang="scss" scoped>
-// 历史生成记录列表（el-dialog teleport 到 body，插槽内容仍带组件 scoped 属性，可正常匹配）
-.history-session-table {
-    cursor: pointer;
-}
-
-// 页签 label 内 badge：与文字垂直居中、间距收紧
-.history-tab-badge {
-    margin-left: 6px;
-    vertical-align: 2px;
-
-    :deep(.el-badge__content) {
-        position: relative;
-        transform: none;
-    }
-}
-
-.history-tip {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-}
-</style>

@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交互设计稿 · 模板编辑 · 统一工作对象选择器</title>
+<style>
+:root{
+  --el:#409eff; --el-light:#ecf5ff; --el-dark:#337ecc;
+  --warn:#e6a23c; --warn-light:#fdf6ec;
+  --danger:#f56c6c; --success:#67c23a; --success-light:#f0f9eb;
+  --bg:#f0f2f5; --panel:#fff; --line:#e4e7ed; --line2:#ebeef5;
+  --t1:#303133; --t2:#606266; --t3:#909399; --t4:#c0c4cc;
+  --code-bg:#1e1e2e;
+  --ai:#8b5cf6; --ai-light:#f3e8ff; --ai-dark:#7c3aed;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+button{font-family:inherit;cursor:pointer}
+
+/* ===== 头部：模板名 + 视图 tab ===== */
+.hd{display:flex;align-items:center;gap:16px;height:52px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0;position:relative;z-index:5}
+.tabs{display:flex;gap:4px;background:#f4f5f7;border-radius:9px;padding:4px;margin-left:6px}
+.tab{border:0;background:transparent;padding:6px 16px;border-radius:6px;font-size:13.5px;color:var(--t2);font-weight:500;display:flex;align-items:center;gap:6px;transition:.15s}
+.tab:hover{color:var(--t1)}
+.tab.on{background:#fff;color:var(--el);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tab .dot{width:6px;height:6px;border-radius:50%;background:var(--ai);display:none}
+.tab.on .dot{display:inline-block}
+.hd .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.status{font-size:12.5px;display:flex;align-items:center;gap:6px;color:var(--t3)}
+.status .d{width:8px;height:8px;border-radius:50%;background:var(--t4)}
+.status.dirty{color:var(--warn)} .status.dirty .d{background:var(--warn)}
+
+/* ===== 按钮 ===== */
+.btn{border:1px solid var(--line);background:#fff;color:var(--t2);border-radius:6px;padding:5px 12px;font-size:13px;display:inline-flex;align-items:center;gap:5px;transition:.12s}
+.btn:hover{border-color:var(--el);color:var(--el);background:var(--el-light)}
+.btn.primary{background:var(--el);border-color:var(--el);color:#fff}
+.btn.primary:hover{background:var(--el-dark);color:#fff}
+.btn.success{background:var(--success);border-color:var(--success);color:#fff}
+.btn.success:hover{filter:brightness(1.05);color:#fff}
+.btn.sm{padding:3px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn:disabled:hover{border-color:var(--line);color:var(--t2);background:#fff}
+
+/* ===== 工具栏（两视图共用一行；左=工作对象选择器，右=操作） ===== */
+.toolbar{height:50px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.toolbar .sep{width:1px;height:22px;background:var(--line);margin:0 2px}
+.toolbar .hint{margin-left:auto;font-size:12px;color:var(--t3);display:flex;align-items:center;gap:6px}
+/* ★ 统一工作对象选择器：顶栏永远=当前树/预览/对话指向的对象（不变式） */
+.selbtn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13.5px;font-weight:600;color:var(--t1);min-width:280px;transition:.12s}
+.selbtn:hover{border-color:var(--el);box-shadow:0 0 0 2px rgba(64,158,255,.12)}
+.selbtn .s-ic{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;background:var(--el-light);color:var(--el)}
+.selbtn .s-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.selbtn .s-tag{font-size:11px;font-weight:400;color:var(--t3);flex-shrink:0}
+.selbtn .caret{font-size:10px;color:var(--t3);margin-left:auto;flex-shrink:0}
+/* 草稿会话态：紫色 AI 风格，与正式模板态一眼区分 */
+.selbtn.draft{border-color:#d6c4f7;background:var(--ai-light);color:var(--ai-dark)}
+.selbtn.draft:hover{border-color:var(--ai);box-shadow:0 0 0 2px rgba(139,92,246,.15)}
+.selbtn.draft .s-ic{background:#fff;color:var(--ai)}
+.selbtn.draft .s-tag{color:var(--ai)}
+/* 已应用只读态：绿色 */
+.selbtn.applied{border-color:#c2e7b0;background:var(--success-light);color:#529b2e}
+.selbtn.applied:hover{border-color:var(--success);box-shadow:0 0 0 2px rgba(103,194,58,.15)}
+.selbtn.applied .s-ic{background:#fff;color:var(--success)}
+.selbtn.applied .s-tag{color:#529b2e}
+
+/* ===== 视图容器 ===== */
+.view{display:none;flex:1;min-height:0}
+.view.on{display:flex}
+
+/* ===== 文件树列（两视图同构） ===== */
+.tree{width:210px;border-right:1px solid var(--line);flex-shrink:0;display:flex;flex-direction:column;background:var(--panel)}
+.tree .t-hd{height:42px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--line2);gap:8px;font-size:13px;font-weight:700;color:var(--t1)}
+.tree .t-hd .grow{flex:1}
+.tree .t-hd .rf{border:0;background:transparent;color:var(--t3);font-size:14px}
+.tree .t-hd .rf:hover{color:var(--el)}
+.tree .search{margin:8px 10px;border:1px solid var(--line);border-radius:6px;padding:5px 9px;font-size:12px;color:var(--t4);background:#fafafa}
+.tree .t-bd{flex:1;overflow:auto;padding:2px 0}
+.tree .node{padding:6px 10px 6px 26px;font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:6px}
+.tree .node:hover{background:#f5f7fa}
+.tree .node.sel{background:var(--el-light);color:var(--el);font-weight:600}
+.tree .node .ico{width:15px;text-align:center;font-size:12px}
+.tree .node.grp{padding-left:10px;font-weight:600;color:var(--t1)}
+/* 会话工作目录树头：紫色强调 */
+.tree.ses .t-hd{background:var(--ai-light);color:var(--ai-dark);border-bottom-color:#e5d9fb}
+
+/* ===== 代码编辑列（手动视图） ===== */
+.mid{width:30%;flex-shrink:0;display:flex;flex-direction:column;min-width:0;background:var(--panel)}
+.editor-tab{height:38px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--line2);font-size:12.5px;color:var(--t2);flex-shrink:0}
+.editor-tab .mark{color:var(--warn);font-size:11px;margin-left:auto;display:flex;align-items:center;gap:4px}
+.code{flex:1;overflow:auto;background:var(--code-bg);padding:10px 0;font:12.5px/1.7 "SFMono-Regular",Consolas,monospace;color:#cdd6f4}
+.code .ln{display:flex;padding:0 14px 0 0}
+.code .no{width:42px;flex-shrink:0;text-align:right;padding-right:14px;color:#4a4e6a;user-select:none}
+.code .tk-c{color:#6c7086;font-style:italic} .code .tk-t{color:#f38ba8} .code .tk-a{color:#f9e2af} .code .tk-s{color:#a6e3a1} .code .tk-p{color:#89b4fa}
+
+/* ===== AI 对话列 ===== */
+.chat{width:30%;flex-shrink:0;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line);background:var(--panel)}
+.chat-hd{height:46px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line2);background:#fff;flex-shrink:0}
+.chat-hd .mode-pill{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:12px;display:flex;align-items:center;gap:5px;flex-shrink:0}
+.mode-pill.adjust{background:var(--warn-light);color:var(--warn);border:1px solid #f5dab1}
+.mode-pill.gen-run{background:var(--ai-light);color:var(--ai-dark);border:1px solid #d6c4f7}
+.mode-pill.gen-pend{background:#f4f5f7;color:var(--t2);border:1px solid var(--line)}
+.mode-pill.applied{background:var(--success-light);color:#529b2e;border:1px solid #c2e7b0}
+.chat-hd .c-title{font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-hd .c-sub{font-size:11.5px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-hd .grow{flex:1}
+.chat-hd .new-btn{border:0;background:transparent;color:var(--el);font-size:12.5px;font-weight:600;flex-shrink:0;display:flex;align-items:center;gap:3px}
+.chat-hd .new-btn:hover{text-decoration:underline}
+/* 会话下拉收窄：只列当前作用模板的调整会话；会话视图下隐藏（切换走顶栏） */
+.chat-hd .sess-select{height:28px;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:12px;color:var(--t2);background:#fff;max-width:170px}
+.msgs{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:92%}
+.msg .m-role{font-size:11px;color:var(--t3);margin-bottom:4px}
+.msg.user{align-self:flex-end}
+.msg.user .m-bubble{background:var(--el-light);border:1px solid #d9ecff;border-radius:10px 10px 2px 10px;padding:8px 12px;font-size:13px}
+.msg.ai .m-bubble{background:#f7f8fa;border:1px solid var(--line2);border-radius:10px 10px 10px 2px;padding:8px 12px;font-size:13px;color:var(--t2)}
+.msg.ai .m-bubble b{color:var(--t1)}
+/* 进度卡 */
+.progress{border:1px solid #e5d9fb;background:#faf8ff;border-radius:8px;padding:8px 10px;margin-top:6px}
+.progress .p-hd{font-size:12px;font-weight:700;color:var(--ai-dark);display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.progress .p-it{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);padding:2px 0;font-family:Consolas,monospace}
+.progress .p-it .st{font-family:inherit;width:14px;text-align:center}
+.progress .p-it.done{color:var(--t3)}
+.progress .p-it.cur .st{color:var(--ai);animation:spin 1s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chat-in{border-top:1px solid var(--line2);padding:10px 12px;flex-shrink:0;background:#fff}
+.chat-in .in-box{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--t4);background:#fafafa;min-height:58px}
+.chat-in .in-ft{display:flex;align-items:center;gap:8px;margin-top:8px}
+.chat-in .send{margin-left:auto}
+
+/* ===== 预览列 ===== */
+.prev{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel)}
+.prev .p-hd{height:42px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--line2);gap:8px;flex-shrink:0}
+.prev .p-hd .grow{flex:1}
+.prev .p-hd .page{height:28px;border:1px solid var(--line);border-radius:6px;padding:0 8px;font-size:12.5px;color:var(--t1);background:#fff;max-width:200px}
+.prev .p-hd .icon{border:0;background:transparent;color:var(--t3);font-size:15px}
+.prev .p-hd .icon:hover{color:var(--el)}
+.prev .p-hd .vp{display:flex;background:#f4f5f7;border-radius:6px;padding:3px}
+.prev .p-hd .vp span{padding:3px 10px;font-size:12px;border-radius:4px;color:var(--t3);cursor:pointer}
+.prev .p-hd .vp span.on{background:#fff;color:var(--el);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.stage{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;background:#f7f8fa;padding:18px}
+.stage .mock{background:#fff;border:1px solid var(--line);border-radius:10px;width:min(560px,100%);box-shadow:0 2px 10px rgba(0,0,0,.05);overflow:hidden}
+.mock .m-nav{height:38px;background:linear-gradient(135deg,#409eff,#6d28d9);display:flex;align-items:center;padding:0 16px;color:#fff;font-size:13px;font-weight:700;gap:14px}
+.mock .m-nav i{font-style:normal;font-weight:400;font-size:12px;opacity:.85}
+.mock .m-hero{padding:26px 22px;text-align:center}
+.mock .m-hero .h1{font-size:19px;font-weight:800;color:var(--t1);margin-bottom:6px}
+.mock .m-hero .h2{font-size:12.5px;color:var(--t3)}
+.mock .m-rows{display:flex;gap:10px;padding:0 22px 22px}
+.mock .m-card{flex:1;height:84px;border-radius:8px;background:linear-gradient(160deg,#f4f7ff,#ece5fb);border:1px solid var(--line2)}
+.stage .mock.draft .m-nav{background:linear-gradient(135deg,#8b5cf6,#d946ef)}
+.stage .mock.applied .m-nav{background:linear-gradient(135deg,#67c23a,#409eff)}
+.stage .empty{color:var(--t4);font-size:13px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.stage .empty .big{font-size:34px}
+</style>
+
+<style>
+/* ===== 统一工作对象对话框（替代旧"模板下拉 + 历史记录按钮"两个入口） ===== */
+.mask{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;align-items:flex-start;justify-content:center}
+.mask.on{display:flex}
+.dlg{width:680px;max-width:94vw;background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);margin-top:7vh;display:flex;flex-direction:column;max-height:82vh;overflow:hidden}
+.dlg-hd{display:flex;align-items:center;gap:10px;padding:16px 18px 12px}
+.dlg-hd .t{font-size:15.5px;font-weight:800}
+.dlg-hd .grow{flex:1}
+.dlg-hd .x{border:0;background:transparent;font-size:18px;color:var(--t3);width:28px;height:28px;border-radius:6px}
+.dlg-hd .x:hover{background:#f4f5f7;color:var(--t1)}
+.dlg-search{margin:0 18px 10px;position:relative}
+.dlg-search input{width:100%;height:32px;border:1px solid var(--line);border-radius:8px;padding:0 12px 0 30px;font-size:13px}
+.dlg-search input:focus{outline:none;border-color:var(--el);box-shadow:0 0 0 2px rgba(64,158,255,.12)}
+.dlg-search .si{position:absolute;left:10px;top:8px;color:var(--t4);font-size:14px}
+/* 对话框页签：正式模板 / 未应用 / 已应用（同"历史生成记录"双 tab 模式，加一个正式模板页签） */
+.dlg-tabs{display:flex;gap:2px;margin:0 14px 2px;border-bottom:1px solid var(--line);padding:0 4px}
+.dlg-tab{border:0;background:transparent;padding:9px 14px;font-size:13px;color:var(--t2);font-weight:500;position:relative;display:flex;align-items:center;gap:6px}
+.dlg-tab:hover{color:var(--t1)}
+.dlg-tab.on{color:var(--el);font-weight:700}
+.dlg-tab.on::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:2px;background:var(--el);border-radius:2px}
+.dlg-tab .cnt{font-size:11px;background:#f4f5f7;color:var(--t3);border-radius:8px;padding:0 7px;font-weight:400}
+.dlg-tab.on .cnt{background:var(--el-light);color:var(--el)}
+.tab-hint{margin:8px 10px 2px;font-size:12px;color:var(--t3);background:#fafbfc;border:1px solid var(--line2);border-radius:6px;padding:6px 10px;line-height:1.5}
+.dlg-bd{overflow:auto;padding:0 8px 8px;flex:1}
+.grp{margin:6px 10px}
+.grp-hd{display:flex;align-items:center;gap:8px;padding:8px 8px 6px;font-size:12px;font-weight:700;color:var(--t3);letter-spacing:.5px}
+.grp-hd .ln{flex:1;height:1px;background:var(--line2)}
+.grp-hd .cnt{font-weight:400}
+.row{display:flex;align-items:center;gap:10px;padding:10px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent;margin:2px 0;transition:.12s}
+.row:hover{background:#f7f9fc}
+.row.on{background:var(--el-light);border-color:#c6e2ff}
+.row .r-ic{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:var(--el-light);color:var(--el)}
+.row.draft .r-ic{background:var(--ai-light);color:var(--ai)}
+.row.applied .r-ic{background:var(--success-light);color:var(--success)}
+.row .r-main{flex:1;min-width:0}
+.row .r-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.row .r-name .req{font-weight:400;font-size:12px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .r-sub{font-size:11.5px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .r-acts{display:flex;gap:6px;flex-shrink:0;opacity:0;transition:.12s}
+.row:hover .r-acts,.row.on .r-acts{opacity:1}
+/* 状态徽章 */
+.bdg{font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
+.bdg .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+.bdg.run{background:var(--ai-light);color:var(--ai-dark)} .bdg.run .d{animation:pulse 1.2s infinite}
+.bdg.pend{background:#f4f5f7;color:var(--t2)}
+.bdg.applied{background:var(--success-light);color:#529b2e}
+.bdg.failed{background:#fef0f0;color:var(--danger)}
+.bdg.active{background:var(--el-light);color:var(--el)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.dlg-ft{border-top:1px solid var(--line2);padding:12px 18px;display:flex;align-items:center;gap:10px;background:#fafbfc}
+.dlg-ft .note{font-size:11.5px;color:var(--t3);margin-left:auto;line-height:1.4}
+
+/* ===== 操作演示提示条（原型演示用，非产品 UI） ===== */
+.demo-bar{flex-shrink:0;background:#1f2430;color:#cbd5e1;font-size:12px;padding:7px 14px;display:flex;align-items:center;gap:8px}
+.demo-bar b{color:#fff}
+.demo-bar .tag{background:rgba(139,92,246,.25);color:#c4b5fd;border-radius:4px;padding:1px 6px;font-weight:700;font-size:11px}
+</style>
+</head>
+<body>
+<!-- 演示提示条 -->
+<div class="demo-bar"><span class="tag">演示</span><b>统一工作对象选择器</b>——点顶栏选择器打开对话框；点任意一行后，<b>顶栏 / 文件树 / 预览 / 对话</b>一起切换，顶栏永远是"当前正在看的东西"（旧版点历史记录后顶栏不动，造成混淆）。</div>
+
+<!-- ===== 头部：视图 tab + 状态（原"模板名 chip"已移除——统一选择器按钮是唯一上下文锚点，
+     头部 chip 与之完全同数据同刷新，留着是重复且可能失步的混淆源） ===== -->
+<div class="hd" id="hd">
+  <div class="tabs">
+    <button class="tab on" data-view="ai" id="tabAi"><span class="dot"></span>AI 工作台</button>
+    <button class="tab" data-view="edit" id="tabEdit"><span class="dot"></span>手动编辑</button>
+  </div>
+  <div class="right"><span class="status dirty" id="dirtyStatus"><span class="d"></span>有未保存的修改</span></div>
+</div>
+
+<!-- ===== 工具栏：左=统一选择器，右=操作（两视图按钮不同） ===== -->
+<div class="toolbar">
+  <button class="selbtn" id="selBtn" title="选择工作对象（正式模板 / 生成中草稿 / 已应用记录）">
+    <span class="s-ic" id="selIc">▦</span>
+    <span class="s-name" id="selName">my-company</span>
+    <span class="s-tag" id="selTag">使用中</span>
+    <span class="caret">▾</span>
+  </button>
+  <div class="sep"></div>
+  <!-- 手动编辑操作 -->
+  <span id="actsEdit" style="display:contents">
+    <button class="btn">⇪ 上传模板</button>
+    <button class="btn primary">保 存</button>
+    <button class="btn">删 除</button>
+  </span>
+  <!-- AI 工作台操作 -->
+  <span id="actsAi" style="display:none">
+    <button class="btn" id="btnNew">✦ 新建模板</button>
+    <button class="btn" id="btnRollback" disabled>⟲ 回滚最近</button>
+    <button class="btn success" id="btnApply" style="display:none">✓ 应用模板</button>
+    <button class="btn" id="btnEditApplied" style="display:none">✎ 编辑此模板</button>
+  </span>
+  <span class="hint" id="prevHint"><span class="d" style="width:7px;height:7px;border-radius:50%;background:var(--el);display:inline-block"></span>预览指向：正式模板目录</span>
+</div>
+
+<!-- ===== 视图 1：手动编辑（简化：树 | 代码 | 预览） ===== -->
+<div class="view on" id="viewEdit" style="flex-direction:row">
+  <div class="tree">
+    <div class="t-hd"><span>模板文件树</span><span class="grow"></span><button class="rf" title="刷新">⟳</button></div>
+    <div class="search">🔍 输入关键字过滤文件</div>
+    <div class="t-bd" id="treeEdit">
+      <div class="node grp"><span class="ico">▾</span>my-company</div>
+      <div class="node"><span class="ico">📄</span>index.html</div>
+      <div class="node"><span class="ico">📄</span>about.html</div>
+      <div class="node"><span class="ico">📄</span>article.html</div>
+      <div class="node grp"><span class="ico">▸</span>static</div>
+    </div>
+  </div>
+  <div class="mid">
+    <div class="editor-tab">index.html <span class="mark">● 未保存</span></div>
+    <div class="code"><div class="ln"><span class="no">1</span><span class="tk-c">&lt;!-- 企业官网首页 --&gt;</span></div><div class="ln"><span class="no">2</span><span class="tk-t">&lt;div</span> <span class="tk-a">class</span>=<span class="tk-s">"hero"</span><span class="tk-t">&gt;</span></div><div class="ln"><span class="no">3</span>&nbsp;&nbsp;<span class="tk-t">&lt;h1&gt;</span>数字化转型专家<span class="tk-t">&lt;/h1&gt;</span></div><div class="ln"><span class="no">4</span>&nbsp;&nbsp;<span class="tk-t">&lt;p&gt;</span>一站式企业建站解决方案<span class="tk-t">&lt;/p&gt;</span></div><div class="ln"><span class="no">5</span><span class="tk-t">&lt;/div&gt;</span></div></div>
+  </div>
+  <div class="prev">
+    <div class="p-hd"><span style="font-weight:700;font-size:13px">实时预览</span><span class="grow"></span>
+      <select class="page"><option>index.html</option><option>about.html</option></select>
+      <button class="icon" title="刷新">⟳</button><button class="icon" title="新窗口">⤢</button>
+      <span class="vp"><span class="on">桌面</span><span>平板</span><span>手机</span></span>
+    </div>
+    <div class="stage"><div class="mock" id="mockEdit"><div class="m-nav">My Company <i>首页  关于  服务  联系</i></div><div class="m-hero"><div class="h1">数字化转型专家</div><div class="h2">一站式企业建站解决方案</div></div><div class="m-rows"><div class="m-card"></div><div class="m-card"></div><div class="m-card"></div></div></div></div>
+  </div>
+</div>
+
+<!-- ===== 视图 2：AI 工作台（树 | 对话 | 预览；对话含状态 pill） ===== -->
+<div class="view" id="viewAi" style="flex-direction:row">
+  <div class="tree" id="treeAi">
+    <div class="t-hd"><span id="treeTitle">模板文件树</span><span class="grow"></span><button class="rf" title="刷新">⟳</button></div>
+    <div class="search">🔍 输入关键字过滤文件</div>
+    <div class="t-bd" id="treeAiBody">
+      <div class="node grp"><span class="ico">▾</span>my-company</div>
+      <div class="node"><span class="ico">📄</span>index.html</div>
+      <div class="node"><span class="ico">📄</span>about.html</div>
+      <div class="node"><span class="ico">📄</span>article.html</div>
+      <div class="node grp"><span class="ico">▸</span>static</div>
+    </div>
+  </div>
+  <div class="chat">
+    <div class="chat-hd">
+      <span class="mode-pill adjust" id="modePill">调整模板</span>
+      <select class="sess-select" id="sessSelect" title="仅当前作用模板的调整会话；切换生成会话请走顶栏选择器">
+        <option>调整会话 · 09-18 14:22</option>
+        <option>调整会话 · 09-16 10:05</option>
+      </select>
+      <span class="grow"></span>
+      <button class="new-btn">＋ 新建会话</button>
+    </div>
+    <div class="msgs" id="msgs">
+      <div class="msg user"><div class="m-role">我</div><div class="m-bubble">把首页 hero 区的标题改成"数字化转型专家"，副标题加一行建站方案描述</div></div>
+      <div class="msg ai"><div class="m-role">AI</div><div class="m-bubble">已更新 <b>index.html</b> 的 hero 区：主标题替换、新增副标题，预览已同步刷新。</div></div>
+    </div>
+    <div class="chat-in">
+      <div class="in-box">输入调整要求，例如：把导航栏改成毛玻璃效果…</div>
+      <div class="in-ft"><button class="btn sm">🖼 换图</button><button class="btn sm">⬚ 选区块</button><button class="btn primary sm send">发 送</button></div>
+    </div>
+  </div>
+  <div class="prev">
+    <div class="p-hd"><span style="font-weight:700;font-size:13px">实时预览</span><span class="grow"></span>
+      <select class="page"><option>index.html</option><option>about.html</option></select>
+      <button class="icon" title="刷新">⟳</button><button class="icon" title="新窗口">⤢</button>
+      <span class="vp"><span class="on">桌面</span><span>平板</span><span>手机</span></span>
+    </div>
+    <div class="stage"><div class="mock" id="mockAi"><div class="m-nav">My Company <i>首页  关于  服务  联系</i></div><div class="m-hero"><div class="h1">数字化转型专家</div><div class="h2">一站式企业建站解决方案</div></div><div class="m-rows"><div class="m-card"></div><div class="m-card"></div><div class="m-card"></div></div></div></div>
+  </div>
+</div>
+
+
+<!-- ===== 统一工作对象对话框 ===== -->
+<div class="mask" id="mask">
+  <div class="dlg">
+    <div class="dlg-hd">
+      <span class="t">选择工作对象</span><span class="grow"></span>
+      <button class="btn primary sm" id="dlgNew">✦ 新建模板</button>
+      <button class="x" id="dlgClose">✕</button>
+    </div>
+    <div class="dlg-search"><span class="si">🔍</span><input id="dlgQ" placeholder="搜索模板 / 生成记录名称、需求描述"></div>
+    <div class="dlg-tabs" id="dlgTabs">
+      <button class="dlg-tab on" data-tab="tpl">正式模板 <span class="cnt" id="cntTpl">0</span></button>
+      <button class="dlg-tab" data-tab="pend">未应用 <span class="cnt" id="cntPend">0</span></button>
+      <button class="dlg-tab" data-tab="app">已应用 <span class="cnt" id="cntApp">0</span></button>
+    </div>
+    <div class="tab-hint" id="tabHint">调整正式模板从这里进入；已应用模板已转入正式模板目录，「已应用」页签仅作记录回看</div>
+    <div class="dlg-bd" id="dlgBd"><!-- JS 渲染当前 tab --></div>
+    <div class="dlg-ft">
+      <span>点击行即进入：正式模板 → 编辑/调整 · 未应用草稿 → 会话续聊 · 已应用记录 → 只读回看</span>
+      <span class="note">合并了旧版"作用模板下拉"+"历史记录按钮"两个入口<br>生成中/失败为会话期状态，刷新后按后端状态展示</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== 数据模型 ====================
+// 正式模板（template 表）
+const TPLS = [
+  {id:'tpl1', name:'my-company', active:true, pages:['index.html','about.html','article.html']},
+  {id:'tpl2', name:'blog-template', active:false, pages:['index.html','post.html']},
+  {id:'tpl3', name:'old-site-renewal', active:false, pages:['index.html','about.html','article.html']}  // s4 应用后落库的正式模板（与生成记录同名）
+];
+// AI 会话（ai_template_session 表）：templateId 有值=调整会话，无值=生成会话
+const SESSIONS = [
+  {sid:'s1', kind:'adjust', templateId:'tpl1', title:'调整会话', created:'09-18 14:22', status:'active', req:'hero 区标题/副标题调整'},
+  {sid:'s2', kind:'generate', templateId:null, templateName:'promo-page', created:'09-18 16:40', status:'active', run:'run', req:'促销活动落地页，含倒计时与优惠模块'},
+  {sid:'s3', kind:'generate', templateId:null, templateName:'enterprise-v2', created:'09-17 09:12', status:'active', run:'pend', req:'企业站暗色主题改版'},
+  {sid:'s4', kind:'generate', templateId:null, templateName:'old-site-renewal', created:'09-15 20:03', status:'applied', req:'旧站组件化样式升级（保留 JS 锚点）', appliedTpl:'tpl3'} // 应用后生成的正式模板（编辑此模板 → 加载它）
+];
+// 会话工作目录（生成会话应用前）
+const SES_FILES = {
+  's2': ['index.html','promo.js','style.css'],
+  's3': ['index.html','about.html','static/css/main.css'],
+  's4': ['index.html','about.html','article.html']
+};
+
+let cur = {type:'tpl', id:'tpl1'};   // 当前工作对象：{type:'tpl'|'gen', id}
+let curView = 'ai';
+let currentSession = null;
+let dlgTab = 'tpl';                  // 对话框当前页签：tpl / pend / app
+
+// ==================== 工具 ====================
+const $ = id => document.getElementById(id);
+const tpl = id => TPLS.find(t=>t.id===id);
+const ses = id => SESSIONS.find(s=>s.sid===id);
+
+function badge(s){
+  if(s.status==='applied') return '<span class="bdg applied"><span class="d"></span>已应用</span>';
+  if(s.run==='run') return '<span class="bdg run"><span class="d"></span>生成中</span>';
+  if(s.run==='fail') return '<span class="bdg failed"><span class="d"></span>失败</span>';
+  return '<span class="bdg pend"><span class="d"></span>进行中</span>';
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+// ==================== 对话框渲染（tab 模式：每次只渲染当前页签那组） ====================
+const TAB_META = {
+  tpl:  {hint:'选择正式模板进入调整/编辑；「未应用」页签的草稿应用后会出现在这里'},
+  pend: {hint:'生成中的草稿：可继续打磨、重新生成或应用；应用后转入正式模板目录'},
+  app:  {hint:'已应用记录仅作回看：模板已转为正式模板目录，后续调整请在「正式模板」页签进入；此处保留生成过程可追溯'}
+};
+function dlgCounts(){
+  return {
+    tpl: TPLS.length,
+    pend: SESSIONS.filter(s=>s.kind==='generate' && s.status!=='applied').length,
+    app:  SESSIONS.filter(s=>s.kind==='generate' && s.status==='applied').length
+  };
+}
+function renderDlg(){
+  const q = $('dlgQ').value.trim().toLowerCase();
+  const match = (name, req) => !q || name.toLowerCase().includes(q) || (req||'').toLowerCase().includes(q);
+  const on = x => (cur.type===x.type && cur.id===x.id) ? ' on' : '';
+  const c = dlgCounts();
+  $('cntTpl').textContent = c.tpl; $('cntPend').textContent = c.pend; $('cntApp').textContent = c.app;
+  $('tabHint').textContent = TAB_META[dlgTab].hint;
+  [...$('dlgTabs').children].forEach(b => b.classList.toggle('on', b.dataset.tab===dlgTab));
+
+  let h = '';
+  const empty = txt => '<div style="padding:34px 10px;text-align:center;color:var(--t4);font-size:13px">'+txt+'</div>';
+
+  if(dlgTab==='tpl'){
+    const list = TPLS.filter(t=>match(t.name,''));
+    if(!list.length) h = empty('没有匹配的正式模板');
+    list.forEach(t=>{
+      h += '<div class="row'+on({type:'tpl',id:t.id})+'" data-act="open" data-type="tpl" data-id="'+t.id+'">'
+        + '<span class="r-ic">▦</span>'
+        + '<span class="r-main"><span class="r-name">'+esc(t.name)+(t.active?'<span class="bdg active">使用中</span>':'')+'</span>'
+        + '<span class="r-sub">'+t.pages.length+' 个页面 · 最近修改 09-18</span></span>'
+        + '<span class="r-acts"><button class="btn sm" data-act="edit">手动编辑</button><button class="btn sm primary" data-act="adjust">AI 调整</button></span></div>';
+    });
+  } else if(dlgTab==='pend'){
+    const list = SESSIONS.filter(s=>s.kind==='generate' && s.status!=='applied' && match(s.templateName, s.req));
+    if(!list.length) h = empty('没有未应用的草稿');
+    list.forEach(s=>{
+      h += '<div class="row draft'+on({type:'gen',id:s.sid})+'" data-act="open" data-type="gen" data-id="'+s.sid+'">'
+        + '<span class="r-ic">✦</span>'
+        + '<span class="r-main"><span class="r-name">'+esc(s.templateName)+badge(s)+'</span>'
+        + '<span class="r-sub" title="'+esc(s.req)+'">'+esc(s.req)+' · '+s.created+'</span></span>'
+        + '<span class="r-acts"><button class="btn sm" data-act="open">打开续聊</button><button class="btn sm success" data-act="apply">应用</button></span></div>';
+    });
+  } else {
+    const list = SESSIONS.filter(s=>s.kind==='generate' && s.status==='applied' && match(s.templateName, s.req));
+    if(!list.length) h = empty('没有已应用的记录');
+    list.forEach(s=>{
+      h += '<div class="row applied'+on({type:'gen',id:s.sid})+'" data-act="open" data-type="gen" data-id="'+s.sid+'">'
+        + '<span class="r-ic">✓</span>'
+        + '<span class="r-main"><span class="r-name">'+esc(s.templateName)+badge(s)+'</span>'
+        + '<span class="r-sub" title="'+esc(s.req)+'">'+esc(s.req)+' · '+s.created+' · 已转为正式模板</span></span>'
+        + '<span class="r-acts"><button class="btn sm" data-act="open">回看会话</button><button class="btn sm" data-act="gotoTpl">去正式模板</button></span></div>';
+    });
+  }
+  $('dlgBd').innerHTML = h;
+}
+/** 默认页签跟随当前工作对象：在草稿会话里→未应用；在已应用回看→已应用；在正式模板→正式模板 */
+function defaultTab(){
+  if(cur.type==='gen'){ const s=ses(cur.id); return s.status==='applied' ? 'app' : 'pend'; }
+  return 'tpl';
+}
+function openDlg(){ dlgTab = defaultTab(); renderDlg(); $('mask').classList.add('on'); $('dlgQ').value=''; setTimeout(()=>$('dlgQ').focus(),50) }
+function closeDlg(){ $('mask').classList.remove('on') }
+$('dlgTabs').onclick = e => { const b = e.target.closest('.dlg-tab'); if(!b) return; dlgTab = b.dataset.tab; renderDlg(); };
+
+// ==================== 核心：切换工作对象（顶栏/树/预览/对话一起变 → 不变式） ====================
+function switchTo(obj, view){
+  cur = obj;
+  if(obj.type==='gen'){
+    // 生成会话只能在 AI 工作台打开（手动编辑没有会话工作目录语义）
+    curView = 'ai';
+    currentSession = ses(obj.id);
+  } else {
+    currentSession = SESSIONS.find(s=>s.kind==='adjust' && s.templateId===obj.id) || null;
+    if(view) curView = view;
+  }
+  applyAll();
+}
+function applyAll(){
+  const isGen = cur.type==='gen', s = currentSession, t = cur.type==='tpl' ? tpl(cur.id) : null;
+
+  // —— 1) 顶栏选择器（永远=当前对象） ——
+  const btn = $('selBtn');
+  btn.className = 'selbtn' + (isGen ? (s.status==='applied' ? ' applied' : ' draft') : '');
+  $('selIc').textContent = isGen ? (s.status==='applied' ? '✓' : '✦') : '▦';
+  $('selName').textContent = isGen ? s.templateName : t.name;
+  $('selTag').textContent = isGen ? (s.status==='applied' ? '已应用 · 只读回看' : (s.run==='run' ? '生成中 · 会话工作目录' : '草稿 · 会话工作目录')) : (t.active ? '使用中' : '正式模板');
+
+  // —— 2) 头部（原"模板名 chip"已移除，选择器按钮是唯一对象锚点；此处仅保留保存状态显隐） ——
+  $('dirtyStatus').style.display = (curView==='edit' && cur.type==='tpl') ? '' : 'none';
+
+  // —— 3) 视图 tab ——
+  $('tabAi').classList.toggle('on', curView==='ai');
+  $('tabEdit').classList.toggle('on', curView==='edit');
+  $('viewAi').classList.toggle('on', curView==='ai');
+  $('viewEdit').classList.toggle('on', curView==='edit');
+  $('actsAi').style.display = curView==='ai' ? '' : 'none';
+  $('actsEdit').style.display = curView==='edit' ? '' : 'none';
+
+  // —— 4) 文件树 ——
+  const treeAi = $('treeAi'), tb = $('treeAiBody'), tt = $('treeTitle');
+  if(isGen){
+    treeAi.classList.add('ses');
+    tt.textContent = '会话工作目录 · ' + s.templateName;
+    tb.innerHTML = (SES_FILES[s.sid]||[]).map(f=>
+      '<div class="node"><span class="ico">'+(f.endsWith('/')||f.includes('/') ? '📁':'📄')+'</span>'+esc(f)+'</div>').join('')
+      || '<div class="node" style="color:var(--t4)">（空）</div>';
+  } else {
+    treeAi.classList.remove('ses');
+    tt.textContent = '模板文件树';
+    tb.innerHTML = '<div class="node grp"><span class="ico">▾</span>'+esc(t.name)+'</div>'
+      + t.pages.map(f=>'<div class="node"><span class="ico">📄</span>'+esc(f)+'</div>').join('')
+      + '<div class="node grp"><span class="ico">▸</span>static</div>';
+  }
+  // 手动视图树同步
+  $('treeEdit').innerHTML = '<div class="node grp"><span class="ico">▾</span>'+esc(t?t.name:'')+'</div>'
+    + (t?t.pages.map(f=>'<div class="node"><span class="ico">📄</span>'+esc(f)+'</div>').join(''):'')
+    + '<div class="node grp"><span class="ico">▸</span>static</div>';
+
+  // —— 5) 对话头（pill + 会话下拉 + 消息区） ——
+  const pill = $('modePill'), ss = $('sessSelect');
+  if(isGen){
+    ss.style.display = 'none';                       // 会话视图：切换生成会话走顶栏
+    if(s.status==='applied'){ pill.className='mode-pill applied'; pill.textContent='已应用 · 只读'; }
+    else if(s.run==='run'){ pill.className='mode-pill gen-run'; pill.textContent='⏳ 生成中'; }
+    else { pill.className='mode-pill gen-pend'; pill.textContent='生成会话 · 进行中'; }
+    $('msgs').innerHTML = isGenMsgs(s);
+  } else {
+    ss.style.display = '';
+    pill.className='mode-pill adjust'; pill.textContent='调整模板';
+    $('msgs').innerHTML = '<div class="msg user"><div class="m-role">我</div><div class="m-bubble">把首页 hero 区的标题改成"数字化转型专家"，副标题加一行建站方案描述</div></div>'
+      + '<div class="msg ai"><div class="m-role">AI</div><div class="m-bubble">已更新 <b>index.html</b> 的 hero 区：主标题替换、新增副标题，预览已同步刷新。</div></div>';
+  }
+
+  // —— 6) 工具条按钮 ——
+  $('btnRollback').disabled = !(cur.type==='tpl' && currentSession);
+  $('btnApply').style.display = (isGen && s.status!=='applied' && curView==='ai') ? '' : 'none';
+  $('btnEditApplied').style.display = (isGen && s.status==='applied' && curView==='ai') ? '' : 'none';
+
+  // —— 7) 预览 ——
+  const ph = $('prevHint');
+  const mock = $('mock'+(curView==='ai'?'Ai':'Edit'));
+  mock.className = 'mock' + (isGen ? (s.status==='applied' ? ' applied' : ' draft') : '');
+  if(isGen){
+    ph.innerHTML = '<span class="d" style="width:7px;height:7px;border-radius:50%;background:var(--ai);display:inline-block"></span>预览指向：会话工作目录 · '+esc(s.templateName)+(s.status==='applied' ? '（已应用回看）':'');
+  } else {
+    ph.innerHTML = '<span class="d" style="width:7px;height:7px;border-radius:50%;background:var(--el);display:inline-block"></span>预览指向：正式模板目录 · '+esc(t.name);
+  }
+}
+function isGenMsgs(s){
+  if(s.run==='run') return '<div class="msg ai"><div class="m-role">AI</div><div class="m-bubble">正在生成 <b>'+esc(s.templateName)+'</b>，已规划 5 个文件…</div>'
+    + '<div class="progress"><div class="p-hd">文件生成进度（2/5）</div>'
+    + '<div class="p-it done"><span class="st">✓</span>index.html</div>'
+    + '<div class="p-it done"><span class="st">✓</span>style.css</div>'
+    + '<div class="p-it cur"><span class="st">◌</span>promo.js</div>'
+    + '<div class="p-it"><span class="st">…</span>about.html</div>'
+    + '<div class="p-it"><span class="st">…</span>static/img/hero.png</div></div></div>';
+  if(s.status==='applied') return '<div class="msg ai"><div class="m-role">AI</div><div class="m-bubble">设计稿已转化为正式模板 <b>'+esc(s.templateName)+'</b>，会话转为只读回看。可用顶部「编辑此模板」继续修改。</div></div>';
+  return '<div class="msg user"><div class="m-role">我</div><div class="m-bubble">'+esc(s.req)+'</div></div>'
+    + '<div class="msg ai"><div class="m-role">AI</div><div class="m-bubble">已按需求生成初版，可在右侧预览，或直接输入修改意见继续打磨。</div></div>';
+}
+
+// ==================== 事件 ====================
+$('selBtn').onclick = openDlg;
+$('dlgClose').onclick = closeDlg;
+$('mask').onclick = e => { if(e.target===$('mask')) closeDlg() };
+$('dlgQ').oninput = renderDlg;
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeDlg() });
+$('dlgBd').onclick = e => {
+  const row = e.target.closest('.row'); if(!row) return;
+  const actBtn = e.target.closest('button[data-act]');
+  const act = actBtn ? actBtn.dataset.act : row.dataset.act;
+  const obj = {type: row.dataset.type, id: row.dataset.id};
+  if(act==='edit'){ switchTo(obj,'edit'); closeDlg(); }
+  else if(act==='adjust'){ switchTo(obj,'ai'); closeDlg(); }
+  else if(act==='apply'){ switchTo(obj,'ai'); closeDlg(); doApply(obj.id); }
+  else if(act==='editapplied'){ const s=ses(obj.id); switchTo(s.appliedTpl ? {type:'tpl',id:s.appliedTpl} : obj,'edit'); closeDlg(); flash('已加载应用后的正式模板「'+s.templateName+'」到手动编辑（原型演示）'); }
+  else if(act==='gotoTpl'){ const s=ses(obj.id); if(s.appliedTpl){ switchTo({type:'tpl',id:s.appliedTpl},'ai'); closeDlg(); flash('已切到正式模板「'+s.templateName+'」的 AI 调整（原型演示：后续修改在这里进行）'); } }
+  else { switchTo(obj,'ai'); closeDlg(); }
+};
+function doApply(sid){
+  const s = ses(sid);
+  s.status = 'applied'; s.run = null;
+  const newTpl = {id:'tpl-new-'+s.sid, name:s.templateName, active:false, pages:(SES_FILES[s.sid]||[]).filter(f=>f.endsWith('.html'))};
+  TPLS.push(newTpl); s.appliedTpl = newTpl.id;
+  flash('已应用模板「'+s.templateName+'」→ 记录移入"已应用"组，正式模板列表新增同名模板（原型演示：实际调后端应用接口）');
+}
+$('dlgNew').onclick = () => { closeDlg(); flash('打开"新建模板"表单（原型省略）：提交后自动进入该会话并出现于"未应用"组'); };
+$('btnNew').onclick = () => flash('打开"新建模板"表单（原型省略）');
+$('btnApply').onclick = () => { if(cur.type==='gen'){ doApply(cur.id); applyAll(); } };
+$('btnEditApplied').onclick = () => { const s=currentSession; switchTo(s && s.appliedTpl ? {type:'tpl',id:s.appliedTpl} : cur,'edit'); };
+$('btnRollback').onclick = () => flash('回滚最近一次 AI 修改（原型演示）');
+$('tabAi').onclick = () => { if(cur.type==='tpl') switchTo(cur,'ai'); else flash('草稿会话只能在 AI 工作台打开'); };
+$('tabEdit').onclick = () => { if(cur.type==='tpl') switchTo(cur,'edit'); else flash('草稿会话只能在 AI 工作台打开（顶栏选择器可切回正式模板）'); };
+
+let flashTimer;
+function flash(msg){
+  let f = document.querySelector('.flash-tip');
+  if(!f){ f = document.createElement('div'); f.className='flash-tip';
+    f.style.cssText='position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#1f2430;color:#fff;font-size:12.5px;padding:9px 16px;border-radius:8px;z-index:99;max-width:70vw';
+    document.body.appendChild(f); }
+  f.textContent = msg; f.style.display='block';
+  clearTimeout(flashTimer); flashTimer = setTimeout(()=>f.style.display='none', 2600);
+}
+
+// 初始：AI 工作台 + 正式模板 my-company
+applyAll();
+</script>
+</body>
+</html>
+

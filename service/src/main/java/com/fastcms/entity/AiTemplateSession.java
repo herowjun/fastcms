@@ -85,6 +85,14 @@ public class AiTemplateSession implements Serializable {
     private String templateId;
 
     /**
+     * 应用后生成的正式模板ID（生成型会话应用成功时回写）
+     *
+     * <p>持久化的目的：前端"去正式模板/编辑此模板"据此直达，免按目录名匹配；
+     * NULL 表示存量数据（应用时此字段尚未上线）或未应用，前端回退按 templateName 匹配。</p>
+     */
+    private String appliedTemplateId;
+
+    /**
      * 分批流水线的规划文件清单（JSON 数组字符串，如 ["index.html","static/css/base.css"]）
      *
      * <p>持久化的目的：刷新页面后前端可重算进度卡；生成中断后下一次对话
@@ -146,6 +154,9 @@ public class AiTemplateSession implements Serializable {
 
     public String getTemplateId() { return templateId; }
     public void setTemplateId(String templateId) { this.templateId = templateId; }
+
+    public String getAppliedTemplateId() { return appliedTemplateId; }
+    public void setAppliedTemplateId(String appliedTemplateId) { this.appliedTemplateId = appliedTemplateId; }
 
     public String getPlanFiles() { return planFiles; }
     public void setPlanFiles(String planFiles) { this.planFiles = planFiles; }

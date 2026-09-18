@@ -3827,6 +3827,21 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             log.warn("应用后按目录名匹配模板 ID 失败（不影响应用结果）: templateName={}", session.getTemplateName(), e);
         }
 
+        // 回写应用后正式模板 ID（指针）：前端"去正式模板/编辑此模板"据此直达，免按目录名匹配。
+        // 与上方 updateStatus 为两次独立 update（本方法含目录复制/注册刷新等文件 IO，无事务包裹）：
+        // 回写失败仅退化为前端按目录名匹配，不影响应用结果
+        if (templateId != null) {
+            try {
+                AiTemplateSession upd = new AiTemplateSession();
+                upd.setId(session.getId());
+                upd.setAppliedTemplateId(templateId);
+                sessionService.updateById(upd);
+            } catch (Exception e) {
+                log.warn("回写 appliedTemplateId 失败（不影响应用结果，前端回退按目录名匹配）: sessionId={}, templateId={}",
+                        sessionId, templateId, e);
+            }
+        }
+
         // 站点数据初始化：按 _pagespec.json 信息架构补建分类/单页/菜单（只补缺不覆盖，失败不影响模板应用）
         String seedMsg = seedSiteData(workDir, templateId);
 

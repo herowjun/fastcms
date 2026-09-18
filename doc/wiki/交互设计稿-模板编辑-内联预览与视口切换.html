@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模板编辑 · 内联预览 + 视口切换（可交互设计稿）</title>
+<style>
+:root{
+  --bg:#f0f2f5;--card:#fff;--border:#e4e7ed;--border-l:#ebeef5;
+  --text:#303133;--muted:#909399;--primary:#409eff;--primary-l:#ecf5ff;
+  --warn:#e6a23c;--warn-bg:#fdf6ec;--danger:#f56c6c;--fill:#f5f7fa;--ok:#67c23a;
+  --radius:6px;--mono:"Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:"Helvetica Neue",Helvetica,"PingFang SC","Microsoft YaHei",Arial,sans-serif;
+  font-size:14px;color:var(--text);background:var(--bg);display:flex;flex-direction:column}
+button,select{font-family:inherit;font-size:13px}
+/* 顶部说明条 */
+.info-strip{display:flex;align-items:center;gap:8px;background:#1f2d3d;color:#cfd8e3;font-size:12px;padding:7px 14px;flex:none}
+.info-strip b{color:#fff}
+.info-strip .tag{background:rgba(64,158,255,.15);border:1px solid rgba(64,158,255,.4);color:#79bbff;border-radius:4px;padding:1px 7px;font-weight:600}
+.info-strip .close{margin-left:auto;cursor:pointer;color:#8aa0b8;padding:0 4px}
+.info-strip .close:hover{color:#fff}
+/* 主卡片 */
+.card{flex:1;margin:12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+/* 工具栏 */
+.toolbar{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--border-l);flex-wrap:wrap;flex:none}
+.tselect select{height:32px;padding:0 28px 0 10px;border:1px solid var(--border);border-radius:4px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23909399' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 9px center;appearance:none;min-width:170px;color:var(--text)}
+.btn{height:32px;padding:0 13px;border:1px solid var(--border);border-radius:4px;background:#fff;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}
+.btn:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-l)}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn-primary:hover{background:#66b1ff;border-color:#66b1ff;color:#fff}
+.btn-warn{background:var(--warn);border-color:var(--warn);color:#fff}
+.btn-warn:hover{background:#ebb563;border-color:#ebb563;color:#fff}
+.btn-warn-plain{background:#fff;border-color:var(--warn);color:var(--warn)}
+.btn-warn-plain:hover{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
+.btn-danger{background:#fff;border-color:var(--danger);color:var(--danger)}
+.btn-danger:hover{background:#fef0f0;border-color:var(--danger);color:var(--danger)}
+.btn[disabled]{opacity:.5;cursor:not-allowed;pointer-events:none}
+.icon{width:15px;text-align:center;font-style:normal}
+.vdiv{width:1px;height:20px;background:var(--border);flex:none}
+.dirty-tip{color:var(--warn);font-size:12px}
+/* 主体三列 */
+.body{flex:1;display:grid;grid-template-columns:250px minmax(340px,1fr) minmax(380px,1.15fr);min-height:0}
+.col{min-width:0;display:flex;flex-direction:column;min-height:0}
+.col+.col{border-left:1px solid var(--border-l)}
+.col-head{padding:8px 12px;font-size:13px;font-weight:600;color:#606266;border-bottom:1px solid var(--border-l);display:flex;align-items:center;gap:8px;flex:none;background:#fafafa}
+.col-head .spacer{flex:1}
+.col-head .path{font-weight:400;color:var(--muted);font-family:var(--mono);font-size:12px}
+.ibtn{border:0;background:none;color:var(--muted);cursor:pointer;width:26px;height:26px;border-radius:4px;font-size:15px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+.ibtn:hover{background:var(--fill);color:var(--primary)}
+/* 文件树 */
+.tree{flex:1;overflow:auto;padding:6px}
+.tnode{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:13px;user-select:none;white-space:nowrap}
+.tnode:hover{background:var(--fill)}
+.tnode.cur{background:var(--primary-l);color:var(--primary);font-weight:600}
+.tnode .ico{width:16px;text-align:center;flex:none;font-size:12px}
+.tnode.l1{padding-left:26px}
+.tnode.l2{padding-left:44px}
+.tnode.dir{color:var(--muted);font-weight:600;cursor:default}
+.tnode.dir:hover{background:none}
+.tnode .arrow{font-size:10px;color:var(--muted);width:10px}
+</style>
+<style>
+/* 树过滤框 */
+.tree-filter{padding:6px 10px;flex:none}
+.tree-filter .inp{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:4px;padding:0 8px;height:30px;color:var(--muted)}
+.tree-filter .inp input{border:0;outline:0;flex:1;font-size:12px;background:none;color:var(--text)}
+/* 代码编辑器（仿 CodeMirror oneDark） */
+.editor-wrap{flex:1;display:flex;min-height:0;background:#282c34}
+.editor{flex:1;display:flex;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.6;padding:0 0 24px 0;min-height:0}
+.gutter{flex:none;width:46px;padding:10px 8px 0 0;text-align:right;color:#636d83;background:#282c34;border-right:1px solid #3a3f4b;user-select:none}
+.gutter div{height:20.8px}
+.code{flex:1;padding:10px 14px 0 10px;white-space:pre;color:#abb2bf;tab-size:2}
+.code .c{color:#5c6370}
+.code .t{color:#e06c75}
+.code .a{color:#d19a66}
+.code .s{color:#98c379}
+.code .n{color:#d19a66}
+.code .tag{color:#e06c75}
+/* 预览列 */
+.preview-toolbar{display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border-l);flex:none;background:#fff}
+.preview-toolbar select{height:30px;padding:0 26px 0 9px;border:1px solid var(--border);border-radius:4px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23909399' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 8px center;appearance:none;min-width:150px;color:var(--text)}
+.preview-toolbar .vs{flex:1;min-width:0}
+.preview-toolbar .vp{flex:none}
+/* 视口舞台（#2 核心：非 100% 时 iframe 居中 + 灰底衬托） */
+.viewport-stage{flex:1;min-height:0;overflow:auto;background:#e9ecef;display:flex;justify-content:center;align-items:flex-start;transition:background .2s}
+.viewport-stage.desktop{background:#fff;justify-content:stretch}
+.stage-frame{background:#fff;height:100%;box-shadow:0 0 0 1px var(--border),0 4px 18px rgba(0,0,0,.1);transition:width .25s ease;overflow:hidden}
+.stage-frame.desktop{box-shadow:none}
+/* 预览状态徽标 */
+.preview-badge{margin-left:8px;font-size:11px;color:var(--muted);font-weight:400;font-family:var(--mono)}
+.preview-badge.saved{color:var(--ok)}
+.preview-badge.dirty{color:var(--warn)}
+/* toast */
+.toast{position:fixed;top:54px;left:50%;transform:translateX(-50%) translateY(-12px);background:#fff;border:1px solid var(--border);
+  border-left:3px solid var(--ok);box-shadow:0 6px 20px rgba(0,0,0,.12);border-radius:6px;padding:10px 16px;font-size:13px;
+  opacity:0;pointer-events:none;transition:all .25s;z-index:99;display:flex;align-items:center;gap:8px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast .t-ico{color:var(--ok)}
+/* 视口标签浮层 */
+.vp-float{position:fixed;bottom:18px;right:18px;z-index:50;background:#1f2d3d;color:#fff;border-radius:8px;padding:10px 14px;font-size:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.28);display:flex;align-items:center;gap:10px}
+.vp-float .cur{font-weight:700;font-family:var(--mono);color:#79bbff}
+.vp-float .hint{color:#8aa0b8}
+@media (max-width:1180px){.body{grid-template-columns:210px 1fr 1fr}}
+</style>
+<style>
+/* ===== 嵌入演示站点（真实响应式：由 .is-desktop/.is-tablet/.is-mobile 类驱动，不靠 media query，
+   因为 frame 是定宽容器而非浏览器视口） ===== */
+.demo{font-family:"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;color:#1f2430;
+  background:#fff;min-height:100%;display:flex;flex-direction:column}
+.demo-header{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid #eef0f3}
+.demo-brand{font-weight:800;font-size:19px;letter-spacing:-.3px;color:#1f2430}
+.demo-brand .dot{color:#409eff}
+.demo-nav{display:flex;gap:24px;margin-left:auto}
+.demo-nav a{text-decoration:none;color:#5b6472;font-size:14px;padding:4px 2px;position:relative;white-space:nowrap}
+.demo-nav a.active{color:#1f2430;font-weight:600}
+.demo-nav a.active::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:2px;background:#409eff;border-radius:2px}
+.hamburger{display:none;margin-left:auto;width:40px;height:40px;border:1px solid #eef0f3;border-radius:8px;background:#fff;cursor:pointer;flex-direction:column;justify-content:center;align-items:center;gap:4px}
+.hamburger span{display:block;width:18px;height:2px;background:#1f2430;border-radius:2px;transition:.2s}
+.demo-hero{padding:48px 32px;background:linear-gradient(135deg,#f5f9ff 0%,#fff 60%)}
+.demo-hero h1{font-size:38px;line-height:1.15;font-weight:800;letter-spacing:-.5px;margin-bottom:14px}
+.demo-hero p{font-size:16px;color:#5b6472;max-width:460px;margin-bottom:22px}
+.hero-btns{display:flex;gap:12px}
+.hb{padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:inline-block}
+.hb.primary{background:#409eff;color:#fff}
+.hb.ghost{background:#fff;color:#409eff;border:1px solid #409eff}
+.demo-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:28px 32px}
+.dc{border:1px solid #eef0f3;border-radius:12px;padding:18px;background:#fff}
+.dc-t{font-weight:700;font-size:15px;margin-bottom:6px}
+.dc-d{font-size:13px;color:#5b6472;line-height:1.5}
+.demo-foot{margin-top:auto;padding:16px 32px;font-size:12px;color:#9aa3b2;border-top:1px solid #eef0f3}
+/* 平板：3 卡 → 2 卡，hero 略收 */
+.demo.is-tablet .demo-cards{grid-template-columns:repeat(2,1fr)}
+.demo.is-tablet .demo-hero h1{font-size:32px}
+/* 手机：汉堡出现、导航折叠成抽屉、单列、hero 收缩 */
+.demo.is-mobile .demo-nav{display:none;position:absolute;top:63px;left:0;right:0;background:#fff;flex-direction:column;
+  gap:0;padding:6px 0;border-bottom:1px solid #eef0f3;box-shadow:0 12px 24px rgba(0,0,0,.1)}
+.demo.is-mobile .demo-nav.open{display:flex}
+.demo.is-mobile .demo-nav a{padding:12px 24px}
+.demo.is-mobile .demo-nav a.active::after{display:none}
+.demo.is-mobile .hamburger{display:flex}
+.demo.is-mobile .demo-hero{padding:32px 20px}
+.demo.is-mobile .demo-hero h1{font-size:26px}
+.demo.is-mobile .demo-hero p{font-size:14px}
+.demo.is-mobile .demo-cards{grid-template-columns:1fr;padding:20px}
+.demo.is-mobile .demo-foot{padding:14px 20px}
+/* 汉堡展开时三杠变 X */
+.demo.is-mobile .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg)}
+.demo.is-mobile .hamburger.open span:nth-child(2){opacity:0}
+.demo.is-mobile .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+</style>
+</head>
+<body>
+<!-- 顶部说明条：这是设计稿，可关闭 -->
+<div class="info-strip">
+  <span class="tag">可交互设计稿</span>
+  <b>方案 A：三列常驻（文件树｜代码｜内联预览）</b>
+  <span>＋ 视口切换（桌面/平板/手机）。</span>
+  <span>试一试：右侧下拉切到「手机 375px」看响应式折叠 + 汉堡菜单；点「保存」触发预览刷新。</span>
+  <span class="close" id="infoClose" title="关闭说明">✕</span>
+</div>
+
+<div class="card">
+  <!-- 工具栏（按方案：删掉独立「预览」按钮，新窗口并入预览列） -->
+  <div class="toolbar">
+    <div class="tselect">
+      <select id="tplSelect">
+        <option>my-company（使用中）</option>
+        <option>xjd2022</option>
+      </select>
+    </div>
+    <button class="btn btn-primary"><i class="icon">＋</i>上传模板文件</button>
+    <span class="vdiv"></span>
+    <button class="btn btn-warn-plain"><i class="icon">✦</i>AI 调整</button>
+    <button class="btn btn-warn"><i class="icon">✦</i>AI 新建模板</button>
+    <span class="vdiv"></span>
+    <button class="btn btn-primary" id="saveBtn"><i class="icon">✓</i>保 存</button>
+    <button class="btn btn-danger" id="delBtn"><i class="icon">🗑</i>删 除</button>
+    <span class="dirty-tip" id="dirtyTip" style="display:none">● 有未保存的修改</span>
+  </div>
+
+  <!-- 三列主体 -->
+  <div class="body">
+    <!-- 列 1：文件树 -->
+    <div class="col">
+      <div class="col-head">模板文件树
+        <span class="spacer"></span>
+        <button class="ibtn" id="refreshTree" title="刷新文件树">⟳</button>
+      </div>
+      <div class="tree-filter">
+        <div class="inp"><span>🔍</span><input id="treeFilter" placeholder="输入关键字过滤文件"></div>
+      </div>
+      <div class="tree" id="tree">
+        <div class="tnode dir"><span class="arrow">▾</span><span class="ico">📁</span>my-company</div>
+        <div class="tnode cur l1" data-file="index.html"><span class="ico">📄</span>index.html</div>
+        <div class="tnode l1" data-file="article.html"><span class="ico">📄</span>article.html</div>
+        <div class="tnode l1" data-file="about.html"><span class="ico">📄</span>about.html</div>
+        <div class="tnode dir l1"><span class="arrow">▸</span><span class="ico">📁</span>_partials</div>
+        <div class="tnode l1" data-file="_layout.html"><span class="ico">📄</span>_layout.html</div>
+        <div class="tnode l1" data-file="_pagespec.json"><span class="ico">🧾</span>_pagespec.json</div>
+        <div class="tnode dir l1"><span class="arrow">▸</span><span class="ico">📁</span>assets</div>
+        <div class="tnode l2" data-file="assets/css/style.css"><span class="ico">🎨</span>style.css</div>
+        <div class="tnode l2" data-file="assets/js/main.js"><span class="ico">⚙️</span>main.js</div>
+        <div class="tnode l2" data-file="assets/img/hero.png"><span class="ico">🖼️</span>hero.png</div>
+      </div>
+    </div>
+
+    <!-- 列 2：代码编辑器 -->
+    <div class="col">
+      <div class="col-head"><span class="path" id="curFile">index.html</span>
+        <span class="spacer"></span>
+        <span class="preview-badge dirty" id="editorBadge">● 未保存</span>
+      </div>
+      <div class="editor-wrap">
+        <div class="editor">
+          <div class="gutter" id="gutter"></div>
+          <div class="code" id="code"></div>
+        </div>
+      </div>
+    </div>
+    <!-- 列 3：内联预览（方案 A 新增列；数据源复用 useAiPreview） -->
+    <div class="col">
+      <div class="preview-toolbar">
+        <select id="pageSelect" title="选择预览页面">
+          <option value="index.html">index.html</option>
+          <option value="article.html">article.html</option>
+          <option value="about.html">about.html</option>
+        </select>
+        <select id="vpSelect" class="vp" title="视口切换（桌面/平板/手机）">
+          <option value="desktop">桌面 · 100%</option>
+          <option value="tablet">平板 · 768px</option>
+          <option value="mobile">手机 · 375px</option>
+        </select>
+        <button class="ibtn" id="refreshPreview" title="刷新预览">⟳</button>
+        <button class="ibtn" id="openNewWindow" title="新窗口打开">⤢</button>
+        <span class="preview-badge dirty" id="prevBadge">● 未保存</span>
+      </div>
+      <div class="viewport-stage desktop" id="stage">
+        <div class="stage-frame desktop" id="frame">
+          <!-- 嵌入的演示站点（真实响应式：断点折叠 + 汉堡菜单） -->
+          <div class="demo" id="demo">
+            <header class="demo-header">
+              <div class="demo-brand">MyCompany<span class="dot">.</span></div>
+              <button class="hamburger" id="hamburger" aria-label="菜单"><span></span><span></span><span></span></button>
+              <nav class="demo-nav" id="demoNav">
+                <a href="#" class="active">首页</a>
+                <a href="#">关于我们</a>
+                <a href="#">解决方案</a>
+                <a href="#">案例</a>
+                <a href="#">联系</a>
+              </nav>
+            </header>
+            <section class="demo-hero">
+              <h1>让每一次<br>落地都更轻盈</h1>
+              <p>面向企业的数字化内容与模板平台，AI 生成 · 多端自适应 · 一键发布。</p>
+              <div class="hero-btns">
+                <span class="hb primary">开始使用</span>
+                <span class="hb ghost">查看案例</span>
+              </div>
+            </section>
+            <section class="demo-cards">
+              <div class="dc"><div class="dc-t">响应式多端</div><div class="dc-d">桌面 / 平板 / 手机断点折叠，汉堡菜单自动出现。</div></div>
+              <div class="dc"><div class="dc-t">AI 生成模板</div><div class="dc-d">一句话生成可发布站点，内联预览即时所见即所得。</div></div>
+              <div class="dc"><div class="dc-t">一键发布</div><div class="dc-d">保存即生效，预览与发布共用同一套渲染管线。</div></div>
+            </section>
+            <footer class="demo-foot">© 2026 MyCompany · 演示数据（_preview_data.json）</footer>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- toast -->
+<div class="toast" id="toast"><span class="t-ico">✓</span><span id="toastMsg"></span></div>
+<!-- 视口浮层提示 -->
+<div class="vp-float" id="vpFloat">当前视口 <span class="cur" id="vpFloatVal">桌面 · 100%</span><span class="hint">仅预览，不影响实际发布</span></div>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ---- 代码编辑器内容（示例 index.html，带语法高亮 span）---- */
+  var FILES = {
+    "index.html": [
+      "<span class='c'>&lt;!-- 首页 · 由 AI 生成（mobileAdaptive=on） --&gt;</span>",
+      "<span class='tag'>&lt;!DOCTYPE</span> html<span class='tag'>&gt;</span>",
+      "<span class='tag'>&lt;html</span> <span class='a'>lang</span>=<span class='s'>'zh-CN'</span><span class='tag'>&gt;</span>",
+      "<span class='tag'>&lt;head&gt;</span>",
+      "  <span class='tag'>&lt;meta</span> <span class='a'>charset</span>=<span class='s'>'UTF-8'</span><span class='tag'>&gt;</span>",
+      "  <span class='tag'>&lt;meta</span> <span class='a'>name</span>=<span class='s'>'viewport'</span> <span class='a'>content</span>=<span class='s'>'width=device-width, initial-scale=1.0'</span><span class='tag'>&gt;</span>",
+      "  <span class='tag'>&lt;link</span> <span class='a'>rel</span>=<span class='s'>'stylesheet'</span> <span class='a'>href</span>=<span class='s'>''</span> ${ctx()}/assets/css/style.css<span class='tag'>&gt;</span>",
+      "  <span class='tag'>&lt;title&gt;</span>MyCompany · 首页<span class='tag'>&lt;/title&gt;</span>",
+      "<span class='tag'>&lt;/head&gt;</span>",
+      "<span class='tag'>&lt;body&gt;</span>",
+      "  <span class='tag'>&lt;header</span> <span class='a'>class</span>=<span class='s'>'site-header'</span><span class='tag'>&gt;</span>",
+      "    <span class='tag'>&lt;a</span> <span class='a'>href</span>=<span class='s'>'/'</span> <span class='a'>class</span>=<span class='s'>'brand'</span><span class='tag'>&gt;</span>MyCompany<span class='tag'>&lt;/a&gt;</span>",
+      "    <span class='tag'>&lt;button</span> <span class='a'>class</span>=<span class='s'>'hamburger'</span> <span class='a'>aria-label</span>=<span class='s'>'菜单'</span><span class='tag'>&gt;</span>☰<span class='tag'>&lt;/button&gt;</span>",
+      "    <span class='tag'>&lt;nav</span> <span class='a'>class</span>=<span class='s'>'site-nav'</span><span class='tag'>&gt;</span>",
+      "      <span class='c'>@menuList</span>  <span class='c'>{&lt;a href=${url}&gt;${name}&lt;/a&gt;}</span>",
+      "    <span class='tag'>&lt;/nav&gt;</span>",
+      "  <span class='tag'>&lt;/header&gt;</span>",
+      "  <span class='tag'>&lt;section</span> <span class='a'>class</span>=<span class='s'>'hero'</span><span class='tag'>&gt;</span>",
+      "    <span class='tag'>&lt;h1&gt;</span>让每一次<span class='tag'>&lt;br&gt;</span>落地都更轻盈<span class='tag'>&lt;/h1&gt;</span>",
+      "    <span class='tag'>&lt;p&gt;</span>面向企业的数字化内容与模板平台…<span class='tag'>&lt;/p&gt;</span>",
+      "  <span class='tag'>&lt;/section&gt;</span>",
+      "  <span class='tag'>&lt;main</span> <span class='a'>class</span>=<span class='s'>'cards'</span><span class='tag'>&gt;</span>",
+      "    <span class='c'>@each</span> <span class='n'>item</span> <span class='a'>in</span> ${cards}",
+      "    <span class='tag'>&lt;div</span> <span class='a'>class</span>=<span class='s'>'card'</span><span class='tag'>&gt;</span>${item.title}<span class='tag'>&lt;/div&gt;</span>",
+      "    <span class='tag'>&lt;/main&gt;</span>",
+      "  <span class='tag'>&lt;script</span> <span class='a'>src</span>=<span class='s'>''</span> ${ctx()}/assets/js/main.js<span class='tag'>&gt;&lt;/script&gt;</span>",
+      "<span class='tag'>&lt;/body&gt;</span>",
+      "<span class='tag'>&lt;/html&gt;</span>"
+    ]
+  };
+
+  var codeEl = $("code"), gutterEl = $("gutter"), curFileEl = $("curFile");
+  var dirtyTip = $("dirtyTip"), editorBadge = $("editorBadge"), prevBadge = $("prevBadge");
+  var isDirty = true; // 设计稿初始演示「未保存」态
+
+  function renderEditor(file){
+    var lines = FILES[file] || [ "<span class='c'>&lt;!-- 二进制/不可编辑文件 --&gt;</span>" ];
+    codeEl.innerHTML = lines.join("\n");
+    gutterEl.innerHTML = "";
+    for(var i=1;i<=lines.length;i++){ var d=document.createElement("div"); d.textContent=i; gutterEl.appendChild(d); }
+    curFileEl.textContent = "my-company/" + file;
+  }
+
+  function setDirty(d){
+    isDirty = d;
+    dirtyTip.style.display = d ? "" : "none";
+    var cls = d ? "preview-badge dirty" : "preview-badge saved";
+    var txt = d ? "● 未保存" : "✓ 已保存";
+    editorBadge.className = cls; editorBadge.textContent = txt;
+    prevBadge.className = cls; prevBadge.textContent = d ? "● 未保存" : "✓ 已保存";
+  }
+
+  var toastTimer = null;
+  function toast(msg){
+    $("toastMsg").textContent = msg;
+    var t = $("toast"); t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2200);
+  }
+
+  /* 编辑器「输入」→ 标记未保存（contenteditable 模拟敲代码） */
+  codeEl.setAttribute("contenteditable","true");
+  codeEl.addEventListener("input", function(){ if(!isDirty) setDirty(true); });
+
+  /* 文件树点击 → 切换当前文件 */
+  document.querySelectorAll(".tnode[data-file]").forEach(function(n){
+    n.addEventListener("click", function(){
+      document.querySelectorAll(".tnode").forEach(function(x){ x.classList.remove("cur"); });
+      n.classList.add("cur");
+      renderEditor(n.getAttribute("data-file"));
+      setDirty(true);
+    });
+  });
+  /* 树过滤 */
+  $("treeFilter").addEventListener("input", function(e){
+    var k = e.target.value.trim().toLowerCase();
+    document.querySelectorAll(".tnode[data-file]").forEach(function(n){
+      n.style.display = (!k || n.getAttribute("data-file").toLowerCase().indexOf(k)>-1) ? "" : "none";
+    });
+  });
+  $("refreshTree").addEventListener("click", function(){ toast("文件树已刷新"); });
+
+  /* 视口切换（#2 核心交互：只改 iframe 宽度 + 响应式类，不重载） */
+  var VP = { desktop:{w:"100%",cls:"is-desktop",label:"桌面 · 100%"},
+             tablet:{w:"768px",cls:"is-tablet",label:"平板 · 768px"},
+             mobile:{w:"375px",cls:"is-mobile",label:"手机 · 375px"} };
+  var demo = $("demo"), frame = $("frame"), stage = $("stage");
+  function applyVp(key){
+    var v = VP[key];
+    frame.style.width = v.w;
+    frame.classList.toggle("desktop", key==="desktop");
+    stage.classList.toggle("desktop", key==="desktop");
+    demo.classList.remove("is-desktop","is-tablet","is-mobile");
+    demo.classList.add(v.cls);
+    if(key!=="mobile"){ $("demoNav").classList.remove("open"); $("hamburger").classList.remove("open"); }
+    $("vpFloatVal").textContent = v.label;
+  }
+  $("vpSelect").addEventListener("change", function(){ applyVp(this.value); });
+
+  /* 手机汉堡菜单（演示响应式折叠效果） */
+  $("hamburger").addEventListener("click", function(){
+    this.classList.toggle("open"); $("demoNav").classList.toggle("open");
+  });
+  $("demoNav").querySelectorAll("a").forEach(function(a){
+    a.addEventListener("click", function(ev){ ev.preventDefault();
+      $("demoNav").querySelectorAll("a").forEach(function(x){x.classList.remove("active");});
+      a.classList.add("active"); $("demoNav").classList.remove("open"); $("hamburger").classList.remove("open");
+    });
+  });
+
+  /* 刷新预览（#1：key 变化重载 iframe，这里用一次闪烁模拟） */
+  function reloadPreview(){
+    demo.style.opacity = "0";
+    setTimeout(function(){ demo.style.transition="opacity .3s"; demo.style.opacity = "1"; }, 120);
+  }
+  $("refreshPreview").addEventListener("click", function(){ reloadPreview(); toast("预览已刷新（key 变更 → iframe 重载）"); });
+  $("openNewWindow").addEventListener("click", function(){ toast("将 window.open('/template/preview/'+id+'/'+entry)"); });
+  $("pageSelect").addEventListener("change", function(){ reloadPreview(); });
+
+  /* 保存（#1 关键：保存后触发预览刷新，预览=已保存内容） */
+  $("saveBtn").addEventListener("click", function(){
+    setDirty(false);
+    toast("已保存 → 预览已刷新");
+    reloadPreview();
+  });
+  $("delBtn").addEventListener("click", function(){ toast("（演示）删除文件后需二次确认"); });
+
+  /* 顶部说明条关闭 */
+  $("infoClose").addEventListener("click", function(){ this.closest(".info-strip").style.display="none"; });
+
+  /* 初始化 */
+  renderEditor("index.html");
+  setDirty(true);
+  applyVp("desktop");
+  // 自动演示一次：2.2s 后切到手机展示响应式，再切回桌面（首次进入引导）
+  setTimeout(function(){ $("vpSelect").value="mobile"; applyVp("mobile"); }, 1600);
+  setTimeout(function(){ $("vpSelect").value="desktop"; applyVp("desktop"); }, 5200);
+})();
+</script>
+</body>
+</html>
