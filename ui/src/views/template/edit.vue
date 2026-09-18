@@ -12,9 +12,10 @@
                 </span>
             </div>
             <!-- 工具栏行：一个容器两套内容按视图切换（同位同高），两视图编辑区起点恒等，
-                 高度实测对两视图通用（AI 视图首进即可正确计算）；下拉列两视图共用，仅绑定值区分 -->
-            <el-row :gutter="35" class="toolbar-row">
-                <el-col :sm="5" class="mb20">
+                 高度实测对两视图通用（AI 视图首进即可正确计算）；
+                 下拉列宽与文件树列同公式（flex 20% + min-width 190px + gap 12px），面板宽度完全对齐 -->
+            <div class="toolbar-row">
+                <div class="tb-col-template">
                     <el-select v-if="currentView === 'edit'" v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
                                    :label="item.name + (item.active ? '（使用中）' : '')" />
@@ -24,8 +25,8 @@
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
                                    :label="item.name + (item.active ? '（使用中）' : '')" />
                     </el-select>
-                </el-col>
-                <el-col :sm="19" class="mb20">
+                </div>
+                <div class="tb-col-actions">
                     <div v-if="currentView === 'edit'" class="toolbar-actions">
                         <el-upload
                             class="upload-btn"
@@ -68,15 +69,16 @@
                         </el-button>
                         <span class="prev-hint">预览指向：{{ aiWorkbenchRef?.prevHint }}</span>
                     </div>
-                </el-col>
-            </el-row>
+                </div>
+            </div>
         </div>
         <!-- 手动编辑视图：树 | 代码编辑（可收起）| 内联预览 三列（flex 布局，与 AI 工作台同一套收起交互） -->
         <div v-show="currentView === 'edit'" style="padding-top: 5px;">
             <div ref="editRowRef" class="edit-columns">
-                <div class="edit-col-tree">
-                    <!-- 树卡片与右侧编辑器等高（高度内联注入），内部 flex 让树占满卡片剩余空间 -->
-                    <el-card shadow="hover" class="tree-card" :style="{ height: state.clientHeight }">
+                <div class="edit-col-tree" :class="{ collapsed: treeCollapsed }">
+                    <!-- 树卡片与右侧编辑器等高（高度内联注入），内部 flex 让树占满卡片剩余空间；
+                         收起态整列变 38px 竖条（与编辑器列收起交互同构） -->
+                    <el-card v-show="!treeCollapsed" shadow="hover" class="tree-card" :style="{ height: state.clientHeight }">
                         <template #header>
                             <div class="tree-card-header">
                                 <span>模板文件树</span>
@@ -107,6 +109,17 @@
                             </el-tree>
                         </div>
                     </el-card>
+                    <!-- 侧边把手条（树列右缘竖条）：展开态=收起按钮，收起态=展开按钮+竖排「文件」（与编辑器列把手同构） -->
+                    <div class="tree-side-bar">
+                        <el-button size="small" text :title="treeCollapsed ? '展开文件树' : '收起文件树'"
+                                   @click="treeCollapsed = !treeCollapsed">
+                            <el-icon :size="14">
+                                <ele-DArrowRight v-if="treeCollapsed" />
+                                <ele-DArrowLeft v-else />
+                            </el-icon>
+                        </el-button>
+                        <span v-if="treeCollapsed" class="collapsed-label">文件</span>
+                    </div>
                 </div>
                 <div class="edit-col-preview">
                     <!-- 内联预览（中列）：预览已保存内容，保存成功后自动刷新 -->
@@ -196,6 +209,8 @@ const templateApi = TemplateApi();
 const currentView = ref<'edit' | 'ai'>('ai');
 // 代码编辑列收起状态（收起后预览列吃满剩余空间）
 const midCollapsed = ref(false);
+// 文件树列收起态：收起后整列变 38px 竖条（与编辑器列收起交互同构）
+const treeCollapsed = ref(false);
 // 编辑器全屏（fixed 覆盖视口；与收起互斥，切视图自动退出）
 const editorFullscreen = ref(false);
 // 编辑器高度：全屏时占满视口（把手条与内边距留 16px），否则用实测的自适应高度
@@ -813,7 +828,23 @@ onActivated(() => {
     padding: 4px 0 0;
 
     .toolbar-row {
+        // 与 edit-columns 同构的 flex 布局：下拉列宽 = 文件树列宽（flex 20% + min-width 190px + gap 12px），
+        // 按钮列起点与预览列起点对齐；底部 20px 与原 el-col mb20 等效（高度实测占位不变）
+        display: flex;
+        align-items: center;
+        gap: 12px;
         width: 100%;
+        margin-bottom: 20px;
+
+        .tb-col-template {
+            flex: 0 0 20%;
+            min-width: 190px;
+        }
+
+        .tb-col-actions {
+            flex: 1;
+            min-width: 0;
+        }
     }
 }
 .toolbar-actions {
@@ -900,9 +931,58 @@ onActivated(() => {
 }
 
 .edit-col-tree {
+    display: flex;
+    flex-direction: row;
     flex: 0 0 20%;
     min-width: 190px;
     min-height: 0;
+
+    // 收起态：整列变 38px 竖条，展开按钮 + 竖排「文件」标签，预览列吃满剩余空间（与编辑器列收起同构）
+    &.collapsed {
+        flex: 0 0 38px;
+        max-width: 38px;
+        min-width: 38px;
+
+        .tree-side-bar {
+            flex: 1;
+            border: 1px solid var(--el-border-color-lighter);
+            border-radius: 6px;
+            background: var(--el-bg-color);
+            padding: 10px 0 12px;
+            gap: 12px;
+
+            .collapsed-label {
+                writing-mode: vertical-rl;
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--el-color-primary);
+                letter-spacing: 3px;
+            }
+        }
+    }
+
+    // 侧边把手条（树列右缘竖条）
+    .tree-side-bar {
+        flex: 0 0 22px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 6px 0 10px;
+        gap: 6px;
+        border-left: 1px solid var(--el-border-color-lighter);
+        border-radius: 0 6px 6px 0;
+        background: var(--el-fill-color-lighter);
+
+        .el-button {
+            width: 100%;
+            padding: 4px 0;
+        }
+    }
+
+    .tree-card {
+        flex: 1;
+        min-width: 0;
+    }
 }
 
 .edit-col-mid {

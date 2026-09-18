@@ -6,8 +6,9 @@
     <div class="ai-workbench" :style="{ height: height }">
         <!-- 三列骨架：左文件树（聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
         <div class="wb-columns">
-            <div class="wb-col-tree">
-                <el-card shadow="hover" class="tree-card">
+            <div class="wb-col-tree" :class="{ collapsed: treeCollapsed }">
+                <!-- 树卡片收起时整列变 38px 竖条（与手动编辑树列/编辑器列收起交互同构） -->
+                <el-card v-show="!treeCollapsed" shadow="hover" class="tree-card">
                     <template #header>
                         <div class="tree-card-header">
                             <span>{{ sessionView ? '会话工作目录' : '模板文件树' }}</span>
@@ -32,6 +33,17 @@
                                  @node-click="onTreeNodeClick" />
                     </div>
                 </el-card>
+                <!-- 侧边把手条（树列右缘竖条）：展开态=收起按钮，收起态=展开按钮+竖排「文件」 -->
+                <div class="tree-side-bar">
+                    <el-button size="small" text :title="treeCollapsed ? '展开文件树' : '收起文件树'"
+                               @click="treeCollapsed = !treeCollapsed">
+                        <el-icon :size="14">
+                            <ele-DArrowRight v-if="treeCollapsed" />
+                            <ele-DArrowLeft v-else />
+                        </el-icon>
+                    </el-button>
+                    <span v-if="treeCollapsed" class="collapsed-label">文件</span>
+                </div>
             </div>
 
             <div class="wb-col-preview">
@@ -144,6 +156,8 @@ const sessionView = ref(false);
 const creatingAiSession = ref(false);
 // AI 对话列收起状态
 const chatCollapsed = ref(false);
+// 文件树列收起态：收起后整列变 38px 竖条（与手动编辑树列/编辑器列收起交互同构）
+const treeCollapsed = ref(false);
 // 预览视口档位
 const viewport = ref<'desktop' | 'tablet' | 'mobile'>('desktop');
 // 文件树选中的聚焦文件（点文件 = 告诉 AI 聚焦该文件）
@@ -647,16 +661,59 @@ defineExpose({
         align-items: stretch;
     }
 
-    // ===== 左列：作用模板 + 文件树（与手动编辑树列同构） =====
+    // ===== 左列：文件树（与手动编辑树列同构，可收起为竖条） =====
     .wb-col-tree {
         flex: 0 0 20%;
         min-width: 190px;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         min-height: 0;
+
+        // 收起态：整列变 38px 竖条，展开按钮 + 竖排「文件」标签，预览/对话列吃满剩余空间
+        &.collapsed {
+            flex: 0 0 38px;
+            max-width: 38px;
+            min-width: 38px;
+
+            .tree-side-bar {
+                flex: 1;
+                border: 1px solid var(--el-border-color-lighter);
+                border-radius: 6px;
+                background: var(--el-bg-color);
+                padding: 10px 0 12px;
+                gap: 12px;
+
+                .collapsed-label {
+                    writing-mode: vertical-rl;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: var(--el-color-primary);
+                    letter-spacing: 3px;
+                }
+            }
+        }
+
+        // 侧边把手条（树列右缘竖条）
+        .tree-side-bar {
+            flex: 0 0 22px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px 0 10px;
+            gap: 6px;
+            border-left: 1px solid var(--el-border-color-lighter);
+            border-radius: 0 6px 6px 0;
+            background: var(--el-fill-color-lighter);
+
+            .el-button {
+                width: 100%;
+                padding: 4px 0;
+            }
+        }
 
         .tree-card {
             flex: 1;
+            min-width: 0;
             min-height: 0;
             display: flex;
             flex-direction: column;
