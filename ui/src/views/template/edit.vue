@@ -731,6 +731,8 @@ onMounted(() => {
     loadTemplateList();
     // 高度自适应：初始计算 + 窗口变化时重算（编辑器/文件树等高，页面不整页滚动）
     updateEditorHeight();
+    // 冷启动收敛兜底：首帧布局未定型实测偏小，布局定型后重读（见 scheduleHeightSettle 注释）
+    scheduleHeightSettle();
     // 事件驱动兜底（无轮询）：冷启动（F5/直接 URL）时顶栏/标签栏（tagsview 异步加载）尚未定型，
     // el-main 的高度会经历一次真实变化（setMainHeight 57→94px）。观察 el-main：其高度由 CSS 决定、
     // 不依赖本页的 clientHeight（非循环依赖），在布局定型变化时触发 updateEditorHeight 重读 top，
@@ -784,7 +786,19 @@ const updateEditorHeight = () => {
     const viewportH = document.documentElement.clientHeight;
     // 底部留白覆盖：el-col 的 mb20 + 页面级 el-card body 的 padding（合计约 40px）+ 少量呼吸空间
     const height = viewportH - top - 48;
-    state.clientHeight = Math.max(400, height) + 'px';
+    const next = Math.max(400, height) + 'px';
+    // 同值短路：定时兜底/ResizeObserver 高频重算时避免同值赋值触发无谓的响应式更新（防观察循环）
+    if (state.clientHeight !== next) state.clientHeight = next;
+};
+
+/**
+ * 高度收敛兜底：冷启动（F5/直接 URL）时 tagsview/面包屑等布局元素异步渲染尚未定型，
+ * 首帧实测的编辑区起点偏大 → 算出偏小高度；布局定型是位置变化（无 DOM 事件可捕获，
+ * ResizeObserver 只响应盒子尺寸变化），只能延迟重读。300/800ms 两档覆盖常见异步渲染时长
+ */
+const scheduleHeightSettle = () => {
+    window.setTimeout(updateEditorHeight, 300);
+    window.setTimeout(updateEditorHeight, 800);
 };
 
 /** Ctrl/Cmd + S 快捷保存：AI 工作台视图下忽略（工作台内对话框自管快捷键语境） */
@@ -813,9 +827,10 @@ onBeforeUnmount(() => {
 });
 
 // keep-alive 缓存恢复时重算高度：从其他菜单切回本页走的是 onActivated 而非 onMounted，
-// 不重算会沿用旧高度（窗口尺寸/布局已变时出现半高留白）
+// 不重算会沿用旧高度（窗口尺寸/布局已变时出现半高留白）；路由过渡动画期间实测偏移，同样延迟收敛
 onActivated(() => {
     updateEditorHeight();
+    scheduleHeightSettle();
 });
 </script>
 
