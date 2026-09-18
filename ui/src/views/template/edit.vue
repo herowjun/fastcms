@@ -1,6 +1,6 @@
 <template>
 <div class="container">
-    <el-card>
+    <el-card class="page-card">
         <div class="toolbar">
             <!-- 视图切换 tab（v-show 保活两视图：AI 会话状态、编辑器内容、树选中态切走再切回不丢） -->
             <div class="view-tabs">
@@ -11,7 +11,7 @@
                     <el-icon><ele-Edit /></el-icon>手动编辑
                 </span>
             </div>
-            <el-row v-show="currentView === 'edit'" :gutter="35" class="toolbar-row">
+            <el-row v-show="currentView === 'edit'" :gutter="35" class="toolbar-row" ref="toolbarRowRef">
                 <el-col :sm="5" class="mb20">
                     <el-select v-model="state.templateId" placeholder="选择模板" filterable style="width: 100%" @change="onTemplateChange">
                         <el-option v-for="item in state.templateList" :key="item.id" :value="item.id"
@@ -119,9 +119,11 @@
             </div>
         </div>
 
-        <!-- AI 工作台视图：工具条 + 树|对话|预览 三列（会话编排内聚在组件内） -->
+        <!-- AI 工作台视图：工具条 + 树|对话|预览 三列（会话编排内聚在组件内）；
+             高度补偿：AI 视图比手动编辑少一行工具栏，补上后两视图列区域贴底对齐 -->
         <ai-workbench v-show="currentView === 'ai'" :template-id="state.loadedTemplateId"
-                      :template-list="state.templateList" :height="state.clientHeight"
+                      :template-list="state.templateList"
+                      :height="`calc(${state.clientHeight} + ${state.toolbarRowHeight}px)`"
                       :active="currentView === 'ai'"
                       @scope-change="onScopeChange" @files-changed="onWorkbenchFilesChanged"
                       @edit-file="onEditAiFile" @applied="onAiTemplateApplied"
@@ -156,6 +158,8 @@ import { oneDark } from "@codemirror/theme-one-dark";
 const treeTable = ref();
 // 编辑区行（左树 + 中编辑器 + 右预览）：用于实测编辑区起点，计算高度自适应
 const editRowRef = ref();
+// 手动视图工具栏行（上传/保存按钮行）：实测高度供 AI 工作台高度补偿
+const toolbarRowRef = ref();
 // 布局容器尺寸变化观察器（keep-alive 缓存页切回时 onMounted 不会重跑，靠 onActivated 兜底重算）
 let editorHeightObserver: ResizeObserver | null = null;
 
@@ -184,6 +188,8 @@ const workbenchVisible = ref(false);
 const workbenchFile = ref('');
 const state = reactive({
     clientHeight: "600px",
+    // 手动视图工具栏行高度缓存（AI 工作台高度补偿用，隐藏时沿用缓存值）
+    toolbarRowHeight: 40,
     // 模板选择（可编辑非激活模板）
     templateList: [] as any[],
     templateId: '',
@@ -729,6 +735,12 @@ const updateEditorHeight = () => {
     // 底部留白覆盖：el-col 的 mb20 + 页面级 el-card body 的 padding（合计约 40px）+ 少量呼吸空间
     const height = viewportH - top - 48;
     state.clientHeight = Math.max(400, height) + 'px';
+    // 缓存手动视图工具栏行高度（隐藏时不可实测，沿用缓存）：
+    // AI 工作台比手动编辑少这一行，高度补偿后两视图列区域贴底对齐
+    const toolbarRowEl = toolbarRowRef.value?.$el || toolbarRowRef.value;
+    if (toolbarRowEl && toolbarRowEl.offsetHeight > 0) {
+        state.toolbarRowHeight = toolbarRowEl.offsetHeight;
+    }
 };
 
 /** Ctrl/Cmd + S 快捷保存：AI 工作台视图下忽略（工作台内对话框自管快捷键语境） */
@@ -764,13 +776,18 @@ onActivated(() => {
 </script>
 
 <style lang="scss" scoped>
+// 页面根卡片：顶部留白收紧（tab 页签贴近页首），其余方向保持 el-card 默认
+:deep(.page-card > .el-card__body) {
+    padding-top: 10px;
+}
+
 .toolbar {
     // 吸顶：页面滚动时工具栏（含保存/删除）始终固定在顶部
     position: sticky;
     top: 0;
     z-index: 20;
     background: var(--el-bg-color);
-    padding: 8px 0 0;
+    padding: 4px 0 0;
 
     .toolbar-row {
         width: 100%;
