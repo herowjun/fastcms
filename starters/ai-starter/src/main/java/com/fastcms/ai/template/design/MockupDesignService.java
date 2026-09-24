@@ -306,6 +306,15 @@ public class MockupDesignService {
                     ctx.userReferenceHtml());
             String raw = callDesignModel(prepared, designOptions, designSystemPrompt, userPrompt, sse, usageAgg);
             Map<String, String> files = parseFileBlocks(raw);
+            if (files.isEmpty()) {
+                // 协议收编兜底：模型未按 ===FILE:=== 文件块输出、但直出了完整 HTML 文档
+                // （参照样稿本身就是完整文档，模型天然模仿该形态——实测 Qwen 级模型高频行为）。
+                // 检测到完整文档时整体收编为 design/<page>.html，V1~V6 内容校验照常把关
+                String bareDoc = extractFullHtmlDocument(raw);
+                if (bareDoc != null) {
+                    files.put("design/" + page.name() + ".html", bareDoc);
+                }
+            }
             List<String> errors = new ArrayList<>(checkPathSafety(files));
             if (errors.isEmpty()) {
                 errors.addAll(DesignHtmlValidator.validate(page.name(), files, existingPaths));
@@ -387,9 +396,9 @@ public class MockupDesignService {
                     // 推理模型思考过程（累积器归一后推送真实增量；失控保险丝按累计量判定）
                     Object reasoning = output.getMetadata() == null
                             ? null : output.getMetadata().get("reasoningContent");
-                    if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
+                    if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                         String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                        if (delta != null && StringUtils.hasText(delta)) {
+                        if (delta != null && !delta.isEmpty()) {
                             sse.send(AiTemplateConstants.SSE_EVENT_REASONING, delta);
                             reasoningTotal[0] += delta.length();
                         }
@@ -398,9 +407,13 @@ public class MockupDesignService {
                                     + reasoningTotal[0] + " 字符），已中止本轮调用");
                         }
                     }
-                    // 正文增量聚合（不推 message：文件块原文不进对话流）
+                    // 正文增量聚合（不推 message：文件块原文不进对话流）。
+                    // 判空必须用 isEmpty 而非 hasText：流式逐 token delta 中，独立空格/换行 token
+                    // 以纯空白 chunk 单独到达（BPE 词表无 " 28px" 融合 token 时拆为 [" "]+["28px"]），
+                    // hasText 会将其当空值丢弃——CSS "padding:0 28px" 粘连成 "padding:028px"、
+                    // 换行全丢塌成单行（实证：修复前设计稿产物 lines=0、数字空格 100% 粘连）
                     String content = output.getText();
-                    if (StringUtils.hasText(content)) {
+                    if (content != null && !content.isEmpty()) {
                         textBuf.append(content);
                         pushMarkerStatus(textBuf, markerScanPos, markerCount, sse);
                     }
@@ -489,6 +502,40 @@ public class MockupDesignService {
             }
         }
         return files;
+    }
+
+    /**
+     * 从模型输出中提取完整 HTML 文档（协议收编兜底路径，见 designPage 收编调用处）
+     *
+     * <p>截取 {@code <!DOCTYPE html>}（或 {@code <html} 开标签）至最后一个 {@code </html>}
+     * 的片段整体收编。结构不完整（找不到开/闭标签对）返回 null——让 V1 走
+     * "缺少页面文件"修正指令，不误收解释性文本。整体被 markdown 围栏包裹时先剥栅栏。</p>
+     */
+    static String extractFullHtmlDocument(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String text = raw;
+        String unfenced = stripGlobalFence(text);
+        if (unfenced != null) {
+            text = unfenced;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        int doctypeIdx = lower.indexOf("<!doctype");
+        int htmlTagIdx = lower.indexOf("<html");
+        int start;
+        if (doctypeIdx >= 0 && (htmlTagIdx < 0 || doctypeIdx < htmlTagIdx)) {
+            start = doctypeIdx;
+        } else if (htmlTagIdx >= 0) {
+            start = htmlTagIdx;
+        } else {
+            return null;
+        }
+        int endIdx = lower.lastIndexOf("</html>");
+        if (endIdx < start) {
+            return null;
+        }
+        return text.substring(start, endIdx + "</html>".length()).trim();
     }
 
     /**

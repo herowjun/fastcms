@@ -125,8 +125,7 @@
 							<el-button size="small" :disabled="state.chatting" @click="onConfirmReject(msg)">
 								<el-icon><ele-RefreshLeft /></el-icon>驳回修改
 							</el-button>
-							<span v-if="msg.confirmCard.confirmAuto" class="ci-auto-note">已开启自动转化（审计通过即转化）</span>
-						</div>
+							</div>
 						<div v-else class="confirm-done-note">已处理（确认转化 / 驳回重设计），等待流程推进</div>
 						</div>
 						<!-- 推理模型思考过程（可折叠，思考中默认展开） -->

@@ -16,8 +16,13 @@
  */
 package com.fastcms.ai.template;
 
+import com.fastcms.ai.agent.BuiltinAgents;
 import com.fastcms.ai.component.DesignDirectionLibrary;
+import com.fastcms.ai.skill.SkillRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -44,6 +49,19 @@ import java.util.Map;
  */
 @Component
 public class TemplateGenPromptBuilder {
+
+    private static final Logger log = LoggerFactory.getLogger(TemplateGenPromptBuilder.class);
+
+    /**
+     * 技能注册中心：模板制作规范段（## 1~## 11）优先从插件技能
+     * {@code template-skills-plugin/template-spec} 加载（规范随插件可插拔/可升级），
+     * 技能缺失时回退内置副本 {@link #SPEC_PROMPT_BUILTIN}（两条路径提示词逐字节一致）
+     */
+    private final SkillRegistry skillRegistry;
+
+    public TemplateGenPromptBuilder(SkillRegistry skillRegistry) {
+        this.skillRegistry = skillRegistry;
+    }
 
     // ==================== 深度焕新设计方向（单一来源） ====================
     // designDirectionName（短名，收尾摘要用）、buildStyleUpgradePrompt（方向段）、
@@ -302,10 +320,29 @@ public class TemplateGenPromptBuilder {
      * @param mobileAdaptive 是否适配移动端（控制第 10 节移动端适配与行为准则第 3 条的强弱）
      */
     public String buildSystemPrompt(String templateName, boolean mobileAdaptive) {
-        return BASE_SYSTEM_PROMPT
+        // 规范段（## 1~## 11）：插件技能优先，缺失回退内置副本；协议段（## 12 + 行为准则）恒内置。
+        // 拼装顺序与原 BASE_SYSTEM_PROMPT 单常量逐字节一致（规范段 + 空行 + 协议段）。
+        String base = loadSpecPrompt() + "\n\n" + SYSTEM_PROMPT_TAIL;
+        return base
                 .replace("${templateName}", templateName)
                 .replace("${mobileAdaptiveSection}", mobileAdaptive ? MOBILE_SECTION_REQUIRED : MOBILE_SECTION_DISABLED)
                 .replace("${mobileRule}", mobileAdaptive ? MOBILE_RULE_REQUIRED : MOBILE_RULE_DISABLED);
+    }
+
+    /**
+     * 加载模板制作规范段（系统提示词 ## 1~## 11）
+     *
+     * <p>优先读插件技能 {@code template-skills-plugin/template-spec}（SKILL.md 正文，
+     * 与 {@link #SPEC_PROMPT_BUILTIN} 内容保持同步）；插件未安装或技能解析失败返回 null，
+     * 回退内置副本——保证规范段永远可用，且两条路径提示词一致。</p>
+     */
+    private String loadSpecPrompt() {
+        String skillContent = skillRegistry.loadContent(BuiltinAgents.TEMPLATE_SPEC_SKILL_ID);
+        if (StringUtils.hasText(skillContent)) {
+            return skillContent;
+        }
+        log.warn("模板制作规范技能 [{}] 未加载，系统提示词回退内置规范段", BuiltinAgents.TEMPLATE_SPEC_SKILL_ID);
+        return SPEC_PROMPT_BUILTIN;
     }
 
     /**
@@ -337,9 +374,12 @@ public class TemplateGenPromptBuilder {
         return "请为模板目录「" + templateName + "」生成一套完整的网站模板。\n\n"
                 + "## 用户需求\n\n" + requirement + "\n\n"
                 + "## 输出要求\n\n"
-                + "1. 必须包含必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html\n"
-                + "2. 必须生成 _preview_data.json 预览演示数据：菜单/分类/单页/文章标题贴合用户需求主题（如餐饮模板用\"菜品展示/门店故事\"）\n"
-                + "3. 至少包含基础样式文件 static/css/base.css（若主样式命名为 style.css 等，base.css 可作为基础重置与变量定义，样式文件总数控制在 2 个以内）\n"
+                + "1. 必须包含必备文件：_template.properties、_layout.html、_articlePage.html、index.html、article.html、article_list.html、page.html、_preview_data.json\n"
+                + "   其中 _articlePage.html 为文章分页宏文件：_layout.html 顶层用 <#include \"_articlePage.html\"> 引入，"
+                + "文章列表页用 <@layout._articlePage/> 输出分页条，宏定义参考如下（样式类名可按模板自身风格调整）：\n"
+                + AiTemplateConstants.ARTICLE_PAGE_HTML + "\n"
+                + "2. _preview_data.json 预览演示数据：菜单/分类/单页/文章标题贴合用户需求主题（如餐饮模板用\"菜品展示/门店故事\"）\n"
+                + "3. 必须包含基础样式文件 static/css/base.css（若主样式命名为 style.css 等，base.css 可作为基础重置与变量定义，样式文件总数控制在 2 个以内）\n"
                 + "4. 静态资源路径使用 ${ctx()} 前缀，例如 <link href=\"${ctx()}/css/base.css\">\n"
                 + "5. 页面通过 <#import \"_layout.html\" as layout> 引入布局宏\n"
                 + "6. 使用 fastcms 指令渲染动态内容，不要硬编码文章列表\n"
@@ -369,9 +409,11 @@ public class TemplateGenPromptBuilder {
                 + "## 用户需求\n\n" + requirement + "\n\n"
                 + "## 输出要求\n\n"
                 + "1. 本轮只做规划，不生成任何文件内容：files 数组中每一项只包含 path 和 action 两个字段，禁止输出 content 字段\n"
-                + "2. 必须涵盖必备文件：_template.properties、_layout.html、index.html、article.html、article_list.html、page.html，"
-                + "以及基础样式 static/css/base.css 与预览演示数据 _preview_data.json（菜单/文章标题贴合需求主题）\n"
-                + "3. 可根据需求补充其他文件（如 static/js/main.js、_articlePage.html），但文件总数控制在 10 个以内\n"
+                + "2. 必须涵盖必备文件：_template.properties、_layout.html、_articlePage.html（文章分页宏，被 _layout.html include）、"
+                + "index.html、article.html、article_list.html、page.html、_preview_data.json（菜单/文章标题贴合需求主题），"
+                + "以及基础样式 static/css/base.css\n"
+                + "3. static/js 为可选目录：仅当确有交互脚本需求时才规划，脚本统一放 static/js/main.js，没有交互脚本则不要规划任何 js 文件；"
+                + "其他文件可按需补充，但文件总数控制在 10 个以内\n"
                 + "4. reply 字段简要说明整体设计思路（配色、布局、栏目结构，100 字以内）\n"
                 + "5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n"
                 + "6. 请全程使用中文思考和回复\n";
@@ -1002,7 +1044,14 @@ public class TemplateGenPromptBuilder {
 
     // ==================== 系统提示词常量 ====================
 
-    private static final String BASE_SYSTEM_PROMPT = """
+    /**
+     * 模板制作规范段（内置兜底副本）
+     *
+     * <p>与插件技能 {@code template-skills-plugin/template-spec} 的正文保持同步：
+     * 系统提示词的规范段（## 1~## 11）优先加载该技能，插件未安装或技能缺失时回退本常量，
+     * 两条路径拼出的提示词逐字节一致。</p>
+     */
+    private static final String SPEC_PROMPT_BUILTIN = """
             你是一名资深的前端工程师和 fastcms 模板开发专家，精通 FreeMarker 模板引擎与响应式网页设计。
             你的任务是：根据用户需求，生成符合 fastcms 规范的完整网站模板文件。
 
@@ -1015,17 +1064,17 @@ public class TemplateGenPromptBuilder {
             ${templateName}/
             ├── _template.properties      # 模板元信息（必备）
             ├── _layout.html              # 公共布局宏（必备）
-            ├── _articlePage.html         # 文章分页宏（可选，被 _layout.html include）
+            ├── _articlePage.html         # 文章分页宏（必备，_layout.html 顶层 include，页面以 <@layout._articlePage/> 调用）
             ├── index.html                # 首页（必备）
             ├── article.html              # 文章详情页（必备）
             ├── article_list.html         # 文章列表页（必备）
             ├── page.html                 # 单页面（必备）
-            ├── _preview_data.json        # 预览演示数据（建议生成，内容贴合需求主题）
+            ├── _preview_data.json        # 预览演示数据（必备，内容贴合需求主题）
             └── static/                   # 静态资源目录
                 ├── css/
                 │   └── base.css          # 基础样式
-                ├── js/
-                │   └── main.js           # 基础脚本（可选）
+                ├── js/                   # 可选——有交互脚本时才创建，无则不建此目录
+                │   └── main.js           # 交互脚本（可选——有交互脚本时才生成）
                 └── images/               # 图片资源
             ```
 
@@ -1254,7 +1303,7 @@ public class TemplateGenPromptBuilder {
 
             ## 9. 预览演示数据 _preview_data.json
 
-            模板目录下应包含 `_preview_data.json`，定义模板预览时使用的演示数据（菜单、分类、标签、单页、文章标题、SEO）。
+            模板目录下必须包含 `_preview_data.json`，定义模板预览时使用的演示数据（菜单、分类、标签、单页、文章标题、SEO）。
             内容必须贴合用户需求主题：如餐饮模板用"菜品展示/门店故事/在线订座"，科技模板用"新闻动态/产品中心"。
             格式（所有字段可选，未配置的字段使用系统默认演示数据）：
             ```json
@@ -1315,7 +1364,14 @@ public class TemplateGenPromptBuilder {
             6. **注意**：`item.url` 可能包含 contextPath（由 menuTag 数据源决定），对比时不要重复拼接；
                若出现路径多次加前缀的情况，可在 body 宏开头先把 item.url 去掉重复前缀（如 `<#local itemUrl = (item.url?starts_with(cp+cp))?then(item.url?substring(cp?length), item.url)>`），
                推荐保持默认：`currentUri = cp + requestURI`、`item.url` 直接用，两者口径一致。
+            """;
 
+    /**
+     * 系统提示词协议段：## 12 响应格式（严格 JSON）+ 行为准则
+     *
+     * <p>管线机器解析契约，恒内置拼接，不随技能覆盖。</p>
+     */
+    private static final String SYSTEM_PROMPT_TAIL = """
             ## 12. 响应格式（严格 JSON）
 
             你的每次回复必须是一个 JSON 对象（不能是数组），包含两个字段：

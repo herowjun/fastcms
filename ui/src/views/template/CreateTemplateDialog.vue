@@ -45,15 +45,13 @@
                         </el-option>
                     </el-select>
                 </el-form-item>
-                <el-form-item label="确认方式">
-                    <el-checkbox v-model="dialog.confirmAuto">审计通过后自动转化（跳过人工确认）</el-checkbox>
-                </el-form-item>
+                <!-- 人工确认策略由后端按会话类型决定（自由设计会话设计稿需人工确认，导入会话全自动），前端不提供开关 -->
             </template>
             <el-form-item label="移动端适配">
                 <el-checkbox v-model="dialog.mobileAdaptive">生成响应式布局（多端断点 + 移动端汉堡菜单）</el-checkbox>
             </el-form-item>
         </el-form>
-        <!-- 历史生成记录视图已删除：由父组件"工作对象选择器"对话框（WorkObjectDialog）的未应用/已应用页签接管 -->
+        <!-- 历史生成记录视图已删除：由父页面左侧常驻工作面板（WorkObjectPanel）的未应用/已应用页签接管 -->
         <template #footer>
             <el-button @click="visible = false">取 消</el-button>
             <el-button type="primary" :loading="dialog.loading" @click="onCreateConfirm">
@@ -89,7 +87,7 @@ const visible = computed({
     set: (v: boolean) => emit('update:visible', v)
 });
 
-// 对话框状态（新建表单；历史生成记录视图已删除，由 WorkObjectDialog 接管）
+// 对话框状态（新建表单；历史生成记录视图已删除，由左侧工作面板 WorkObjectPanel 接管）
 const dialog = reactive({
     templateName: '',
     requirement: '',
@@ -100,8 +98,6 @@ const dialog = reactive({
     createMode: 'pipeline' as 'pipeline' | 'design',
     // 设计稿模式：设计方向 key（空 = AI 自选；选项来自后端方向资产库，不写死）
     designDirection: '',
-    // 设计稿模式：审计通过后自动转化（跳过人工确认；关闭时审计通过停在确认卡片）
-    confirmAuto: false,
     // 导入模式：待上传的 HTML/ZIP 文件（手动上传，创建会话后随 uploadReference 提交）
     importFile: null as File | null,
     importFileList: [] as any[],
@@ -163,10 +159,9 @@ const open = () => {
     dialog.templateName = '';
     dialog.requirement = '';
     dialog.mobileAdaptive = true;
-    // 设计模式三字段每次重置（默认管线、方向 AI 自选、审计通过自动转化）
+    // 设计模式字段每次重置（默认管线、方向 AI 自选；确认策略由后端按会话类型决定）
     dialog.createMode = 'pipeline';
     dialog.designDirection = '';
-    dialog.confirmAuto = true;
     // 参考文件每次重置（残留会让用户误以为已选择新文件）
     dialog.importFile = null;
     dialog.importFileList = [];
@@ -227,8 +222,7 @@ const onCreateConfirm = async () => {
         const res = await aiApi.createSession({
             templateName: name, requirement, mobileAdaptive: dialog.mobileAdaptive,
             createMode: dialog.createMode,
-            designDirection: (!withReference && dialog.designDirection) || undefined,
-            confirmAuto: dialog.confirmAuto === true
+            designDirection: (!withReference && dialog.designDirection) || undefined
         });
         if (!res.data) {
             ElMessage.error(res.msg || '创建会话失败');

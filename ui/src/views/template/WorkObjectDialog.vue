@@ -1,4 +1,4 @@
-<template>
+﻿<template>
     <!-- 统一工作对象选择器对话框：正式模板 / 未应用草稿 / 已应用回看 三页签。
          数据全部由父组件 props 注入（模板列表 + 全部会话，单一数据源），本组件不自拉；
          对象切换经 emit('select') 交父组件唯一写入口 selectWorkObject 处理 -->
@@ -94,7 +94,7 @@
                 <el-empty v-if="appliedSessions.length === 0" description="暂无已应用的生成会话" :image-size="60" />
             </el-tab-pane>
         </el-tabs>
-        <div class="wobj-tip">点击行即进入：正式模板默认进入 AI 调整（行内按钮可指定手动编辑）；生成会话只能在 AI 工作台打开</div>
+        <div class="wobj-tip">点击行即选中工作对象（停留当前页签）；行内按钮可指定进入手动编辑 / AI 调整</div>
         <template #footer>
             <el-button @click="visible = false">关 闭</el-button>
         </template>
@@ -199,8 +199,10 @@ watch(() => props.visible, (v) => {
     }
 });
 
-/** 正式模板行点击：默认进入 AI 调整（行内按钮可指定手动编辑） */
-const onTplRowClick = (row: any) => onTplSelect(row, 'ai');
+/** 正式模板行点击：中性选择（不指定落点视图，停留父组件当前 tab——避免"选模板被强制跳 AI"） */
+const onTplRowClick = (row: any) => {
+    emit('select', { obj: { kind: 'template', templateId: String(row.id) } });
+};
 const onTplSelect = (row: any, view: 'edit' | 'ai') => {
     emit('select', { obj: { kind: 'template', templateId: String(row.id) }, view });
 };

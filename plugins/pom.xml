@@ -24,6 +24,7 @@
         <module>hello-world-plugin</module>
         <module>twplus-components-plugin</module>
         <module>article-skills-plugin</module>
+        <module>template-skills-plugin</module>
     </modules>
 
     <dependencyManagement>

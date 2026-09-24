@@ -45,6 +45,7 @@ build/
 
 ### Tailwind pack.css 构建目录（node_modules + 中间产物） ###
 .tailwind-build/
+.tmp-verify/
 
 ### Trae 临时调试产物 ###
 .trae-tmp/

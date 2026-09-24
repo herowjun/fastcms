@@ -1,51 +1,11 @@
 <template>
-    <!-- AI 工作台视图：与手动编辑同构的三列布局（树 | 内联预览 | AI 对话）。
+    <!-- AI 工作台视图（已去树化）：内联预览 | AI 对话 两列。
+         文件树与工作对象选择已上提到父页面左侧常驻面板（共享树实例经 props 注入），
          会话编排自 edit.vue 迁入：本组件持有 AI 会话状态与预览点选钩子；
-         工具条（作用模板下拉+按钮排）上移到父组件 toolbar-row 统一排版（与手动编辑工具行同位同高），
-         按钮逻辑经 defineExpose 暴露给父组件调用 -->
-    <div class="ai-workbench" :style="{ height: height }">
-        <!-- 三列骨架：左文件树（聚焦导航）| 中内联预览 | 右 AI 对话（可收起） -->
+         工具条按钮逻辑经 defineExpose 暴露给父组件调用 -->
+    <div class="ai-workbench">
+        <!-- 两列骨架：内联预览 | AI 对话（可收起）；树中选中/高亮经 emit('highlight-file') 由父面板呈现 -->
         <div class="wb-columns">
-            <div class="wb-col-tree" :class="{ collapsed: treeCollapsed }">
-                <!-- 树卡片收起时整列变 38px 竖条（与手动编辑树列/编辑器列收起交互同构） -->
-                <el-card v-show="!treeCollapsed" shadow="hover" class="tree-card">
-                    <template #header>
-                        <div class="tree-card-header">
-                            <span>{{ sessionView ? '会话工作目录' : '模板文件树' }}</span>
-                            <el-button size="small" text :loading="tree.loading" title="刷新文件树" @click="onRefreshTree">
-                                <el-icon><ele-Refresh /></el-icon>
-                            </el-button>
-                        </div>
-                    </template>
-                    <div class="tree-filter">
-                        <el-input v-model="treeFilter" size="small" clearable placeholder="输入关键字过滤文件">
-                            <template #prefix>
-                                <el-icon><ele-Search /></el-icon>
-                            </template>
-                        </el-input>
-                    </div>
-                    <div v-loading="tree.loading" class="tree-body">
-                        <!-- 文件树不渲染代码内容：点文件 = 告诉 AI 聚焦该文件（经 current-file 注入对话），
-                             选中可路由 HTML 页面时预览列联动切页 -->
-                        <el-tree ref="wbTreeRef" :data="currentTreeData" node-key="filePath" highlight-current
-                                 :default-expanded-keys="tree.expandedKeys" :props="tree.defaultProps"
-                                 :filter-node-method="filterTreeNode"
-                                 @node-click="onTreeNodeClick" />
-                    </div>
-                </el-card>
-                <!-- 侧边把手条（树列右缘竖条）：展开态=收起按钮，收起态=展开按钮+竖排「文件」 -->
-                <div class="tree-side-bar">
-                    <el-button size="small" text :title="treeCollapsed ? '展开文件树' : '收起文件树'"
-                               @click="treeCollapsed = !treeCollapsed">
-                        <el-icon :size="14">
-                            <ele-DArrowRight v-if="treeCollapsed" />
-                            <ele-DArrowLeft v-else />
-                        </el-icon>
-                    </el-button>
-                    <span v-if="treeCollapsed" class="collapsed-label">文件</span>
-                </div>
-            </div>
-
             <div class="wb-col-preview">
                 <TemplatePreviewPanel ref="previewPanelRef" v-model:entry="preview.entry"
                                       :page-options="previewPageOptions" :url="aiPreviewUrl"
@@ -107,19 +67,22 @@ import AiChat from '/@/views/template/aiChat.vue';
 import ImagePickDialog from '/@/views/template/ImagePickDialog.vue';
 import CreateTemplateDialog from '/@/views/template/CreateTemplateDialog.vue';
 import TemplatePreviewPanel from '/@/views/template/TemplatePreviewPanel.vue';
-import { useTemplateFileTree } from '/@/views/template/composables/useTemplateFileTree';
 import { useAiPreview, isRoutableHtml } from '/@/views/template/composables/useAiPreview';
 import { usePreviewIframeHooks } from '/@/views/template/composables/usePreviewIframeHooks';
 
 const props = defineProps<{
-    /** 作用模板 ID（与主编辑视图同步：切换由父组件工具栏行的作用模板下拉发起，切换后回流） */
+    /** 作用模板 ID（与主编辑视图同步：切换由父页面工作对象选择发起，切换后回流） */
     templateId: string;
-    /** 模板列表（父组件工具栏行作用模板下拉数据源 + 编辑此模板回定位用） */
+    /** 模板列表（编辑此模板回定位用） */
     templateList?: any[];
     /** 全部会话（父组件统一持有与刷新，单一数据源；本组件只读，变更经 sessions-changed 通知父组件重拉） */
     sessions?: any[];
-    /** 工作区高度（与手动编辑视图同源注入） */
-    height?: string;
+    /** 共享文件树实例（父组件 useTemplateFileTree 的 tree 对象：data=正式模板目录，sessionData=会话工作目录） */
+    tree: { loading: boolean; data: any[]; sessionData: any[]; expandedKeys: string[]; defaultProps: any };
+    /** 加载正式模板目录树（父组件包装共享实例的 load，返回 Promise） */
+    loadTemplateTree: (templateId?: string) => Promise<any>;
+    /** 加载会话工作目录树（父组件包装共享实例的 loadSession，返回 Promise） */
+    loadSessionTree: (sessionId?: string) => Promise<any>;
     /** 视图是否激活（首次激活时初始化调整会话，避免页面加载就产生会话副作用） */
     active?: boolean;
 }>();
@@ -135,6 +98,10 @@ const emit = defineEmits<{
     (e: 'edit-applied', templateId: string): void;
     /** 会话数据变化（创建会话等）→ 父组件统一重拉会话列表（单一数据源，父组件 refreshSessions） */
     (e: 'sessions-changed'): void;
+    /** 左面板共享文件树高亮驱动：AI 写盘/切页/清空选中时由父组件转发给 WorkObjectPanel 呈现 */
+    (e: 'highlight-file', path: string): void;
+    /** 进入会话视图（面板选择会话 / 新建模板成功）→ 父组件把 currentObject 同步为该会话（单一同步路径） */
+    (e: 'session-opened', session: any): void;
 }>();
 
 const aiApi = AiTemplateApi();
@@ -142,7 +109,6 @@ const aiApi = AiTemplateApi();
 // ==================== 会话状态（自 edit.vue 迁入） ====================
 
 const aiChatRef = ref();
-const wbTreeRef = ref();
 const previewPanelRef = ref();
 
 // 换图对话框（v-model:visible）
@@ -162,8 +128,6 @@ const sessionView = ref(false);
 const creatingAiSession = ref(false);
 // AI 对话列收起状态
 const chatCollapsed = ref(false);
-// 文件树列收起态：收起后整列变 38px 竖条（与手动编辑树列/编辑器列收起交互同构）
-const treeCollapsed = ref(false);
 // 预览视口档位
 const viewport = ref<'desktop' | 'tablet' | 'mobile'>('desktop');
 // 文件树选中的聚焦文件（点文件 = 告诉 AI 聚焦该文件）
@@ -185,31 +149,34 @@ const showApply = computed(() => aiMode.value === 'generate' && !!currentSession
 const showEditApplied = computed(() => aiMode.value === 'generate' && currentSession.value?.status === 'applied'
     && !!currentSession.value?.templateName);
 
-const prevHint = computed(() => {
-    if (sessionView.value && currentSession.value?.templateName) {
-        return `会话工作目录 · ${currentSession.value.templateName}`;
-    }
-    return '正式模板目录';
-});
+// ==================== 共享文件树（父页面注入）/ 实时预览 / 点选钩子 ====================
 
-// ==================== 文件树 / 实时预览 / 点选钩子 ====================
+// 文件树已上提父页面左侧常驻面板（单一实例），本组件经 props 协作：
+// 数据读 props.tree（reactive 引用，直接别名保留响应式），加载调父组件包装的回调。
+// 树 UI（渲染/过滤/高亮）在左侧面板，本组件只消费数据并经 emit('highlight-file') 驱动高亮
+const tree = props.tree;
 
-// 独立树实例：调整模式=作用模板目录树，会话视图=会话工作目录树
-const { tree, findIndexNode, load: loadScopeTree, loadSession } = useTemplateFileTree();
-
+/** 当前生效的树数据（会话视图=会话工作目录，否则=正式模板目录）：预览页面下拉与默认入口的数据源 */
 const currentTreeData = computed<any[]>(() => (sessionView.value ? tree.sessionData : tree.data) as any[]);
 
-const loadSessionFileTree = () => loadSession(currentSession.value?.sessionId);
-
-// 文件树关键字过滤：按文件/目录名模糊匹配（与手动编辑文件树同一交互）
-const treeFilter = ref('');
-const filterTreeNode = (value: string, data: any) => {
-    if (!value) return true;
-    return String(data.label || '').toLowerCase().includes(value.toLowerCase());
+/** 树中查找 index.html 节点（默认入口，含模板目录前缀，如 my-company/index.html） */
+const findIndexNode = (nodes: any[]): any => {
+    for (const n of nodes || []) {
+        if (n.children && n.children.length > 0) {
+            const hit = findIndexNode(n.children);
+            if (hit) return hit;
+        } else if ((n.filePath || '').toLowerCase().endsWith('/index.html') || n.filePath === 'index.html') {
+            return n;
+        }
+    }
+    return null;
 };
-watch(treeFilter, (val) => {
-    wbTreeRef.value?.filter(val);
-});
+
+/** 加载作用模板目录树 / 会话工作目录树（父组件共享实例的加载回调） */
+const loadScopeTree = (templateId?: string) => props.loadTemplateTree(templateId);
+const loadSession = (sessionId?: string) => props.loadSessionTree(sessionId);
+
+const loadSessionFileTree = () => loadSession(currentSession.value?.sessionId);
 
 // 对话头会话下拉数据源（收窄）：仅当前作用模板的调整会话。
 // 生成会话（草稿/已应用）的切换统一走顶栏"工作对象选择器"对话框，避免同一批数据在两个入口重复；
@@ -259,15 +226,16 @@ const onRefreshTree = () => {
 };
 
 /**
- * 文件树点选：聚焦该文件（对话头 current-file 注入），树高亮选中；
- * 选中可路由 HTML 页面时预览列联动切到该页面
+ * 左面板文件树点选（AI 工作台 tab 下的分发目标，父组件经 expose 调入）：
+ * 聚焦该文件（对话头 current-file 注入），树高亮选中；选中可路由 HTML 页面时预览列联动切到该页面
  */
-const onTreeNodeClick = (node: any) => {
+const focusTreeNode = (node: any) => {
     if (node.sortNum === 0) return;
     selectedFile.value = node.filePath;
     if (isRoutableHtml(node.filePath)) {
         preview.entry = node.filePath;
     }
+    emit('highlight-file', node.filePath);
 };
 
 /**
@@ -281,7 +249,7 @@ const selectDefaultEntry = () => {
         if (isRoutableHtml(idx.filePath)) {
             preview.entry = idx.filePath;
         }
-        nextTick(() => wbTreeRef.value?.setCurrentKey(idx.filePath));
+        emit('highlight-file', idx.filePath);
     }
 };
 
@@ -302,7 +270,7 @@ const highlightFile = (path: string) => {
     const node = find(nodes);
     if (node && node.sortNum !== 0) {
         selectedFile.value = node.filePath;
-        nextTick(() => wbTreeRef.value?.setCurrentKey(node.filePath));
+        emit('highlight-file', node.filePath);
     }
 };
 
@@ -312,7 +280,7 @@ const highlightFile = (path: string) => {
 const applySession = (session: any) => {
     currentSession.value = session || null;
     selectedFile.value = '';
-    wbTreeRef.value?.setCurrentKey(null);
+    emit('highlight-file', '');
     // 旧会话锁定的选区/点选模式对新会话无意义，一并清除
     resetModes();
 };
@@ -434,6 +402,8 @@ const onCreateDialogCreated = async (session: any, firstMessage: string) => {
     // 会话列表由父组件统一持有，通知其重拉（单一数据源；不阻断进入会话）
     emit('sessions-changed');
     applySession(session);
+    // 父组件 currentObject 同步为该新会话（左侧面板高亮/下半文件树随之切会话工作目录）
+    emit('session-opened', session);
     // 初始化会话文件树与预览入口（新会话尚无文件，首个页面写盘后预览自动出现）
     loadSessionFileTree().then(() => {
         initPreviewEntry();
@@ -448,6 +418,8 @@ const onCreateDialogCreated = async (session: any, firstMessage: string) => {
 const openSessionByRow = (row: any) => {
     sessionView.value = true;
     applySession(row);
+    // 父组件 currentObject 同步为该会话（面板选择会话的回流路径：selectObject 依赖此事件统一设置）
+    emit('session-opened', row);
     loadSessionFileTree().then(() => {
         initPreviewEntry();
         selectDefaultEntry();
@@ -674,7 +646,7 @@ onBeforeUnmount(() => {
     }
 });
 
-// 工具条逻辑暴露：工具条 UI 上移到父组件 toolbar-row 统一排版（与手动编辑工具行同位同高），
+// 工具条逻辑暴露：工具条 UI 上移到父组件单行工具栏统一排版（与手动编辑工具条同位互换），
 // 按钮点击/状态显示由父组件经模板 ref 调用（exposed ref 自动解包）
 defineExpose({
     openCreateDialog,
@@ -686,8 +658,7 @@ defineExpose({
     showEditApplied,
     rollingBack,
     applying,
-    prevHint,
-    // ===== 统一工作对象选择器支撑 =====
+    // ===== 统一工作对象选择支撑 =====
     /** 打开生成会话（未应用续聊 / 已应用只读回看） */
     openSessionByRow,
     /** 退出会话视图，恢复当前作用模板的调整上下文 */
@@ -697,11 +668,15 @@ defineExpose({
     /** 会话视图标记 / 当前会话（父组件推导"当前工作对象"用） */
     sessionView,
     currentSession,
+    /** 左面板文件树点选在 AI tab 下的分发目标：聚焦该文件 + 预览联动 + 树高亮 */
+    focusTreeNode,
 });
 </script>
 
 <style lang="scss" scoped>
 .ai-workbench {
+    // 撑满父容器（父页面右区列注入显式高度）
+    height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -712,95 +687,6 @@ defineExpose({
         flex: 1;
         min-height: 0;
         align-items: stretch;
-    }
-
-    // ===== 左列：文件树（与手动编辑树列同构，可收起为竖条） =====
-    .wb-col-tree {
-        flex: 0 0 20%;
-        min-width: 190px;
-        display: flex;
-        flex-direction: row;
-        min-height: 0;
-
-        // 收起态：整列变 38px 竖条，展开按钮 + 竖排「文件」标签，预览/对话列吃满剩余空间
-        &.collapsed {
-            flex: 0 0 38px;
-            max-width: 38px;
-            min-width: 38px;
-
-            .tree-side-bar {
-                flex: 1;
-                border: 1px solid var(--el-border-color-lighter);
-                border-radius: 6px;
-                background: var(--el-bg-color);
-                padding: 10px 0 12px;
-                gap: 12px;
-
-                .collapsed-label {
-                    writing-mode: vertical-rl;
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: var(--el-color-primary);
-                    letter-spacing: 3px;
-                }
-            }
-        }
-
-        // 侧边把手条（树列右缘竖条）
-        .tree-side-bar {
-            flex: 0 0 22px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 6px 0 10px;
-            gap: 6px;
-            border-left: 1px solid var(--el-border-color-lighter);
-            border-radius: 0 6px 6px 0;
-            background: var(--el-fill-color-lighter);
-
-            .el-button {
-                width: 100%;
-                padding: 4px 0;
-            }
-        }
-
-        .tree-card {
-            flex: 1;
-            min-width: 0;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-
-            // 树卡片内搜索框：与手动编辑文件树同一布局（卡片内、树列表上方）
-            .tree-filter {
-                padding: 8px 10px 4px;
-            }
-
-            :deep(.el-card__body) {
-                flex: 1;
-                min-height: 0;
-                overflow: hidden;
-                display: flex;
-                flex-direction: column;
-            }
-
-            .tree-card-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-
-            .tree-body {
-                flex: 1;
-                min-height: 0;
-                overflow: hidden;
-
-                :deep(.el-tree) {
-                    height: 100%;
-                    overflow: auto;
-                }
-            }
-        }
     }
 
     // ===== 右列：AI 对话（30%，可收起 38px） =====
@@ -883,7 +769,7 @@ defineExpose({
         }
     }
 
-    // ===== 右列：内联预览（吃满剩余空间，中列收起时自动扩张） =====
+    // ===== 左列：内联预览（吃满剩余空间，对话列收起时自动扩张） =====
     .wb-col-preview {
         flex: 1 1 0;
         min-width: 0;
@@ -891,21 +777,16 @@ defineExpose({
     }
 }
 
-// 窄屏：三列退回堆叠
+// 窄屏：两列退回堆叠
 @media (max-width: 768px) {
     .wb-columns {
         flex-direction: column;
     }
 
-    .wb-col-tree,
     .wb-col-chat,
     .wb-col-preview {
         flex: none;
         width: 100%;
-    }
-
-    .wb-col-tree .tree-card {
-        min-height: 260px;
     }
 
     .wb-col-chat {

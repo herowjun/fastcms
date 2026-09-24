@@ -57,10 +57,10 @@ public final class DesignContractPrompt {
             1. 每个页面 ≥3 个顶层 <section data-block="语义名"> 区块（hero/features/gallery/footer 等）
             2. 色彩统一走 :root CSS 变量（--c-primary/--c-accent/--c-bg/--c-text/--c-muted），禁止区块内硬编码色值
             3. 导航与页脚在所有页面保持相同结构与 id（#nav-toggle / #footer）
-            4. 图片用占位：design/assets/placeholder-<语义>.svg（简单几何 SVG），并在 img 上加 data-src-hint="真实图描述"
+            4. 图片不用外链图床：优先用内联 <svg>（简单几何图形）或 CSS 渐变/纯色占位；若用 <img>，src 必须是 design/assets/placeholder-<语义>.svg 并在文档之后以 ===FILE: 该路径=== 追加输出对应 SVG 文件块，img 上加 data-src-hint="真实图描述"
             5. 交互 JS 只允许：汉堡菜单切换 + 锚点平滑滚动 + 简单滚动渐显（其余交互会被丢弃）
             【审美契约】：留白优先、字号三级、每个区块一个视觉重点；若下方附有《设计方法论》全文则严格遵循（契约优先，方法论补充细化）。
-            【输出契约】：文件块格式（===FILE: path===），一次输出该页全部文件。""";
+            【输出契约】：直接输出该页的完整 HTML 文档（<!DOCTYPE html> 起、</html> 止），不要 markdown 围栏、不要解释性文字；确需附加占位 SVG 文件时才使用 ===FILE: path=== 文件块（追加在文档之后）。""";
 
     /**
      * 直注模式系统提示词 = 设计契约基底 + 设计方法论（design-brief 技能 L2 正文）全文直拼
@@ -141,11 +141,17 @@ public final class DesignContractPrompt {
         // 作为本站"设计语言的唯一权威参照"——AI 必须提取 :root CSS 变量、卡片/按钮/导航的
         // class 命名与样式特征、视觉风格（圆角/阴影/留白），为本页（article_list/article/page）
         // 设计沿用相同设计语言，但不复制其结构与文案（本页是 CMS 数据流页面，必须保留
-        // data-block 标记、:root 变量声明、nav/footer 公共结构）
+        // data-block 标记、:root 变量声明、nav/footer 公共结构）。
+        // 变量命名矛盾消解：参照的变量体系（如 --brand/--bg/--ink）与五件套
+        // （--c-primary 等，转化段 tokens.css 提取的硬依赖）并存——要求照搬参照 :root 原文
+        // 后追加五件套映射（值用 var() 引用参照变量），两套指令不再互斥
         if (StringUtils.hasText(userReferenceHtml)) {
             sb.append("\n【用户上传参考样稿】（设计语言权威参照——颜色/字体/卡片/按钮风格必须与此一致；")
+              .append(":root 照搬参照的 CSS 变量原文，并追加映射五件套 ")
+              .append("--c-primary/--c-accent/--c-bg/--c-text/--c-muted")
+              .append("（值用 var() 引用参照变量或同色值，五件套是转化硬依赖不可省略）；")
               .append("不要复制其结构与文案，本页是 CMS 数据流页面，必须保留 data-block 标记、")
-              .append(":root 变量声明、nav/footer 公共结构与 #nav-toggle / #footer id）\n")
+              .append("nav/footer 公共结构与 #nav-toggle / #footer id）\n")
               .append("<html-skeleton>\n")
               .append(userReferenceHtml.trim())
               .append("\n</html-skeleton>\n");
@@ -164,7 +170,7 @@ public final class DesignContractPrompt {
         } else {
             sb.append("（专注桌面端设计，宽度按 1280px 基准）");
         }
-        sb.append("，图片占位 SVG 一并输出（design/assets/placeholder-*.svg）。\n");
+        sb.append("，图片优先内联 <svg> 或 CSS 占位（不用外链图床）。\n");
 
         if (prevAuditIssues != null && !prevAuditIssues.isEmpty()) {
             sb.append("\n【上轮机器审计问题】（本轮必须逐条修复）\n");
@@ -180,8 +186,9 @@ public final class DesignContractPrompt {
             sb.append("\n【用户具体不满】（本轮设计必须针对性改进）\n").append(userComment.trim()).append('\n');
         }
 
-        sb.append("\n输出该页全部文件（===FILE: design/").append(page.name()).append(".html=== 起头，");
-        sb.append("占位图 SVG 各自独立文件块），不要输出解释性文字。");
+        sb.append("\n直接输出该页完整 HTML 文档（<!DOCTYPE html> 起、</html> 止），不要输出解释性文字、");
+        sb.append("markdown 围栏或 ===FILE:=== 标记；仅当使用了 <img> 占位图时，才在文档之后以 ");
+        sb.append("===FILE: design/assets/placeholder-<语义>.svg=== 文件块追加输出对应 SVG。");
         return sb.toString();
     }
 }

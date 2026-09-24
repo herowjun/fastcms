@@ -75,6 +75,16 @@ public class BuiltinAgents {
      */
     public static final String DESIGN_BRIEF_SKILL_ID = "design-brief";
 
+    /**
+     * 模板制作规范技能 id（插件源 template-skills-plugin，jar 内 skills/template-spec/SKILL.md）
+     *
+     * <p>消费方式：<b>全文直注</b>——由 TemplateGenPromptBuilder 把本技能正文拼入
+     * buildSystemPrompt 的规范段（## 1~## 11），与内置副本 SPEC_PROMPT_BUILTIN 保持同步；
+     * 技能未加载（插件未安装/解析失败）时回退内置副本，规范段永远可用。
+     * 协议段（## 12 响应格式 + 行为准则）恒内置，不在此技能范围内。</p>
+     */
+    public static final String TEMPLATE_SPEC_SKILL_ID = "template-skills-plugin/template-spec";
+
     private final Map<String, AgentProfile> builtins = new LinkedHashMap<>();
 
     public BuiltinAgents() {

@@ -82,10 +82,12 @@ public final class DesignHtmlValidator {
         String pagePath = "design/" + pageName + ".html";
         String html = files.get(pagePath);
 
-        // V1：页面文件块齐全
+        // V1：页面文件块齐全（修正文案兼容两种输出形态：直出完整文档——系统会自动收编，
+        // 或 ===FILE:=== 文件块协议）
         if (html == null || html.isBlank()) {
             errors.add("V1: 缺少页面文件 " + pagePath
-                    + "（必须以 ===FILE: " + pagePath + "=== 标记输出完整文件块，不要省略）");
+                    + "（必须输出该页完整 HTML 文档：<!DOCTYPE html> 起、</html> 止；"
+                    + "或以 ===FILE: " + pagePath + "=== 标记输出文件块，不要省略）");
             return errors;
         }
 

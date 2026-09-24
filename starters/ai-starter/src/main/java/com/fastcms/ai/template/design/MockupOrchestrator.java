@@ -20,6 +20,7 @@ import com.fastcms.ai.autoconfigure.FastcmsAiProperties;
 import com.fastcms.ai.component.DesignDirectionLibrary;
 import com.fastcms.ai.service.IAiTemplateMessageService;
 import com.fastcms.ai.template.AiTemplateConstants;
+import com.fastcms.ai.template.compliance.TemplateComplianceChecker;
 import com.fastcms.entity.AiTemplateSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,14 +46,23 @@ import java.util.Set;
  *
  * <p><b>状态落盘 {@code workDir/design/plan.json}（文件即状态，重启/断线可恢复）</b>，状态机：</p>
  * <pre>
- * DESIGNING → AUDITING →（审计通过 ∧ confirmAuto）→ CONVERTING → DONE
- *                  │         └→（审计失败且 &lt; max-audit-rounds）→ DESIGNING（仅重出问题页）
- *                  │         └→（审计失败 ≥ max-audit-rounds）→ AWAITING_CONFIRM（人工兜底）
- *                  └→（confirmAuto=false 且审计通过）→ AWAITING_CONFIRM
- * AWAITING_CONFIRM →（approve）→ CONVERTING → DONE
- * AWAITING_CONFIRM →（reject + input 作修改意见）→ DESIGNING（全页重出）
- * 任意状态 →（FAILED：模型调用级异常）→ FAILED（保留已有文件，重新发消息按进度续传）
+ * 导入会话（createMode=import，AI 照上传 HTML 仿写）：
+ *   DESIGNING → AUDITING →（修正轮 &lt; max-audit-rounds）→ DESIGNING（仅重出问题页）
+ *                  │       └→（修正轮耗尽）→ 软门槛播报，直接 CONVERTING → DONE（全程无人工确认）
+ *   CONVERTING 重大失败 → FAILED（重新发消息按 mappingCache 断点续传，不设人工确认）
+ *
+ * 自由设计会话（createMode=design，AI 自由出设计稿）：
+ *   DESIGNING → AUDITING →（审计通过）→ AWAITING_CONFIRM（人工确认 HTML 设计稿）
+ *                  │       └→（修正轮 &lt; max-audit-rounds）→ DESIGNING（仅重出问题页）
+ *                  │       └→（修正轮耗尽）→ AWAITING_CONFIRM（人工兜底）
+ *   AWAITING_CONFIRM →（approve）→ CONVERTING → DONE
+ *   AWAITING_CONFIRM →（reject + input 作修改意见）→ DESIGNING（全页重出）
+ *   任意状态 →（FAILED：模型调用级异常）→ FAILED（保留已有文件，重新发消息按进度续传）
  * </pre>
+ *
+ * <p><b>闸门语义（用户决议）</b>：人工确认是"AI 自由设计的 HTML 是否合格"的关卡，
+ * 仅自由设计会话使用；导入会话的目标就是"照上传 HTML 转出规范模板"，全程自动，
+ * 审计/占位页/转化失败均不设人工确认闸门（质量由转化后 R4 合规检查器兜底 + 播报）。</p>
  *
  * <p><b>AWAITING_CONFIRM 不占线程</b>：推送 {@code confirm_request} 事件后本方法直接返回
  * （线程池归还，SseEmitter 生命周期由宿主 chatStream 收口）；下一次 chat 调用从 plan.json
@@ -103,15 +113,18 @@ public class MockupOrchestrator {
     private final IAiTemplateMessageService messageService;
     private final FastcmsAiProperties aiProperties;
     private final com.fastcms.ai.template.htmlimport.ImportService importService;
+    private final TemplateComplianceChecker complianceChecker;
 
     public MockupOrchestrator(MockupDesignService designService, MockupConverter converter,
                               IAiTemplateMessageService messageService, FastcmsAiProperties aiProperties,
-                              com.fastcms.ai.template.htmlimport.ImportService importService) {
+                              com.fastcms.ai.template.htmlimport.ImportService importService,
+                              TemplateComplianceChecker complianceChecker) {
         this.designService = designService;
         this.converter = converter;
         this.messageService = messageService;
         this.aiProperties = aiProperties;
         this.importService = importService;
+        this.complianceChecker = complianceChecker;
     }
 
     // ==================== plan.json 模型 ====================
@@ -394,19 +407,21 @@ public class MockupOrchestrator {
                 workDir, allPages, placeholders, importedPages(plan), isMobileAdaptive(session));
 
         if (issues.isEmpty()) {
-            boolean confirmAuto = Boolean.TRUE.equals(session.getConfirmAuto());
             plan = plan.withPendingIssues(List.of()).appendHistory("AUDIT_PASS");
-            // 占位页闸门：存在占位页时即使 confirmAuto 也不自动转化——占位页是格式校验
-            // 多轮未收敛的降级产物，直接转化会产出占位站点；进人工确认
-            //（重新发消息可要求重新设计占位页，确认则按占位页转化）
-            if (confirmAuto && placeholders.isEmpty()) {
-                // 落库（与设计轮摘要同因）：自动转化路径无人工确认播报，转化耗时较长，
-                // 中途关页重进须能看到"审计通过、正在转化"的进展锚点
-                saveAssistant(session.getSessionId(), "审计通过，正在将设计稿转化为模板…");
+            // 导入会话：全程无人工确认（用户决议：人工确认仅用于"AI 自由设计的 HTML 是否合格"）。
+            // 占位页不阻断——播报占位情况后按现状转化（占位页是格式校验多轮未收敛的降级产物，
+            // 重新发消息可要求重新设计，转化产物质量由 R4 合规检查器兜底）
+            if (AiTemplateConstants.isImportMode(session)) {
+                String note = placeholders.isEmpty() ? ""
+                        : "（注意：占位页 " + String.join("、", placeholders)
+                                + " 多轮未通过格式校验已降级，按现状转化）";
+                saveAssistant(session.getSessionId(), "审计通过，正在将设计稿转化为模板…" + note);
                 plan = plan.withState(STATE_CONVERTING);
                 persistPlan(workDir, plan);
                 return plan;
             }
+            // 自由设计会话：设计完 HTML 一律人工确认（confirmAuto 已废弃，不再绕过确认），
+            // 确认后才转化为模板文件；占位页随确认卡片列出
             List<String> confirmIssues = new ArrayList<>();
             if (!placeholders.isEmpty()) {
                 confirmIssues.add("占位页（" + String.join("、", placeholders)
@@ -437,7 +452,18 @@ public class MockupOrchestrator {
             persistPlan(workDir, plan);
             return plan;
         }
-        // 轮次耗尽：人工兜底（问题清单随 confirm_request 展示，用户可否决重出或确认放行）
+        // 轮次耗尽：
+        // 导入会话——软门槛：播报未过审计项后按现状直接转化（用户决议：导入会话不设人工确认；
+        // 硬编码色值/跨页差异等由转化阶段 R4 合规检查器确定性兜底 + 播报，不阻塞产物产出）
+        if (AiTemplateConstants.isImportMode(session)) {
+            saveAssistant(session.getSessionId(),
+                    "审计 " + issues.size() + " 项未过（" + codes + "），修正轮已用完，按现状继续转化为模板…");
+            plan = plan.withPendingIssues(List.of()).withState(STATE_CONVERTING)
+                    .appendHistory("AUDIT_FAIL(exhausted→auto-convert): " + codes);
+            persistPlan(workDir, plan);
+            return plan;
+        }
+        // 自由设计会话——人工兜底（问题清单随 confirm_request 展示，用户可否决重出或确认放行）
         plan = plan.withPendingIssues(instructions).withState(STATE_AWAITING_CONFIRM)
                 .appendHistory("AUDIT_FAIL(exhausted): " + codes);
         persistPlan(workDir, plan);
@@ -467,6 +493,21 @@ public class MockupOrchestrator {
                     .filter(r -> r.outcome() == MockupConverter.PageOutcome.FAILED)
                     .map(r -> r.pageKey() + ": " + (r.note() == null ? "渲染失败" : r.note()))
                     .toList();
+            // 导入会话：不进人工确认（用户决议）——标 FAILED 播报失败清单，
+            // 重新发消息即从 mappingCache 断点续传重试转化（已映射批次不重问 AI）
+            if (AiTemplateConstants.isImportMode(session)) {
+                StringBuilder msg = new StringBuilder("转化出现重大失败（" + failures.size() + " 页），本轮未产出模板，重新发送消息即可重试：");
+                for (String f : failures) {
+                    msg.append("\n- ").append(f);
+                }
+                saveAssistant(session.getSessionId(), msg.toString());
+                plan = plan.withPendingIssues(failures).withState(STATE_FAILED)
+                        .appendHistory("CONVERT: MAJOR_FAILURE(→FAILED, auto-resume)");
+                persistPlan(workDir, plan);
+                sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, msg.toString());
+                return;
+            }
+            // 自由设计会话：维持人工兜底（确认放行或否决重出）
             plan = plan.withPendingIssues(failures).withState(STATE_AWAITING_CONFIRM)
                     .appendHistory("CONVERT: MAJOR_FAILURE");
             persistPlan(workDir, plan);
@@ -481,6 +522,25 @@ public class MockupOrchestrator {
         if (AiTemplateConstants.isImportMode(session)) {
             importService.postConvertWiring(session, workDir, sse);
         }
+
+        // ===== R4 合规校验（链路 A-design/import 收口）：确定性兜底（元信息/预览数据/分页宏）
+        // + 播报；基础页缺失不在此补页（Link 非 BATCH_HTML，由 converter 的页面规划保证），
+        // 铁律：校验失败不影响转化结果 =====
+        try {
+            TemplateComplianceChecker.Report compliance = complianceChecker.check(workDir,
+                    TemplateComplianceChecker.Link.DESIGN_IMPORT,
+                    false, msg -> sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, msg));
+            for (String fixedPath : compliance.fixed()) {
+                importService.registerFile(session, workDir, sse, fixedPath);
+            }
+            // 合规结论落库（sink 已实时播报，落库保证刷新回看与下轮对话 AI 上下文可见）
+            if (!compliance.fixed().isEmpty() || !compliance.issues().isEmpty()) {
+                saveAssistant(session.getSessionId(), "【模板合规检查】" + compliance.summary(false));
+            }
+        } catch (Exception e) {
+            log.warn("模板合规校验失败（不影响转化结果）: sessionId={}", session.getSessionId(), e);
+        }
+
         String summary = buildDoneSummary(outcome);
         sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, summary);
         sendDone(sse, summary);
@@ -500,9 +560,9 @@ public class MockupOrchestrator {
     private void enterAwaitingConfirm(AiTemplateSession session, DesignPlan plan,
                                       List<String> issues, DesignSseSink sse) {
         sse.send(AiTemplateConstants.SSE_EVENT_CONFIRM_REQUEST,
-                toJson(buildConfirmCardData(session, issues, designPreviewUrl(session))));
+                toJson(buildConfirmCardData(session, issues, designPreviewUrl(session, plan))));
 
-        String previewUrl = designPreviewUrl(session);
+        String previewUrl = designPreviewUrl(session, plan);
         StringBuilder msg = new StringBuilder("设计稿已就绪，等待人工确认（预览：").append(previewUrl).append("）");
         if (!issues.isEmpty()) {
             msg.append("\n待处理问题：");
@@ -583,10 +643,25 @@ public class MockupOrchestrator {
 
     /**
      * 设计稿预览地址（会话内设计目录入口页，前端确认卡片"查看设计稿"链接）
+     *
+     * <p>入口页取 plan 中 pageKey=index 页面的实际设计稿路径——导入保真场景下首页
+     * 是 design/&lt;landing 文件名&gt;.html 而非 design/index.html（plan.json 实证：
+     * fastcms-landing 页 name=fastcms-landing、pageKey=index），硬拼 index.html 会 404。</p>
      */
-    private static String designPreviewUrl(AiTemplateSession session) {
+    private static String designPreviewUrl(AiTemplateSession session, DesignPlan plan) {
+        String entry = null;
+        if (plan != null && plan.pages() != null) {
+            entry = plan.pages().stream()
+                    .filter(p -> "index".equals(p.pageKey()))
+                    .map(PageState::html)
+                    .filter(h -> h != null && !h.isBlank())
+                    .findFirst().orElse(null);
+        }
+        if (entry == null) {
+            entry = "design/index.html";
+        }
         return "/ai/template/preview/" + session.getSessionId() + "/"
-                + session.getTemplateName() + "/design/index.html";
+                + session.getTemplateName() + "/" + entry;
     }
 
     /**
@@ -600,7 +675,7 @@ public class MockupOrchestrator {
         if (plan == null || !STATE_AWAITING_CONFIRM.equals(plan.state())) {
             return null;
         }
-        return buildConfirmCardData(session, plan.pendingIssues(), designPreviewUrl(session));
+        return buildConfirmCardData(session, plan.pendingIssues(), designPreviewUrl(session, plan));
     }
 
     // ==================== plan 演进辅助 ====================

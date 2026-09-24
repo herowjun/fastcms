@@ -414,7 +414,11 @@ public class ImportService {
         }
     }
 
-    private void registerFile(AiTemplateSession session, Path workDir, DesignSseSink sse, String relPath) {
+    /**
+     * 产物文件注册进会话文件表 + 推送 SSE file 事件（前端文件树 + 应用前可见）。
+     * 导入接线与 R4 合规校验修复产物共用（文件已落盘，仅补注册与推送）。
+     */
+    public void registerFile(AiTemplateSession session, Path workDir, DesignSseSink sse, String relPath) {
         try {
             String content = Files.readString(workDir.resolve(relPath), StandardCharsets.UTF_8);
             fileService.saveOrUpdateFile(session.getSessionId(), relPath, content,

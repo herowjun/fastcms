@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模板编辑页 v3 原型 · 左侧统一操作对象</title>
+<style>
+:root{
+  --primary:#409eff; --primary-light:#ecf5ff; --border:#dcdfe6; --border-light:#ebeef5;
+  --bg:#f5f7fa; --card:#fff; --text:#303133; --text2:#606266; --text3:#909399;
+  --draft:#7e22ce; --draft-bg:#faf5ff; --draft-bd:#d8b4fe;
+  --ok:#529b2e; --ok-bg:#f0f9eb; --ok-bd:#b3e19d;
+  --warn:#e6a23c; --warn-bg:#fdf6ec;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:13px;color:var(--text);background:var(--bg);height:100vh;overflow:hidden}
+.page{display:flex;height:100vh;gap:12px;padding:12px}
+
+/* ===== 左列：统一操作对象面板（固定 280px） ===== */
+.left{width:280px;flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
+.obj-card{border-radius:6px;padding:10px 12px;cursor:pointer;user-select:none;border:1px solid var(--primary);background:var(--primary-light);transition:border-color .2s,box-shadow .2s}
+.obj-card:hover{box-shadow:0 2px 8px rgba(64,158,255,.18)}
+.obj-card.draft{border-color:var(--draft-bd);background:var(--draft-bg);color:var(--draft)}
+.obj-card.applied{border-color:var(--ok-bd);background:var(--ok-bg);color:var(--ok)}
+.obj-line1{display:flex;align-items:center;gap:6px;color:var(--primary)}
+.obj-card.draft .obj-line1{color:var(--draft)}
+.obj-card.applied .obj-line1{color:var(--ok)}
+.obj-ico{font-size:15px;flex:none}
+.obj-name{font-weight:600;font-size:14px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.obj-tag{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;opacity:.75}
+.obj-caret{margin-left:auto;flex:none;font-size:11px;opacity:.6}
+.obj-line2{margin-top:6px;font-size:12px;color:var(--text3)}
+.new-tpl{flex:none;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border:1px dashed var(--border);border-radius:6px;background:var(--card);color:var(--text2);cursor:pointer;font-size:13px}
+.new-tpl:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}
+
+.tree-card{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border-light);border-radius:6px}
+.tree-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border-light)}
+.tree-head b{font-size:13px}
+.tree-refresh{border:none;background:none;color:var(--text3);cursor:pointer;font-size:13px}
+.tree-refresh:hover{color:var(--primary)}
+.tree-filter{padding:8px 10px 2px}
+.tree-filter input{width:100%;height:28px;border:1px solid var(--border);border-radius:4px;padding:0 8px;font-size:12px;outline:none}
+.tree-filter input:focus{border-color:var(--primary)}
+.tree-body{flex:1;min-height:120px;overflow:auto;padding:4px 6px 10px}
+.tn{display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;font-size:13px}
+.tn:hover{background:var(--bg)}
+.tn.cur{background:var(--primary-light);color:var(--primary)}
+.tn .tw{width:14px;flex:none;font-size:10px;color:var(--text3);text-align:center}
+.tn .ti{flex:none;font-size:13px}
+.tn.dir>div{font-weight:500}
+.tn .cnt{margin-left:auto;font-size:11px;color:var(--text3)}
+
+/* ===== 右列 ===== */
+.right{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+.view-tabs{display:flex;align-items:center;gap:4px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border-light);flex:none}
+.vt{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;font-size:14px;color:var(--text2);border-radius:6px 6px 0 0;cursor:pointer;border-bottom:2px solid transparent}
+.vt:hover{color:var(--primary)}
+.vt.active{color:var(--primary);font-weight:600;border-bottom-color:var(--primary)}
+.view-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;border-radius:4px;border:1px solid var(--border);background:var(--card);color:var(--text2);cursor:pointer;font-size:13px;white-space:nowrap}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.pri:hover{background:#66b1ff;color:#fff}
+.btn.wrn{border-color:#f5dab1;color:var(--warn);background:var(--warn-bg)}
+.btn.suc{background:#67c23a;border-color:#67c23a;color:#fff}
+.btn.dan{border-color:#fab6b6;color:#f56c6c;background:#fef0f0}
+.btn.sm{height:26px;padding:0 10px;font-size:12px}
+.dirty-tip{color:var(--warn);font-size:12px}
+.btn.pri2{border-color:#c6e2ff;color:var(--primary);background:#fff}
+.btn.pri2:hover{background:var(--primary-light)}
+.vd{width:1px;height:18px;background:var(--border);flex:none}
+.prev-hint{margin-left:auto;font-size:12px;color:var(--text3)}
+
+.content{flex:1;min-height:0;display:flex}
+.pane{display:none;flex:1;min-height:0;gap:12px}
+.pane.show{display:flex}
+
+/* 预览列（两视图同构） */
+.pv{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border-light);border-radius:6px;min-height:0}
+.pv-head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border-light);flex:none}
+.pv-url{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--bg);border-radius:10px;padding:4px 12px;font-size:12px;color:var(--text2);max-width:60%}
+.pv-tools{margin-left:auto;display:flex;gap:2px}
+.pv-tools span{padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px;color:var(--text3)}
+.pv-tools span:hover{background:var(--bg);color:var(--primary)}
+.pv-tools span.on{background:var(--primary-light);color:var(--primary)}
+.sel{height:26px;border:1px solid var(--border);border-radius:4px;padding:0 8px;font-size:12px;color:var(--text2);outline:none;background:#fff}
+.sel:focus{border-color:var(--primary)}
+.pv-body{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--bg)}
+
+/* 假网站 mock */
+.mock{background:#fff;border-radius:4px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.mock-nav{display:flex;align-items:center;gap:16px;padding:10px 16px;background:#1e3a5f;color:#fff;font-size:12px}
+.mock-nav b{font-size:14px}
+.mock-nav span{opacity:.85}
+.mock-hero{padding:36px 24px;background:linear-gradient(120deg,#e8f1fb,#f4f8fd);text-align:center}
+.mock-hero h2{font-size:20px;color:#1e3a5f;margin-bottom:8px}
+.mock-hero p{font-size:12px;color:var(--text3)}
+.mock-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px}
+.mc{border:1px solid var(--border-light);border-radius:6px;padding:12px}
+.mc i{display:block;height:60px;border-radius:4px;background:linear-gradient(135deg,#dce9f7,#eef4fb);margin-bottom:8px;font-style:normal}
+.mc b{font-size:12px;display:block;margin-bottom:4px}
+.mc p{font-size:11px;color:var(--text3);line-height:1.5}
+
+/* AI 对话列（30%） */
+.chat{flex:0 0 30%;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border-light);border-radius:6px;min-height:0}
+.chat-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border-light);flex:none}
+.pill{font-size:12px;padding:3px 10px;border-radius:10px;flex:none}
+.pill.adjust{background:var(--primary-light);color:var(--primary)}
+.pill.session{background:var(--draft-bg);color:var(--draft)}
+.pill.applied{background:var(--ok-bg);color:var(--ok)}
+.sess-sel{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text2);cursor:pointer}
+.sess-sel:hover{color:var(--primary)}
+.chat-msgs{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:92%}
+.msg .role{font-size:11px;color:var(--text3);margin-bottom:3px}
+.msg .body{border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.6;white-space:pre-wrap}
+.msg.user{align-self:flex-end}
+.msg.user .body{background:var(--primary);color:#fff}
+.msg.ai .body{background:var(--bg);color:var(--text)}
+.prog{margin-top:8px;border:1px solid var(--border-light);border-radius:6px;padding:8px 10px;font-size:12px}
+.prog .ph{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text2)}
+.prog .pi{display:flex;align-items:center;gap:6px;padding:2px 0;color:var(--text3)}
+.prog .pi.done{color:var(--ok)}
+.prog .pi.cur{color:var(--primary)}
+.chat-input{border-top:1px solid var(--border-light);padding:8px 10px 10px;flex:none}
+.ci-tools{display:flex;align-items:center;gap:4px;margin-bottom:6px}
+.ci-tools .btn{height:24px;padding:0 8px;font-size:12px}
+.ci-tools .btn.on{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}
+.ci-tools .sw{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text3)}
+.chat-input textarea{width:100%;height:58px;border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;resize:none;outline:none;font-family:inherit}
+.chat-input textarea:focus{border-color:var(--primary)}
+.ci-actions{display:flex;justify-content:flex-end;margin-top:6px}
+
+/* 代码列（30%） */
+.code{flex:0 0 30%;min-width:0;display:flex;flex-direction:column;background:#1e1e1e;border-radius:6px;min-height:0}
+.code-head{display:flex;align-items:center;gap:8px;padding:7px 12px;background:#252526;color:#ccc;font-size:12px;border-bottom:1px solid #333;flex:none}
+.code-head .fn{color:#4fc1ff}
+.code-head .dirty-tip{margin-left:auto}
+.code-body{flex:1;min-height:0;overflow:auto;padding:10px 0;font-family:Consolas,"Courier New",monospace;font-size:12px;line-height:1.7;color:#d4d4d4;white-space:pre}
+.ln{display:flex}
+.ln .no{width:38px;flex:none;text-align:right;padding-right:12px;color:#5a5a5a;user-select:none}
+.ln .tg{color:#569cd6}
+.ln .at{color:#9cdcfe}
+.ln .st{color:#ce9178}
+.ln .cm{color:#6a9955}
+</style>
+</head>
+<body>
+<div class="page">
+  <!-- ═══════ 左列：统一操作对象（选择按钮 + 新建 + 附件树，固定 280px）═══════ -->
+  <div class="left">
+    <div class="obj-card" id="objCard" title="点击切换工作对象" onclick="openDialog()">
+      <div class="obj-line1">
+        <span class="obj-ico">📄</span>
+        <span class="obj-name">企业官网模板</span>
+        <span class="obj-tag">corporate-site</span>
+        <span class="obj-caret">▾</span>
+      </div>
+      <div class="obj-line2" id="objLine2">正式模板 · ID 12 · 点击切换对象</div>
+    </div>
+
+    <div class="tree-card">
+      <div class="tree-head">
+        <b id="treeTitle">模板目录</b>
+        <button class="tree-refresh" title="刷新">⟳</button>
+      </div>
+      <div class="tree-filter"><input placeholder="过滤文件…"></div>
+      <div class="tree-body" id="treeBody">
+        <div class="tn dir"><span class="tw">▾</span><span class="ti">📁</span>templates<div class="cnt"></div></div>
+        <div class="tn dir" style="padding-left:22px"><span class="tw">▾</span><span class="ti">📁</span>corporate-site<div class="cnt">7</div></div>
+        <div class="tn" style="padding-left:38px"><span class="tw"></span><span class="ti">📄</span>index.html</div>
+        <div class="tn cur" style="padding-left:38px"><span class="tw"></span><span class="ti">📄</span>about.html</div>
+        <div class="tn" style="padding-left:38px"><span class="tw"></span><span class="ti">📄</span>contact.html</div>
+        <div class="tn dir" style="padding-left:38px"><span class="tw">▾</span><span class="ti">📁</span>static<div class="cnt">4</div></div>
+        <div class="tn" style="padding-left:54px"><span class="tw"></span><span class="ti">🖼</span>logo.png</div>
+        <div class="tn" style="padding-left:54px"><span class="tw"></span><span class="ti">🖼</span>hero.jpg</div>
+        <div class="tn" style="padding-left:54px"><span class="tw"></span><span class="ti">🎞</span>main.css</div>
+        <div class="tn" style="padding-left:54px"><span class="tw"></span><span class="ti">⚙</span>app.js</div>
+        <div class="tn" style="padding-left:38px"><span class="tw"></span><span class="ti">📄</span>config.yaml</div>
+        <div class="tn" style="padding-left:38px"><span class="tw"></span><span class="ti">🔖</span>meta.json</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 右列：顶部视图 tab + 内容 ═══════ -->
+  <div class="right">
+    <div class="view-tabs">
+    <div class="vt active" id="vtAi" onclick="switchView('ai')">🤖 AI 工作台</div>
+    <div class="vt" id="vtManual" onclick="switchView('manual')">✏️ 手动编辑</div>
+    <!-- AI 工作台工具条按钮（与现有代码一致：新建模板/回滚最近/应用模板/编辑此模板/预览指向） -->
+    <div class="view-actions" id="actAi">
+      <button class="btn sm wrn" onclick="noop()">✦ 新建模板</button>
+      <button class="btn sm dan" onclick="noop()">↩ 回滚最近</button>
+      <button class="btn sm suc" onclick="noop()">✓ 应用模板</button>
+      <button class="btn sm pri2" onclick="noop()" title="把应用后的正式模板加载到主编辑视图继续修改">✎ 编辑此模板</button>
+      </div>
+    <!-- 手动编辑工具条按钮（与现有代码一致：上传/保存/删除/未保存提示） -->
+    <div class="view-actions" id="actEdit" style="display:none">
+      <button class="btn sm pri" onclick="noop()">＋ 上传模板文件</button>
+      <span class="vd"></span>
+      <button class="btn sm pri" onclick="noop()">保存</button>
+      <button class="btn sm dan" onclick="noop()">删除</button>
+      <span class="dirty-tip">● 有未保存的修改</span>
+    </div>
+    </div>
+
+    <div class="content">
+      <!-- ── AI 工作台：预览(flex1) │ 对话(30%) ── -->
+      <div class="pane show" id="paneAi">
+                <div class="pv">
+          <div class="pv-head">
+            <select class="sel" style="max-width:210px;text-overflow:ellipsis"><option>corporate-site/about.html</option><option>corporate-site/index.html</option><option>corporate-site/contact.html</option></select>
+            <select class="sel"><option>桌面</option><option>平板 · 768px</option><option>手机 · 375px</option></select>
+            <div class="pv-tools"><span>↺ 刷新</span><span>⤢ 新窗口打开</span></div>
+          </div>
+          <div class="pv-body">
+            <div class="mock">
+              <div class="mock-nav"><b>星辰科技</b><span>首页</span><span>关于我们</span><span>产品</span><span>联系</span></div>
+              <div class="mock-hero"><h2>值得信赖的企业数字化伙伴</h2><p>二十年行业沉淀 · 服务 300+ 企业客户</p></div>
+              <div class="mock-cards">
+                <div class="mc"><i></i><b>云服务</b><p>弹性算力，按需扩展，支撑业务高峰。</p></div>
+                <div class="mc"><i></i><b>数据中台</b><p>统一数据资产，驱动精细化运营。</p></div>
+                <div class="mc"><i></i><b>智能客服</b><p>7×24 小时在线，转化率提升 35%。</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chat">
+          <div class="chat-head">
+            <span class="pill adjust">调整直写</span>
+            <span class="sess-sel">会话：调整-0918-02 ▾</span>
+            <button class="btn sm" style="margin-left:auto;flex:none" onclick="noop()">＋ 新建会话</button>
+          </div>
+          <div class="chat-msgs">
+            <div class="msg user"><div class="role">我</div><div class="body">把 about.html 的团队介绍改成 3 列卡片布局，配头像占位图</div></div>
+            <div class="msg ai"><div class="role">AI</div><div class="body">好的，我已调整 about.html 的团队板块：
+
+1. 改为 3 列响应式卡片（桌面 3 列 / 平板 2 列 / 手机 1 列）
+2. 每张卡片含圆形头像占位、姓名、职务、简介
+3. 卡片悬停有轻微上浮阴影
+
+文件已写入，预览已自动刷新，可在左侧树中高亮的文件查看。</div>
+              <div class="prog">
+                <div class="ph"><span>文件进度</span><span>3/3</span></div>
+                <div class="pi done">✔ about.html</div>
+                <div class="pi done">✔ static/main.css</div>
+                <div class="pi done">✔ static/app.js</div>
+              </div>
+            </div>
+          </div>
+          <div class="chat-input">
+            <div class="ci-tools">
+              <button class="btn" title="图片替换点选">🖼</button>
+              <button class="btn" title="区块选区">▦ 选区</button>
+              <span class="sw">☐ 全量注入</span>
+            </div>
+            <textarea placeholder="描述你想要的修改，Enter 发送，Shift+Enter 换行"></textarea>
+            <div class="ci-actions"><button class="btn sm pri">发送</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 手动编辑：预览(flex1) │ 代码(30%) ── -->
+      <div class="pane" id="paneManual">
+                <div class="pv">
+          <div class="pv-head">
+            <select class="sel" style="max-width:210px;text-overflow:ellipsis"><option>corporate-site/about.html</option><option>corporate-site/index.html</option><option>corporate-site/contact.html</option></select>
+            <select class="sel"><option>桌面</option><option>平板 · 768px</option><option>手机 · 375px</option></select>
+            <div class="pv-tools"><span>↺ 刷新</span><span>⤢ 新窗口打开</span></div>
+          </div>
+          <div class="pv-body">
+            <div class="mock">
+              <div class="mock-nav"><b>星辰科技</b><span>首页</span><span>关于我们</span><span>产品</span><span>联系</span></div>
+              <div class="mock-hero"><h2>值得信赖的企业数字化伙伴</h2><p>二十年行业沉淀 · 服务 300+ 企业客户</p></div>
+              <div class="mock-cards">
+                <div class="mc"><i></i><b>云服务</b><p>弹性算力，按需扩展，支撑业务高峰。</p></div>
+                <div class="mc"><i></i><b>数据中台</b><p>统一数据资产，驱动精细化运营。</p></div>
+                <div class="mc"><i></i><b>智能客服</b><p>7×24 小时在线，转化率提升 35%。</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="code">
+          <div class="code-head"><span class="fn">about.html</span><span class="dirty-tip">● 未保存</span></div>
+          <div class="code-body"><div class="ln"><span class="no">14</span><span class="cm">&lt;!-- 团队介绍：3 列卡片布局（AI 生成 09-18）--&gt;</span></div><div class="ln"><span class="no">15</span><span class="tg">&lt;section</span> <span class="at">class</span>=<span class="st">"team"</span><span class="tg">&gt;</span></div><div class="ln"><span class="no">16</span>  <span class="tg">&lt;h2</span> <span class="at">class</span>=<span class="st">"sec-title"</span><span class="tg">&gt;</span>我们的团队<span class="tg">&lt;/h2&gt;</span></div><div class="ln"><span class="no">17</span>  <span class="tg">&lt;div</span> <span class="at">class</span>=<span class="st">"team-grid"</span><span class="tg">&gt;</span></div><div class="ln"><span class="no">18</span>    <span class="tg">&lt;article</span> <span class="at">class</span>=<span class="st">"member"</span><span class="tg">&gt;</span></div><div class="ln"><span class="no">19</span>      <span class="tg">&lt;img</span> <span class="at">src</span>=<span class="st">"static/avatar-1.png"</span> <span class="at">alt</span>=<span class="st">"张明"</span><span class="tg">&gt;</span></div><div class="ln"><span class="no">20</span>      <span class="tg">&lt;h3&gt;</span>张明<span class="tg">&lt;/h3&gt;</span></div><div class="ln"><span class="no">21</span>      <span class="tg">&lt;p</span> <span class="at">class</span>=<span class="st">"role"</span><span class="tg">&gt;</span>技术总监<span class="tg">&lt;/p&gt;</span></div><div class="ln"><span class="no">22</span>      <span class="tg">&lt;p&gt;</span>10 年 Web 架构经验，主导多个<span class="tg">&lt;/p&gt;</span></div><div class="ln"><span class="no">23</span>      <span class="tg">&lt;/article&gt;</span></div><div class="ln"><span class="no">24</span>    <span class="tg">&lt;/div&gt;</span></div><div class="ln"><span class="no">25</span>  <span class="tg">&lt;/div&gt;</span></div><div class="ln"><span class="no">26</span> <span class="tg">&lt;/section&gt;</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+  <!-- ═══════ 工作对象选择弹窗（三页签）═══════ -->
+  <div id="dlgMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100" onclick="closeDialog()">
+    <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:720px;max-height:80vh;background:#fff;border-radius:8px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-light)">
+        <b style="font-size:15px">选择工作对象</b>
+        <span style="cursor:pointer;color:var(--text3);font-size:18px" onclick="closeDialog()">×</span>
+      </div>
+      <div style="padding:10px 18px 0;display:flex;gap:2px;border-bottom:1px solid var(--border-light)">
+        <span class="tabbtn active" id="t1" onclick="tab(1)" style="padding:8px 14px;cursor:pointer;border-bottom:2px solid var(--primary);color:var(--primary);font-weight:600">正式模板 <i style="font-style:normal;background:var(--primary-light);color:var(--primary);border-radius:9px;padding:0 7px;font-size:11px">3</i></span>
+        <span class="tabbtn" id="t2" onclick="tab(2)" style="padding:8px 14px;cursor:pointer;color:var(--text2)">草稿 · 未应用 <i style="font-style:normal;background:#f4f4f5;color:var(--text3);border-radius:9px;padding:0 7px;font-size:11px">2</i></span>
+        <span class="tabbtn" id="t3" onclick="tab(3)" style="padding:8px 14px;cursor:pointer;color:var(--text2)">已应用记录 <i style="font-style:normal;background:#f4f4f5;color:var(--text3);border-radius:9px;padding:0 7px;font-size:11px">1</i></span>
+      </div>
+      <div style="padding:8px 18px;font-size:12px;color:var(--text3);background:var(--bg)">点击行选中对象（停留在当前页签）；行内按钮指定打开后的视图</div>
+      <div style="flex:1;overflow:auto;padding:6px 12px 10px" id="dlgBody">
+        <div class="row" onclick="pickTpl()"><span style="color:var(--primary)">📄</span><b>企业官网模板</b><span style="color:var(--text3);font-size:12px">corporate-site · ID 12</span><span class="rowbtns"><button class="btn sm" onclick="event.stopPropagation()">去 AI 工作台</button><button class="btn sm" onclick="event.stopPropagation()">手动编辑</button></span></div>
+        <div class="row" onclick="pickTpl2()"><span style="color:var(--primary)">📄</span><b>活动落地页模板</b><span style="color:var(--text3);font-size:12px">landing-2026 · ID 15</span><span class="rowbtns"><button class="btn sm" onclick="event.stopPropagation()">去 AI 工作台</button><button class="btn sm" onclick="event.stopPropagation()">手动编辑</button></span></div>
+        <div class="row" onclick="noop()"><span style="color:var(--primary)">📄</span><b>文档站模板</b><span style="color:var(--text3);font-size:12px">docs · ID 21</span><span class="rowbtns"><button class="btn sm" onclick="event.stopPropagation()">去 AI 工作台</button><button class="btn sm" onclick="event.stopPropagation()">手动编辑</button></span></div>
+      </div>
+      <div style="padding:10px 18px;border-top:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+        <input placeholder="关键字过滤…" style="width:220px;height:28px;border:1px solid var(--border);border-radius:4px;padding:0 8px;font-size:12px">
+        <button class="btn sm" onclick="closeDialog()">关闭</button>
+      </div>
+    </div>
+  </div>
+  <style>
+  .row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:5px;cursor:pointer;font-size:13px}
+  .row:hover{background:var(--bg)}
+  .row b{font-weight:500}
+  .rowbtns{margin-left:auto;display:flex;gap:6px}
+  </style>
+<script>
+function noop(){/* 原型占位 */}
+function openDialog(){document.getElementById('dlgMask').style.display='block'}
+function closeDialog(){document.getElementById('dlgMask').style.display='none'}
+function tab(n){for(var i=1;i<=3;i++){var e=document.getElementById('t'+i);e.style.borderBottom=i===n?'2px solid var(--primary)':'2px solid transparent';e.style.color=i===n?'var(--primary)':'var(--text2)';e.style.fontWeight=i===n?'600':'400'}}
+function pickTpl(){closeDialog();setObj('','','corporate-site · ID 12','模板目录','正式模板 · ID 12 · 点击切换对象')}
+function pickTpl2(){closeDialog();setObj('','活动落地页模板','landing-2026 · ID 15','活动落地页模板目录','正式模板 · ID 15 · 点击切换对象')}
+function setObj(cls,name,tag,treeTitle,line2){
+  var c=document.getElementById('objCard');c.className='obj-card'+(cls?' '+cls:'');
+  if(name)c.querySelector('.obj-name').textContent=name;
+  if(tag)c.querySelector('.obj-tag').textContent=tag;
+  if(treeTitle)document.getElementById('treeTitle').textContent=treeTitle;
+  if(line2)document.getElementById('objLine2').textContent=line2;
+}
+function switchView(v){
+  document.getElementById('vtAi').classList.toggle('active',v==='ai');
+  document.getElementById('vtManual').classList.toggle('active',v==='manual');
+  document.getElementById('paneAi').classList.toggle('show',v==='ai');
+  document.getElementById('paneManual').classList.toggle('show',v==='manual');
+  document.getElementById('actAi').style.display=v==='ai'?'flex':'none';
+  document.getElementById('actEdit').style.display=v==='manual'?'flex':'none';
+  /* 真实实现：两 tab v-show 保活，切 tab 不丢状态（此处原型同步刷新演示） */
+}
+</script>
+</body>
+</html>

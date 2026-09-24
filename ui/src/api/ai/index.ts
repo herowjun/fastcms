@@ -384,7 +384,8 @@ export function AiTemplateApi() {
 		},
 
 		/**
-		 * 构造会话文件上传 URL（el-upload action 使用；data 携带 dirName + sessionId）
+		 * 构造会话文件上传 URL（el-upload action 使用；sessionId 在 URL path，
+		 * data 只需携带 dirName，与后端 uploadSessionFiles(dirName, files) 参数对齐）
 		 */
 		sessionUploadUrl(sessionId: string) {
 			return import.meta.env.VITE_API_URL + '/admin/ai/template/sessions/' + sessionId + '/files/upload';

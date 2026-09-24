@@ -16,7 +16,9 @@
 ```
 ① AI 自主设计（自主型智能体，可加载设计技能）→ design/ 下纯 HTML 设计稿
 ② 机器审计（确定性 A1~A7 清单）→ 不过则 AI 修正（≤2 轮）
-③ 确认关口：confirmAuto=true → 审计通过自动放行；false → 前端确认卡片
+③ 确认关口（2026-09-21 决议修订，以 MockupOrchestrator 实现为准）：
+   自由设计会话 → 审计后一律前端确认卡片（人工确认 HTML 设计稿，confirmAuto 已废弃）；
+   导入会话（createMode=import）→ 全程无人工确认，审计修正轮耗尽降级为软门槛直接转化
 ④ 确定性转化（代码驱动，AI 只做区块→组件语义映射）→ 正式模板文件
 ⑤ 复用既有 apply/预览/调整管线
 ```
@@ -124,10 +126,15 @@ private Boolean confirmAuto;
 状态迁移（代码强制，非法迁移抛异常 + SSE 播报）：
 
 ```
-DESIGNING → AUDITING →（审计通过 ∧ confirmAuto）→ CONVERTING → DONE
+导入会话（createMode=import，2026-09-21 决议：全程无人工确认）：
+DESIGNING → AUDITING →（修正轮<2）→ DESIGNING
+               │         └→（修正轮耗尽）→ 软门槛播报，直接 CONVERTING → DONE
+CONVERTING 重大失败 → FAILED（重新发消息按 mappingCache 断点续传）
+
+自由设计会话（createMode=design，人工确认 HTML 设计稿后才转化）：
+DESIGNING → AUDITING →（审计通过）→ AWAITING_CONFIRM
                  │         └→（审计失败且<2轮）→ DESIGNING
-                 │         └→（审计失败≥2轮）→ AWAITING_CONFIRM（降级人工兜底）
-                 └→（confirmAuto=false 且审计通过）→ AWAITING_CONFIRM
+                 │         └→（审计失败≥2轮）→ AWAITING_CONFIRM（人工兜底）
 AWAITING_CONFIRM →（approve）→ CONVERTING → DONE
 AWAITING_CONFIRM →（reject+comment）→ DESIGNING（携带 comment 重出）
 任意状态 →（FAILED：模型连续失败/格式不可救）→ FAILED（保留已有文件，可重新发消息继续）
@@ -240,7 +247,8 @@ for page in pages:
 | A7 | 体积护栏：单页 HTML ≤ 60KB（防转化后模板膨胀） | 文件尺寸 | 退回设计（要求精简） |
 
 审计 → 修正 loop ≤2 轮（与升级管线 `MAX_AUDIT_ROUNDS=2` 同口径）；
-仍失败 → 进 `AWAITING_CONFIRM` 人工兜底（confirmAuto 用户此时必能看到问题清单）。
+仍失败 → 自由设计会话进 `AWAITING_CONFIRM` 人工兜底（用户此时必能看到问题清单）；
+导入会话按软门槛播报后直接转化（2026-09-21 决议，无人工确认）。
 
 
 ---
@@ -289,7 +297,7 @@ for page in pages:
 |---|---|
 | 单区块 Step 2 映射 2 次失败 | 该区块 → custom_macro（页面完整，播报"第 N 区块已转为自定义区块"） |
 | 单页 Step 5 渲染 2 轮修不好 | 该页整页 → 单 custom_macro（页面可见，播报降级） |
-| 多页失败 ≥ 半数 | 暂停转化，`AWAITING_CONFIRM` 展示失败清单（approve 带伤转化 / reject 回设计段） |
+| 多页失败 ≥ 半数 | 自由设计会话：暂停转化，`AWAITING_CONFIRM` 展示失败清单（approve 带伤转化 / reject 回设计段）；导入会话：`FAILED` 播报失败清单，重新发消息按 mappingCache 断点续传（2026-09-21 决议，无人工确认） |
 | 全失败 | `FAILED`，保留 design/ 目录，用户可"从设计稿继续"（plan.json 断点续传） |
 
 ### 5.3 产物同构性（兼容 apply 的关键）

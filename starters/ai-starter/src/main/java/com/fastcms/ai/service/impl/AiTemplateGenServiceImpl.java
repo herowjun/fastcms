@@ -29,6 +29,7 @@ import com.fastcms.ai.template.AiTemplateSessionRequest;
 import com.fastcms.ai.template.ComponentGenPromptBuilder;
 import com.fastcms.ai.template.IAiTemplateGenService;
 import com.fastcms.ai.template.TemplateGenPromptBuilder;
+import com.fastcms.ai.template.compliance.TemplateComplianceChecker;
 import com.fastcms.ai.template.design.DesignSseSink;
 import com.fastcms.ai.template.design.MockupOrchestrator;
 import com.fastcms.ai.component.PageSpecParser;
@@ -170,6 +171,12 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
      */
     @Autowired
     private com.fastcms.ai.template.AiTemplatePreviewRenderer previewRenderer;
+
+    /**
+     * 模板规范合规校验/兜底（所有生成链路的统一收口，见 doc/wiki/ai-template-spec-compliance-remediation-design.md §6-R4）
+     */
+    @Autowired
+    private com.fastcms.ai.template.compliance.TemplateComplianceChecker complianceChecker;
 
     /**
      * 旧模板「样式组件化」升级器（确定性前置 + 锚点扫描/校验，AI 改造轮由本服务驱动）
@@ -374,7 +381,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                     : "调整 " + template.getPathName());
             session.setWorkDir(template.getTemplatePath().toString());
         } else {
-            // 生成型会话：在预览工作目录中生成，应用后复制到正式模板目录
+            // 生成型会话：在预览工作目录中生成，应用后复制到正式模板目录。
+            // 模板名即正式模板目录名（applyTemplate 直接替换目标目录），创建期校验全局唯一
+            validateTemplateNameUnique(request.getTemplateName());
             session.setTemplateName(request.getTemplateName());
             session.setTitle(StringUtils.hasText(request.getTitle())
                     ? request.getTitle()
@@ -1320,6 +1329,27 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                 messages.add(new UserMessage(promptBuilder.buildRenderFixPrompt(
                         renderErrors, buildBatchFileSection(workDir, renderFixFiles), normalizedCur)));
                 continue;
+            }
+
+            // ===== R4 合规校验（链路 C 收口）：本轮有文件产出才校验；调整型会话工作目录
+            // 是已应用正式模板，只播报不回写（readOnly）；生成型的修复产物补注册 =====
+            if (totalFiles > 0) {
+                try {
+                    Path complianceDir = resolveEffectiveWorkDir(session);
+                    TemplateComplianceChecker.Report compliance = complianceChecker.check(complianceDir,
+                            TemplateComplianceChecker.Link.BATCH_HTML,
+                            isAdjust, msg -> sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, msg));
+                    if (!isAdjust) {
+                        registerComplianceFixedFiles(session, channel, complianceDir, compliance.fixed());
+                    }
+                    // 合规结论落库（sink 已实时播报给前端，这里保证下轮对话 AI 上下文可见）
+                    if (!compliance.fixed().isEmpty() || !compliance.issues().isEmpty()) {
+                        messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
+                                "【模板合规检查】" + compliance.summary(isAdjust));
+                    }
+                } catch (Exception e) {
+                    log.warn("模板合规校验失败（不影响生成结果）: sessionId={}", session.getSessionId(), e);
+                }
             }
 
             // 兜底推送：流式期间未推送过 reply（如 AI 把 reply 放在 files 之后、或旧数组格式）时补推，
@@ -2918,6 +2948,23 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             finalExtractor = fixExtractor;
         }
 
+        // ===== R4 合规校验（链路 A-pipeline 统一收口，循环外只执行一次） =====
+        // 渲染校验保证"能渲染"，合规校验保证"符合模板规范"（基础页/布局/元信息/预览数据/
+        // 分页宏/目录结构）；可修复项已由 checker 确定性兜底落盘，这里只负责把修复产物
+        // 补注册（checker 不感知会话与持久化），铁律：校验失败不影响生成结果
+        String complianceNote = null;
+        try {
+            TemplateComplianceChecker.Report compliance = complianceChecker.check(workDir,
+                    TemplateComplianceChecker.Link.PIPELINE,
+                    false, msg -> sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, msg));
+            registerComplianceFixedFiles(session, channel, workDir, compliance.fixed());
+            if (!compliance.fixed().isEmpty() || !compliance.issues().isEmpty()) {
+                complianceNote = compliance.summary(false);
+            }
+        } catch (Exception e) {
+            log.warn("模板合规校验失败（不影响生成结果）: sessionId={}", session.getSessionId(), e);
+        }
+
         // ===== 收尾：落库 + 推送（渲染错误与补丁结果一并落库，保证下轮对话 AI 上下文可见，
         //      避免"错误只展示给用户、AI 看不见"导致的盲改循环） =====
         String reasoningText = allReasoning.length() > 0 ? allReasoning.toString() : null;
@@ -2934,6 +2981,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             assistantMsg = assistantMsg + "\n\n【渲染校验异常】已自动修复 " + renderRound
                     + " 轮，仍有 " + renderErrors.size() + " 个页面渲染失败：\n" + errSb
                     + "（可让 AI 继续修复：换组件规避或调整槽位数据；或手工修改对应文件）";
+        }
+        if (complianceNote != null) {
+            assistantMsg = assistantMsg + "\n\n【模板合规检查】" + complianceNote;
         }
         messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
                 assistantMsg, reasoningText);
@@ -3175,6 +3225,80 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             sendProgress(channel, plannedFiles, -1, donePaths);
         }
 
+        // ===== R4 合规校验 + R6-2 合规修复轮（链路 B 收口） =====
+        // 直写 HTML 无渲染器兜底，AI 可能漏基础页/漏布局宏/直写纯静态页：
+        // 先确定性兜底（补页/补元信息/补预览数据），剩余 ERROR 级文件问题
+        // （missing-layout / plain-html-page）触发 1 轮 AI 单文件修复后复检
+        TemplateComplianceChecker.Report compliance = null;
+        if (!donePaths.isEmpty()) {
+            Path batchWorkDir = resolveEffectiveWorkDir(session);
+            try {
+                compliance = complianceChecker.check(batchWorkDir,
+                        TemplateComplianceChecker.Link.BATCH_HTML,
+                        false, msg -> sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, msg));
+                registerComplianceFixedFiles(session, channel, batchWorkDir, compliance.fixed());
+            } catch (Exception e) {
+                log.warn("模板合规校验失败（不影响生成结果）: sessionId={}", session.getSessionId(), e);
+            }
+            // AI 修复对象：ERROR 级且不可确定性修复的 html 文件（checker 修复不了的交给模型重写）
+            List<String> aiFixPaths = compliance == null ? List.of() : compliance.issues().stream()
+                    .filter(i -> i.severity() == TemplateComplianceChecker.Severity.ERROR
+                            && !i.fixable() && i.file().endsWith(".html"))
+                    .map(TemplateComplianceChecker.ComplianceIssue::file)
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (!aiFixPaths.isEmpty()) {
+                sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE,
+                        "\n\n（合规检查发现 " + aiFixPaths.size() + " 个文件不符合模板规范，正在自动修复…）");
+                for (String fixPath : aiFixPaths) {
+                    if (channel.isCancelled()) {
+                        throw new ChatCancelledException();
+                    }
+                    String issueDetail = compliance.issues().stream()
+                            .filter(i -> fixPath.equals(i.file()))
+                            .map(i -> i.code() + "（" + i.detail() + "）")
+                            .collect(Collectors.joining("；"));
+                    String fixPrompt = promptBuilder.buildSingleFilePrompt(genRequirement, fixPath,
+                            buildGenContext(generatedFiles, layoutContent),
+                            "该文件未通过 fastcms 模板规范合规检查：" + issueDetail
+                                    + "。必须按系统提示词中的模板规范重写：用 FreeMarker 指令"
+                                    + "（<#import _layout.html>、<@articleListTag>、<@menuTag> 等）渲染 CMS 动态数据，"
+                                    + "禁止输出纯静态 HTML。",
+                            isMobileAdaptive(session));
+                    AiTemplateFileDto fixedDto = generateSingleFile(chatClient, systemPrompt, fixPrompt,
+                            fixPath, channel, allReasoning, usageAgg, modelConfig, null);
+                    if (fixedDto != null && StringUtils.hasText(fixedDto.getContent())) {
+                        fixedDto.setPath(fixPath);
+                        fixedDto.setAction(AiTemplateConstants.ACTION_CREATE);
+                        if (AiTemplateConstants.FILE_LAYOUT.equals(fixPath)) {
+                            layoutContent = fixedDto.getContent();
+                        }
+                        try {
+                            fileService.saveOrUpdateFile(session.getSessionId(), fixPath,
+                                    fixedDto.getContent(), AiTemplateConstants.ACTION_CREATE);
+                            writeToFile(session, fixedDto, null);
+                            sendFileEvent(channel, fixedDto);
+                        } catch (Exception e) {
+                            log.warn("合规修复文件写入失败: sessionId={}, path={}",
+                                    session.getSessionId(), fixPath, e);
+                        }
+                    } else {
+                        log.warn("合规修复轮单文件生成失败: sessionId={}, path={}",
+                                session.getSessionId(), fixPath);
+                    }
+                }
+                // 复检：确定性兜底再跑一遍（AI 重写可能引入新缺失），播报最终结论
+                try {
+                    compliance = complianceChecker.check(batchWorkDir,
+                            TemplateComplianceChecker.Link.BATCH_HTML,
+                            false, msg -> sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, msg));
+                    registerComplianceFixedFiles(session, channel, batchWorkDir, compliance.fixed());
+                } catch (Exception e) {
+                    log.warn("合规复检失败（不影响生成结果）: sessionId={}", session.getSessionId(), e);
+                }
+            }
+        }
+
         // ===== 汇总收尾 =====
         usageOut[0] = aggregateUsage(usageAgg);
         // donePaths 含断点续传时加载的历史文件，summary 统计全量完成度
@@ -3184,6 +3308,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         }
         String reasoningText = allReasoning.length() > 0 ? allReasoning.toString() : null;
         messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT, summary, reasoningText);
+        // 合规结论落库（sink 已实时播报，落库保证下轮对话 AI 上下文与刷新回看可见）
+        if (compliance != null && (!compliance.fixed().isEmpty() || !compliance.issues().isEmpty())) {
+            messageService.saveMessage(session.getSessionId(), AiTemplateConstants.ROLE_ASSISTANT,
+                    "【模板合规检查】" + compliance.summary(false));
+        }
         if (donePaths.isEmpty()) {
             sendError(channel, "所有文件生成失败，请重试或调整需求描述");
             return;
@@ -3191,6 +3320,32 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         sendDone(channel, truncate(summary, 100));
         log.info("AI 模板分批生成完成: sessionId={}, resumed={}, planned={}, done={}, failed={}",
                 session.getSessionId(), resumed, plannedFiles.size(), donePaths.size(), failedPaths.size());
+    }
+
+    /**
+     * 合规校验修复产物补注册（R4 各链路共用）：checker 只落盘、不感知会话与持久化，
+     * 这里统一补 saveOrUpdateFile + SSE file 事件（文件已由 checker 写盘，无需再 writeToFile）
+     */
+    private void registerComplianceFixedFiles(AiTemplateSession session, SseChannel channel,
+                                              Path workDir, List<String> fixedPaths) {
+        for (String fixedPath : fixedPaths) {
+            try {
+                Path fixedFile = workDir.resolve(fixedPath);
+                if (!Files.isRegularFile(fixedFile)) {
+                    continue;
+                }
+                String fixedContent = Files.readString(fixedFile, StandardCharsets.UTF_8);
+                fileService.saveOrUpdateFile(session.getSessionId(), fixedPath, fixedContent,
+                        AiTemplateConstants.ACTION_CREATE);
+                AiTemplateFileDto fixedDto = new AiTemplateFileDto();
+                fixedDto.setPath(fixedPath);
+                fixedDto.setContent(fixedContent);
+                fixedDto.setAction(AiTemplateConstants.ACTION_CREATE);
+                sendFileEvent(channel, fixedDto);
+            } catch (Exception e) {
+                log.warn("合规修复文件注册失败: sessionId={}, path={}", session.getSessionId(), fixedPath, e);
+            }
+        }
     }
 
     /**
@@ -3586,9 +3741,9 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         // 本处只推送真实增量；reasoningBuf 仅作落库镜像（差分追加 + 上限封顶）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
+                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                             String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && StringUtils.hasText(delta)) {
+                            if (delta != null && !delta.isEmpty()) {
                                 sendEvent(channel, AiTemplateConstants.SSE_EVENT_REASONING, delta);
                                 appendReasoningCapped(reasoningBuf, delta);
                                 reasoningTotal[0] += delta.length();
@@ -3603,9 +3758,11 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                                         + "KB），模型疑似陷入思考循环，已主动中断，请重试或简化本次改动范围");
                             }
                         }
-                        // 正文增量
+                        // 正文增量。判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行
+                        // token 单独到达）被 hasText 吞掉会导致 CSS 数字粘连与换行丢失
+                        // （同设计段修复，实证见 testpipe5/7 会话产物）
                         String chunk = output.getText();
-                        if (!StringUtils.hasText(chunk)) {
+                        if (chunk == null || chunk.isEmpty()) {
                             return;
                         }
                         // feed 前记录 reply 是否已流完：本 chunk 在闭引号之后到达，说明
@@ -3619,7 +3776,7 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
                         }
                         responseBuffer.append(chunk);
                         String replyDelta = replyExtractor.feed(chunk);
-                        if (StringUtils.hasText(replyDelta)) {
+                        if (replyDelta != null && !replyDelta.isEmpty()) {
                             sendEvent(channel, AiTemplateConstants.SSE_EVENT_MESSAGE, replyDelta);
                         }
                         // reply 已流完（闭引号已过）、本 chunk 属于 files/pagespec 等其余字段：
@@ -4102,8 +4259,16 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
         if (!StringUtils.hasText(templateName) || !filePath.startsWith(templateName)) {
             return null;
         }
+        // 截掉模板目录前缀后必须剥离残留的前导分隔符：Path.resolve 收到以 / 或 \ 开头的
+        // 路径时不做拼接（Windows 下解析为盘符根，Linux 下视为绝对路径），结果会落到
+        // workDir 之外，startsWith 防穿越校验随之失败，接口误报"文件不存在"
+        int relativeStart = templateName.length();
+        while (relativeStart < filePath.length()
+                && (filePath.charAt(relativeStart) == '/' || filePath.charAt(relativeStart) == '\\')) {
+            relativeStart++;
+        }
         Path workDir = resolveEffectiveWorkDir(session);
-        Path resolved = workDir.resolve(filePath.substring(templateName.length())).normalize();
+        Path resolved = workDir.resolve(filePath.substring(relativeStart)).normalize();
         return resolved.startsWith(workDir) ? resolved : null;
     }
 
@@ -4251,6 +4416,52 @@ public class AiTemplateGenServiceImpl implements IAiTemplateGenService {
             throw new RuntimeException("创建预览工作目录失败: " + workDirPath, e);
         }
         return workDirPath;
+    }
+
+    /**
+     * 模板目录名全局唯一校验（仅生成型会话；调整型会话绑定既有模板，同名合法）
+     *
+     * <p>模板名即正式模板目录名，applyTemplate 会把产物直接替换
+     * {@code <模板根目录>/<templateName>}，同名即静默覆盖已有模板。三层比对：</p>
+     * <ol>
+     *     <li>正式模板注册表（getTemplateList 的 pathName）</li>
+     *     <li>模板根目录磁盘扫描（含未注册/手工放置的残留目录）</li>
+     *     <li>全部 AI 模板会话记录（生成中/已应用；同名会话先后应用会互相覆盖，
+     *         会话记录物理删除后名字才释放）</li>
+     * </ol>
+     *
+     * <p>注：会话表 templateName 不能加数据库唯一索引——调整型会话可对同一模板
+     * 开多个会话，templateName 相同是合法数据；并发创建的窄窗口竞态由
+     * applyTemplate 的同名互斥锁兜底（应用期不会数据损坏）。</p>
+     */
+    private void validateTemplateNameUnique(String templateName) {
+        // 1) 正式模板注册表
+        for (Template registered : templateService.getTemplateList()) {
+            if (templateName.equals(registered.getPathName())) {
+                throw new IllegalArgumentException("模板目录名已被正式模板使用: " + templateName
+                        + "（如需修改该模板，请在模板列表中选择它发起调整会话）");
+            }
+        }
+        // 2) 模板根目录磁盘扫描（防未注册目录占用名字）
+        String templateDir = DirUtils.getTemplateDir();
+        if (StringUtils.hasText(templateDir) && Files.isDirectory(Paths.get(templateDir))) {
+            try (Stream<Path> entries = Files.list(Paths.get(templateDir))) {
+                if (entries.anyMatch(p -> Files.isDirectory(p)
+                        && templateName.equals(p.getFileName().toString()))) {
+                    throw new IllegalArgumentException("模板根目录下已存在同名目录: " + templateName);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("校验模板目录名失败: " + e.getMessage(), e);
+            }
+        }
+        // 3) 全部 AI 模板会话记录
+        List<AiTemplateSession> conflicts = sessionService.lambdaQuery()
+                .eq(AiTemplateSession::getTemplateName, templateName)
+                .list();
+        if (!conflicts.isEmpty()) {
+            throw new IllegalArgumentException("模板目录名已被 " + conflicts.size()
+                    + " 个 AI 模板会话占用: " + templateName + "（可在 AI 模板会话列表中查看/复用同名会话）");
+        }
     }
 
     /**

@@ -19,6 +19,7 @@ package com.fastcms.ai.component;
 import com.fastcms.ai.capability.CapabilityDescriptor;
 import com.fastcms.ai.capability.CapabilitySnippet;
 import com.fastcms.ai.capability.PluginCapabilityRegistry;
+import com.fastcms.ai.template.AiTemplateConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -199,6 +200,7 @@ public class PageSpecRenderer {
         writeStaticAssets(spec, plan, targetDir, written);
         writeComponentSources(spec, plan, targetDir, written);
         writeLayout(spec, plan, targetDir, written, mobileAdaptive);
+        writeArticlePageHtml(targetDir, written);
         writePages(spec, plan, targetDir, written, mobileAdaptive);
         writePagespec(spec, targetDir, written);
         writeTemplateProperties(spec, targetDir, written);
@@ -793,6 +795,9 @@ public class PageSpecRenderer {
         sb.append("<#-- 公共布局：HTML 骨架 + 导航区 + 页脚区，全站共享，修改本文件即刻全站生效 -->\n");
         sb.append("<#-- 页面用法：<#import \"_layout.html\" as layout> + <@layout.page>...页面内容...</@layout.page> -->\n");
         sb.append("<#-- 页面标题由页面在 import 后 <#assign pageTitle> 提供；standalone 页面不经过本文件 -->\n");
+        // 规范分页宏文件：顶层 include（<#macro page> 定义之外）——页面 import 本文件时 include
+        // 随 import 静态解析执行，<#macro _articlePage> 成为 layout 命名空间宏，页面以 <@layout._articlePage/> 调用
+        sb.append("<#include \"_articlePage.html\">\n");
         sb.append("<#macro page>\n");
         sb.append("<#-- 移动端适配开关：组件模板以 (mobileAdaptive!true) 读取，控制响应式结构输出 -->\n");
         sb.append("<#assign mobileAdaptive = ").append(mobileAdaptive).append(">\n");
@@ -927,6 +932,9 @@ public class PageSpecRenderer {
         html.append("<!DOCTYPE html>\n");
         html.append("<#-- 移动端适配开关：组件模板以 (mobileAdaptive!true) 读取 -->\n");
         html.append("<#assign mobileAdaptive = ").append(mobileAdaptive).append(">\n");
+        // standalone 页不使用布局宏，但正文骨架（如 article_list）以 <@layout._articlePage/> 引用分页宏，
+        // 借 import 获得 layout 命名空间（import 只静态解析、不执行宏体，无副作用）
+        html.append("<#import \"_layout.html\" as layout>\n");
         html.append("<html lang=\"zh-CN\" class=\"bg-white text-slate-900 antialiased\">\n");
         html.append("<head>\n");
         html.append("<meta charset=\"utf-8\">\n");
@@ -970,6 +978,29 @@ public class PageSpecRenderer {
             }
         }
         throw new IllegalStateException("组件包缺少内容页骨架: " + PAGE_SKELETON_PREFIX + pageKey + ".ftl");
+    }
+
+    /**
+     * 内容页正文骨架（仅供合规兜底补页复用，见 TemplateComplianceChecker）
+     *
+     * @return 骨架内容；组件包缺失对应资产时返回 null（调用方按不可修复处理）
+     */
+    public String contentSkeletonOf(String pageKey) {
+        try {
+            return contentSkeleton(pageKey);
+        } catch (IllegalStateException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 规范分页宏文件 _articlePage.html（内容源 AiTemplateConstants.ARTICLE_PAGE_HTML，
+     * 与合规校验器共用单一常量，防两处漂移）
+     */
+    private void writeArticlePageHtml(Path targetDir, List<String> written) throws IOException {
+        write(targetDir.resolve(AiTemplateConstants.FILE_ARTICLE_PAGE),
+                AiTemplateConstants.ARTICLE_PAGE_HTML.getBytes(StandardCharsets.UTF_8),
+                AiTemplateConstants.FILE_ARTICLE_PAGE, written);
     }
 
     // ==================== 静态资产 ====================
@@ -1044,7 +1075,7 @@ public class PageSpecRenderer {
      *
      * @return 已注册的模板 id；文件不存在或无 template.id 行时返回 null
      */
-    private String readExistingTemplateId(Path targetDir) {
+    public static String readExistingTemplateId(Path targetDir) {
         Path file = targetDir.resolve("_template.properties");
         if (!Files.isRegularFile(file)) {
             return null;

@@ -191,9 +191,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                         // 推理模型思考过程（累积器归一后推送真实增量）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
+                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                             String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && StringUtils.hasText(delta)) {
+                            if (delta != null && !delta.isEmpty()) {
                                 sendEvent(emitter, "reasoning", delta, clientGone);
                                 reasoningBuf.append(delta);
                                 reasoningTotal[0] += delta.length();
@@ -207,10 +207,12 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             }
                         }
                         String chunk = output.getText();
-                        if (StringUtils.hasText(chunk)) {
+                        // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
+                        // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
+                        if (chunk != null && !chunk.isEmpty()) {
                             responseBuffer.append(chunk);
                             String replyDelta = replyExtractor.feed(chunk);
-                            if (StringUtils.hasText(replyDelta)) {
+                            if (replyDelta != null && !replyDelta.isEmpty()) {
                                 sendEvent(emitter, "message", replyDelta, clientGone);
                             }
                         }
@@ -367,9 +369,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                         org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
+                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                             String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && StringUtils.hasText(delta)) {
+                            if (delta != null && !delta.isEmpty()) {
                                 sendEvent(emitter, "reasoning", delta, clientGone);
                                 reasoningBuf.append(delta);
                                 reasoningTotal[0] += delta.length();
@@ -384,7 +386,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                         }
                         // 直接流式推送改写文本增量
                         String chunk = output.getText();
-                        if (StringUtils.hasText(chunk)) {
+                        // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
+                        // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
+                        if (chunk != null && !chunk.isEmpty()) {
                             rewritten.append(chunk);
                             sendEvent(emitter, "message", chunk, clientGone);
                         }
@@ -508,9 +512,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                         // 推理模型思考过程（累积器归一后推送真实增量）
                         Object reasoning = output.getMetadata() == null
                                 ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && StringUtils.hasText(String.valueOf(reasoning))) {
+                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                             String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && StringUtils.hasText(delta)) {
+                            if (delta != null && !delta.isEmpty()) {
                                 sendEvent(emitter, "reasoning", delta, clientGone);
                                 reasoningBuf.append(delta);
                                 reasoningTotal[0] += delta.length();
@@ -524,7 +528,9 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
                             }
                         }
                         String chunk = output.getText();
-                        if (StringUtils.hasText(chunk)) {
+                        // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
+                        // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
+                        if (chunk != null && !chunk.isEmpty()) {
                             responseBuffer.append(chunk);
                         }
                     })

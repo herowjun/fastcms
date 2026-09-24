@@ -119,6 +119,48 @@ public final class AiTemplateConstants {
     public static final String FILE_PREVIEW_DATA = "_preview_data.json";
 
     /**
+     * 文章分页宏文件（规范产物：_layout.html 顶层 include，页面以 <@layout._articlePage/> 调用；
+     * 渲染器（PageSpecRenderer）与合规校验器（TemplateComplianceChecker）共用此单一内容源，防两处漂移）
+     */
+    public static final String FILE_ARTICLE_PAGE = "_articlePage.html";
+
+    /**
+     * 文章分页宏文件内容（分页条样式/判空逻辑与 components/tw/pages/article_list.ftl 原内联版逐字一致）
+     */
+    public static final String ARTICLE_PAGE_HTML = """
+            <#-- 文章列表分页宏（fastcms 规范文件）：页面用 <@layout._articlePage/> 调用 -->
+            <#macro _articlePage>
+              <@articlePageTag>
+                <#if data??>
+                  <nav class="mt-12 flex flex-wrap items-center justify-center gap-2" aria-label="文章分页">
+                    <#if data.prev?? && (data.prev.url)?? && ((data.prev.url)!'')?has_content>
+                      <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+                         href="${data.prev.url}">${(data.prev.text)!'上一页'}</a>
+                    </#if>
+                    <#if data.list?? && data.list?is_sequence>
+                      <#list data.list as page>
+                        <#if page?? && page?is_hash>
+                          <#if (page.url)?? && ((page.url)!'')?has_content>
+                            <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+                               href="${page.url}">${(page.text)!}</a>
+                          <#else>
+                            <span class="rounded-lg border border-primary-600 bg-primary-600 px-4 py-2 text-sm text-white"
+                                  aria-current="page">${(page.text)!}</span>
+                          </#if>
+                        </#if>
+                      </#list>
+                    </#if>
+                    <#if data.next?? && (data.next.url)?? && ((data.next.url)!'')?has_content>
+                      <a class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 transition-colors hover:border-primary-600 hover:text-primary-600"
+                         href="${data.next.url}">${(data.next.text)!'下一页'}</a>
+                    </#if>
+                  </nav>
+                </#if>
+              </@articlePageTag>
+            </#macro>
+            """;
+
+    /**
      * 静态资源目录
      */
     public static final String DIR_STATIC = "static";
