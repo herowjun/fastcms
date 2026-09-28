@@ -78,6 +78,29 @@ final class AiTemplatePreviewMockSupport {
     private static final String SUFFIX_PATTERN = "[a-zA-Z0-9_-]+";
 
     /**
+     * 缺页面引导页的路径段（预览路由下，由 {@code AiTemplatePreviewController} 渲染）
+     *
+     * <p>菜单/分类/标签/单页指向的 {@code {type}_{suffix}.html} 不存在时改指此处，
+     * 而不是<b>静默回退</b>到该类型的基础页——静默回退会让多个栏目最终落到同一页
+     * （如"新闻动态""产品中心"都跳 article_list.html），用户无从察觉配置已失效。
+     * 引导页说明原因并提供两个出口：让 AI 生成该页面 / 删除该条目。</p>
+     */
+    static final String MISSING_PAGE_SEGMENT = "__missing_page__";
+
+    /**
+     * 条目引用（itemRef）：指向预览数据中的唯一位置，用于引导页定位与删除
+     *
+     * <p>格式 {@code 前缀+索引}，多级菜单用 {@code -} 连接，如 {@code m0} / {@code m0-2}
+     * （menus[0].children[2]）、{@code c1}（categories[1]）、{@code t0} / {@code s2} / {@code a3}。
+     * 索引取<b>原始 JSON 数组下标</b>（解析失败被跳过的元素仍占位），保证与文件内容对齐。</p>
+     */
+    private static final String REF_MENU = "m";
+    private static final String REF_CATEGORY = "c";
+    private static final String REF_TAG = "t";
+    private static final String REF_SINGLE_PAGE = "s";
+    private static final String REF_ARTICLE = "a";
+
+    /**
      * 演示缩略图：内联 SVG data URI，避免外链图片加载失败影响预览
      */
     private static final String THUMBNAIL_SVG = "data:image/svg+xml;charset=utf-8,"
@@ -158,6 +181,17 @@ final class AiTemplatePreviewMockSupport {
         String pageUrl() {
             return pageUrls.getOrDefault("page", indexUrl());
         }
+
+        /**
+         * 缺页面引导页 URL：{pageBase}/__missing_page__/{itemRef}
+         *
+         * <p>不带 .html 后缀：前端预览的链接拦截按"可路由 HTML"判定
+         * （{@code isRoutableHtml} 要求以 .html 结尾），此处刻意让判定的结果为 false，
+         * 链接点击放行默认行为，由 iframe 直接导航到引导页，宿主页面下拉状态不受影响。</p>
+         */
+        String missingPageUrl(String itemRef) {
+            return pageBase() + "/" + MISSING_PAGE_SEGMENT + "/" + itemRef;
+        }
     }
 
     /**
@@ -174,15 +208,15 @@ final class AiTemplatePreviewMockSupport {
 
     /**
      * 菜单配置项：type ∈ index/article_list/article/page（缺省 article_list），
-     * suffix 对应模板文件 {type}_{suffix}.html（可空）
+     * suffix 对应模板文件 {type}_{suffix}.html（可空），ref 为条目引用（见 {@link #REF_MENU}）
      */
-    record MenuConfig(String name, String type, String suffix, List<MenuConfig> children) {
+    record MenuConfig(String name, String type, String suffix, List<MenuConfig> children, String ref) {
     }
 
     /**
-     * 分类/标签/单页配置项：title + 可选 suffix
+     * 分类/标签/单页配置项：title + 可选 suffix（ref 为条目引用，见 REF_CATEGORY 等）
      */
-    record ItemConfig(String title, String suffix) {
+    record ItemConfig(String title, String suffix, String ref) {
     }
 
     /**
@@ -212,10 +246,10 @@ final class AiTemplatePreviewMockSupport {
                 log.warn("预览数据文件不是 JSON 对象，忽略并回退默认演示数据: {}", file);
                 return null;
             }
-            List<MenuConfig> menus = parseMenus(root.get("menus"), MAX_MENUS);
-            List<ItemConfig> categories = parseItems(root.get("categories"), MAX_CATEGORIES);
-            List<ItemConfig> tags = parseItems(root.get("tags"), MAX_TAGS);
-            List<ItemConfig> singlePages = parseItems(root.get("singlePages"), MAX_SINGLE_PAGES);
+            List<MenuConfig> menus = parseMenus(root.get("menus"), MAX_MENUS, REF_MENU);
+            List<ItemConfig> categories = parseItems(root.get("categories"), MAX_CATEGORIES, REF_CATEGORY);
+            List<ItemConfig> tags = parseItems(root.get("tags"), MAX_TAGS, REF_TAG);
+            List<ItemConfig> singlePages = parseItems(root.get("singlePages"), MAX_SINGLE_PAGES, REF_SINGLE_PAGE);
             ArticleConfig articles = parseArticles(root.get("articles"));
             Map<String, String> seo = parseSeo(root.get("seo"));
             Map<String, String> imageOverrides = parseImageOverrides(root.get("imageOverrides"));
@@ -234,17 +268,24 @@ final class AiTemplatePreviewMockSupport {
 
     /**
      * 解析菜单数组：仅两级（顶层 + children），超限截断，全部非法返回 null
+     *
+     * <p>ref 取<b>原始 JSON 下标</b>（含解析失败被跳过的元素占位），保证与文件内容对齐——
+     * 引导页按 ref 定位/删除条目时不会因跳过非法元素而错位。</p>
+     *
+     * @param refPrefix 本层条目的 ref 前缀（顶层 "m"，子层 "m0-"）
      */
-    private static List<MenuConfig> parseMenus(JsonNode node, int max) {
+    private static List<MenuConfig> parseMenus(JsonNode node, int max, String refPrefix) {
         if (node == null || !node.isArray() || node.isEmpty()) {
             return null;
         }
         List<MenuConfig> list = new ArrayList<>();
+        int rawIndex = 0;
         for (JsonNode elem : node) {
+            int index = rawIndex++;
             if (list.size() >= max) {
                 break;
             }
-            MenuConfig menu = parseMenu(elem, false);
+            MenuConfig menu = parseMenu(elem, false, refPrefix + index);
             if (menu != null) {
                 list.add(menu);
             }
@@ -252,7 +293,7 @@ final class AiTemplatePreviewMockSupport {
         return list.isEmpty() ? null : list;
     }
 
-    private static MenuConfig parseMenu(JsonNode elem, boolean child) {
+    private static MenuConfig parseMenu(JsonNode elem, boolean child, String ref) {
         if (elem == null || !elem.isObject()) {
             return null;
         }
@@ -264,31 +305,35 @@ final class AiTemplatePreviewMockSupport {
         if (type == null) {
             type = "article_list";
         }
-        List<MenuConfig> children = child ? null : parseMenus(elem.get("children"), MAX_MENU_CHILDREN);
-        return new MenuConfig(name, type, suffixOf(elem.get("suffix")), children);
+        List<MenuConfig> children = child ? null : parseMenus(elem.get("children"), MAX_MENU_CHILDREN, ref + "-");
+        return new MenuConfig(name, type, suffixOf(elem.get("suffix")), children, ref);
     }
 
     /**
      * 解析分类/标签/单页数组：元素为字符串（无 suffix）或 {title/name, suffix} 对象
+     *
+     * @param refPrefix 条目 ref 前缀（c / t / s，见 REF_CATEGORY 等）
      */
-    private static List<ItemConfig> parseItems(JsonNode node, int max) {
+    private static List<ItemConfig> parseItems(JsonNode node, int max, String refPrefix) {
         if (node == null || !node.isArray() || node.isEmpty()) {
             return null;
         }
         List<ItemConfig> list = new ArrayList<>();
+        int rawIndex = 0;
         for (JsonNode elem : node) {
+            String ref = refPrefix + (rawIndex++);
             if (list.size() >= max) {
                 break;
             }
             if (elem != null && elem.isTextual()) {
                 String title = elem.asString().trim();
                 if (!title.isEmpty()) {
-                    list.add(new ItemConfig(title, null));
+                    list.add(new ItemConfig(title, null, ref));
                 }
             } else if (elem != null && elem.isObject()) {
                 String title = textOf(elem, "title", "name");
                 if (title != null) {
-                    list.add(new ItemConfig(title, suffixOf(elem.get("suffix"))));
+                    list.add(new ItemConfig(title, suffixOf(elem.get("suffix")), ref));
                 }
             }
         }
@@ -405,10 +450,21 @@ final class AiTemplatePreviewMockSupport {
     /**
      * 按 type + suffix 解析演示 URL（对齐真实系统的 page_{suffix}.html 路由约定）
      *
-     * <p>suffix 为空 → 该类型默认 URL；suffix 非空且对应模板文件存在 → 指向该文件；
-     * 文件不存在（AI 没生成对应模板）→ 回退默认 URL，保证链接始终可跳转。</p>
+     * <p><b>三态</b>（历史教训：原先"suffix 文件不存在即回退该类型默认 URL"是静默回退，
+     * 会让多个栏目最终落到同一页——"新闻动态""产品中心"都跳 article_list.html，
+     * "解决方案""关于我们""联系我们"都跳 page.html，用户完全看不出配置已失效）：</p>
+     *
+     * <ul>
+     *     <li>suffix 为空 → 该类型默认 URL（基础页语义，属正常形态）</li>
+     *     <li>suffix 非空且 {@code {type}_{suffix}.html} 存在 → 指向该文件</li>
+     *     <li>suffix 非空但文件不存在 → 指向<b>缺页面引导页</b>（不复用其他页面，
+     *         由引导页说明原因并提供"让 AI 生成 / 删除该条目"两个出口）</li>
+     * </ul>
+     *
+     * @param ref 条目引用（见 {@link #REF_MENU}），引导页据此定位预览数据中的条目；
+     *            为空时退化为回退 URL（仅用于无法定位的非常规调用）
      */
-    private static String resolveUrl(PreviewContext ctx, String type, String suffix) {
+    private static String resolveUrl(PreviewContext ctx, String type, String suffix, String ref) {
         String fallback = switch (type == null ? "" : type) {
             case "article" -> ctx.articleUrl();
             case "page" -> ctx.pageUrl();
@@ -419,7 +475,10 @@ final class AiTemplatePreviewMockSupport {
             return fallback;
         }
         String file = type + "_" + suffix.trim() + ".html";
-        return ctx.htmlFiles().contains(file) ? ctx.pageBase() + "/" + file : fallback;
+        if (ctx.htmlFiles().contains(file)) {
+            return ctx.pageBase() + "/" + file;
+        }
+        return (ref == null || ref.isBlank()) ? fallback : ctx.missingPageUrl(ref);
     }
 
     /**
@@ -538,7 +597,7 @@ final class AiTemplatePreviewMockSupport {
             for (int i = 0; i < items.size(); i++) {
                 if (suffix.equals(items.get(i).suffix())) {
                     return category((long) (i + 1), items.get(i).title(),
-                            resolveUrl(ctx, "article_list", items.get(i).suffix()));
+                            resolveUrl(ctx, "article_list", items.get(i).suffix(), items.get(i).ref()));
                 }
             }
         }
@@ -602,24 +661,150 @@ final class AiTemplatePreviewMockSupport {
     // ==================== 演示数据 ====================
 
     /**
-     * 菜单列表：配置了 menus 时按配置构建（URL 按 type+suffix 解析），否则回退默认菜单
+     * 菜单列表：只按预览数据的 menus 构建（URL 按 type+suffix+ref 三态解析）；
+     * 未配置 menus 时返回空列表，不再回退硬编码默认栏目
      *
      * <p>type=index（首页）条目跳过：导航类组件普遍硬编码"首页"链接，
      * AI 生成 spec 的 menus 里再带一个 index 项会渲染出两个"首页"。</p>
      */
     private static List<Map<String, Object>> menus(PreviewContext ctx, PreviewDataConfig config) {
         List<MenuConfig> items = config == null ? null : config.menus();
-        if (items != null && !items.isEmpty()) {
-            List<Map<String, Object>> menus = new ArrayList<>();
-            for (MenuConfig item : items) {
-                if (isIndexMenu(item)) {
-                    continue;
-                }
-                menus.add(menu(item, ctx));
-            }
-            return menus;
+        if (items == null || items.isEmpty()) {
+            // 无菜单配置：不伪造默认栏目。历史实现回退 defaultMenus（硬编码"新闻动态/产品中心/
+            // 解决方案/关于我们/联系我们"），这些栏目在模板目录里没有对应页面文件，只能全部挤到
+            // article_list.html / page.html 两个页面上——看似导航饱满，实则每个链接都是假的，
+            // 用户点哪个都跳同一页且无从察觉。此处改为返回空菜单，由预览层展示
+            // "让 AI 规划导航菜单"引导条，把缺失的信息架构决策交还给用户与 AI。
+            return List.of();
         }
-        return defaultMenus(ctx.articleListUrl(), ctx.pageUrl());
+        List<Map<String, Object>> menus = new ArrayList<>();
+        for (MenuConfig item : items) {
+            if (isIndexMenu(item)) {
+                continue;
+            }
+            menus.add(menu(item, ctx));
+        }
+        return menus;
+    }
+
+    /**
+     * 预览数据是否配置了可用菜单
+     *
+     * <p>未配置时预览导航区为空（不再回退硬编码默认栏目），预览控制器据此注入
+     * "让 AI 规划导航菜单"引导条——无菜单本身就是需要用户决策的状态，
+     * 不应由预览层静默编造。</p>
+     */
+    static boolean hasMenuConfig(PreviewDataConfig config) {
+        return config != null && config.menus() != null && !config.menus().isEmpty();
+    }
+
+    /**
+     * 缺页面条目的展示信息（引导页文案与"删除该条目"共用）
+     *
+     * @param ref    条目引用（前端原样回传，删除接口据此定位；见 {@link #REF_MENU}）
+     * @param name   条目标题（菜单名 / 分类名 / 标签名 / 单页标题 / 文章标题）
+     * @param type   页面类型（article_list / page / article）
+     * @param suffix 预览数据中配置的 suffix
+     * @param kind   条目种类：menu / category / tag / singlePage / article
+     */
+    record MissingItem(String ref, String name, String type, String suffix, String kind) {
+
+        /** 期望但缺失的模板文件名（{@code {type}_{suffix}.html}） */
+        String expectedFile() {
+            return type + "_" + suffix + ".html";
+        }
+
+        /** 引导页的条目分类文案（"栏目"/"分类"/"标签"/"单页"/"文章"） */
+        String kindLabel() {
+            return switch (kind) {
+                case "category" -> "分类";
+                case "tag" -> "标签";
+                case "singlePage" -> "单页";
+                case "article" -> "文章";
+                default -> "栏目";
+            };
+        }
+
+        /**
+         * 是否支持"删除该条目"：文章条目的 suffix 存于 articles.suffixes 平行数组，
+         * 与 titles 一一对应，无法整项删除（其余四类均可从预览数据中移除该元素）
+         */
+        boolean deletable() {
+            return !"article".equals(kind);
+        }
+    }
+
+    /**
+     * 按条目引用（ref）在预览数据中定位条目
+     *
+     * <p>引导页渲染与"删除该条目"接口共用：ref 由渲染期生成、指向预览数据中的唯一位置
+     * （多级菜单形如 {@code m0-2}），不受重名影响，也不依赖文件内容被用户改动。</p>
+     *
+     * @return 定位到的条目；config/ref 为空或找不到时返回 null
+     */
+    static MissingItem findMissingItem(PreviewDataConfig config, String ref) {
+        if (config == null || ref == null || ref.isBlank()) {
+            return null;
+        }
+        MissingItem menu = findMenuByRef(config.menus(), ref);
+        if (menu != null) {
+            return menu;
+        }
+        MissingItem category = findItemByRef(config.categories(), ref, "article_list", "category");
+        if (category != null) {
+            return category;
+        }
+        MissingItem tag = findItemByRef(config.tags(), ref, "article_list", "tag");
+        if (tag != null) {
+            return tag;
+        }
+        MissingItem singlePage = findItemByRef(config.singlePages(), ref, "page", "singlePage");
+        return singlePage != null ? singlePage : findArticleByRef(config.articles(), ref);
+    }
+
+    private static MissingItem findMenuByRef(List<MenuConfig> items, String ref) {
+        for (MenuConfig item : items == null ? List.<MenuConfig>of() : items) {
+            if (ref.equals(item.ref())) {
+                return new MissingItem(item.ref(), item.name(), item.type(), item.suffix(), "menu");
+            }
+            MissingItem child = findMenuByRef(item.children(), ref);
+            if (child != null) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private static MissingItem findItemByRef(List<ItemConfig> items, String ref, String type, String kind) {
+        for (ItemConfig item : items == null ? List.<ItemConfig>of() : items) {
+            if (ref.equals(item.ref())) {
+                return new MissingItem(item.ref(), item.title(), type, item.suffix(), kind);
+            }
+        }
+        return null;
+    }
+
+    /** 文章条目：ref 形如 a3，suffix 取 articles.suffixes[3]，标题取 articles.titles[3] */
+    private static MissingItem findArticleByRef(ArticleConfig articles, String ref) {
+        if (articles == null || articles.suffixes() == null || !ref.startsWith(REF_ARTICLE)) {
+            return null;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(ref.substring(REF_ARTICLE.length()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (index < 0 || index >= articles.suffixes().size()) {
+            return null;
+        }
+        String suffix = articles.suffixes().get(index);
+        if (suffix == null || suffix.isBlank()) {
+            return null;
+        }
+        String title = articles.titles() != null && index < articles.titles().size()
+                ? articles.titles().get(index) : "文章 " + (index + 1);
+        return new MissingItem(ref, title, "article", suffix.trim(), "article");
     }
 
     /** 是否首页菜单项（type=index）：与组件硬编码的首页链接重复，渲染时跳过 */
@@ -636,21 +821,7 @@ final class AiTemplatePreviewMockSupport {
                 }
             }
         }
-        return menu(item.name(), resolveUrl(ctx, item.type(), item.suffix()), children);
-    }
-
-    private static List<Map<String, Object>> defaultMenus(String articleListUrl, String pageUrl) {
-        List<Map<String, Object>> menus = new ArrayList<>();
-        menus.add(menu("新闻动态", articleListUrl, List.of(
-                menu("公司新闻", articleListUrl, List.of()), menu("行业资讯", articleListUrl, List.of()))));
-        menus.add(menu("产品中心", articleListUrl, List.of(
-                menu("内容管理", articleListUrl, List.of()),
-                menu("插件市场", articleListUrl, List.of()),
-                menu("模板引擎", articleListUrl, List.of()))));
-        menus.add(menu("解决方案", pageUrl, List.of()));
-        menus.add(menu("关于我们", pageUrl, List.of()));
-        menus.add(menu("联系我们", pageUrl, List.of()));
-        return menus;
+        return menu(item.name(), resolveUrl(ctx, item.type(), item.suffix(), item.ref()), children);
     }
 
     private static Map<String, Object> menu(String name, String url, List<Map<String, Object>> children) {
@@ -672,7 +843,7 @@ final class AiTemplatePreviewMockSupport {
             for (int i = 0; i < items.size(); i++) {
                 ItemConfig item = items.get(i);
                 list.add(category((long) (i + 1), item.title(),
-                        resolveUrl(ctx, "article_list", item.suffix())));
+                        resolveUrl(ctx, "article_list", item.suffix(), item.ref())));
             }
             return list;
         }
@@ -693,7 +864,7 @@ final class AiTemplatePreviewMockSupport {
             int index = items.size() >= 3 ? 2 : 0;
             ItemConfig item = items.get(index);
             return category((long) (index + 1), item.title(),
-                    resolveUrl(ctx, "article_list", item.suffix()));
+                    resolveUrl(ctx, "article_list", item.suffix(), item.ref()));
         }
         return category(3L, "开发实践", ctx.articleListUrl());
     }
@@ -718,7 +889,7 @@ final class AiTemplatePreviewMockSupport {
                 Map<String, Object> t = new LinkedHashMap<>();
                 t.put("id", (long) (i + 1));
                 t.put("name", item.title());
-                t.put("url", resolveUrl(ctx, "article_list", item.suffix()));
+                t.put("url", resolveUrl(ctx, "article_list", item.suffix(), item.ref()));
                 list.add(t);
             }
             return list;
@@ -747,7 +918,7 @@ final class AiTemplatePreviewMockSupport {
                 Map<String, Object> s = new LinkedHashMap<>();
                 s.put("id", (long) (i + 1));
                 s.put("title", item.title());
-                s.put("url", resolveUrl(ctx, "page", item.suffix()));
+                s.put("url", resolveUrl(ctx, "page", item.suffix(), item.ref()));
                 list.add(s);
             }
             return list;
@@ -794,10 +965,11 @@ final class AiTemplatePreviewMockSupport {
         } else {
             summary = ARTICLE_SUMMARIES[index % ARTICLE_SUMMARIES.length];
         }
-        // URL：配置了该篇 suffix 且对应模板文件存在 → 指向 article_{suffix}.html，否则默认文章页
+        // URL：配置了该篇 suffix 且对应模板文件存在 → 指向 article_{suffix}.html；
+        // 文件缺失时同样走缺页面引导页，不再静默复用默认文章页
         String url = ctx.articleUrl();
         if (cfg != null && cfg.suffixes() != null && index < cfg.suffixes().size()) {
-            url = resolveUrl(ctx, "article", cfg.suffixes().get(index));
+            url = resolveUrl(ctx, "article", cfg.suffixes().get(index), REF_ARTICLE + index);
         }
         Map<String, Object> a = new LinkedHashMap<>();
         a.put("id", (long) (index + 1));
@@ -899,7 +1071,7 @@ final class AiTemplatePreviewMockSupport {
                         + "<h2>了解更多</h2><p>演示文案：如需了解更多，可通过导航浏览其他栏目或返回首页。</p>");
         s.put("seoKeywords", "关于我们,FastCMS");
         s.put("seoDescription", "这是用于模板预览的演示单页内容。");
-        s.put("url", first != null ? resolveUrl(ctx, "page", first.suffix()) : ctx.pageUrl());
+        s.put("url", first != null ? resolveUrl(ctx, "page", first.suffix(), first.ref()) : ctx.pageUrl());
         return s;
     }
 

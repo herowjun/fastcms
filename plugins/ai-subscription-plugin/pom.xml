@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>fastcms-plugins</artifactId>
+        <groupId>com.fastcms</groupId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>ai-subscription-plugin</artifactId>
+    <description>AI 模型订阅插件：官网售卖 fastcms 托管模型（月度/季度/年度），客户实例粘贴授权码激活后可用于 AI 模板编辑、文章编写、生图。同一插件按角色配置：官网侧负责签发与中转，客户侧负责激活与调用。</description>
+
+    <properties>
+        <plugin.id>ai-subscription-plugin</plugin.id>
+        <plugin.class>com.fastcms.plugin.ai.subscription.AiSubscriptionPlugin</plugin.class>
+        <plugin.version>0.0.1</plugin.version>
+        <plugin.provider>wjun_java@163.com</plugin.provider>
+        <plugin.description>FastCMS AI subscription: sell hosted model plans on the official site, activate by signed license code on customer instances</plugin.description>
+        <plugin.dependencies />
+    </properties>
+
+    <dependencies>
+
+        <!-- provided：运行时由主程序（fastcms-web 及其传递依赖）提供，
+             插件 jar 不重复打包，避免与主程序类冲突 -->
+        <dependency>
+            <groupId>com.fastcms</groupId>
+            <artifactId>fastcms-web</artifactId>
+            <version>${revision}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>2.4</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Plugin-Id>${plugin.id}</Plugin-Id>
+                            <Plugin-Class>${plugin.class}</Plugin-Class>
+                            <Plugin-Version>${plugin.version}</Plugin-Version>
+                            <Plugin-Provider>${plugin.provider}</Plugin-Provider>
+                            <Plugin-description>${plugin.description}</Plugin-description>
+                            <Plugin-Dependencies>${plugin.dependencies}</Plugin-Dependencies>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skip>${surefire.skip}</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

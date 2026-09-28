@@ -55,10 +55,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -117,8 +119,19 @@ public class MockupConverter {
     private static final int MAX_MAPPING_ROUNDS = 2;
     /** 渲染降级轮上限（对齐管线 MAX_RENDER_FIX_ATTEMPTS=2：轮1 组件区块全降 custom，轮2 整页单 custom） */
     private static final int MAX_RENDER_DEGRADE_ROUNDS = 2;
-    /** 映射调用输出上限（JSON 数组，远小于设计稿输出） */
-    private static final int MAPPING_MAX_TOKENS = 3000;
+    /**
+     * 映射调用输出上限（JSON 数组，远小于设计稿输出）
+     *
+     * <p>取值须覆盖"推理型模型（如 Qwen3 系列）的思考链 + 最终 JSON"两部分：上限只够输出
+     * JSON 本身时，思考过程会吃满配额导致 content 为空（实测 Qwen3.6-27B 在 3000 下稳定
+     * 空响应 87s 后抛"映射模型返回空响应"，整盘转化 FAILED）。</p>
+     */
+    private static final int MAPPING_MAX_TOKENS = 16000;
+    /**
+     * 映射调用空响应重试次数：推理型模型的思考链偶发吃满配额 / 上游偶发截断会返回空 content，
+     * 单次空响应不重试直接整盘 FAILED（实测一次端到端跑挂 5 次），故同参数重试再判失败
+     */
+    private static final int MAPPING_CALL_ATTEMPTS = 3;
     /** R2 交互脚本外置阈值：超过 2KB 写 static/js/imported.js，layout 引外链；小脚本仍内联 */
     private static final int EXTERNAL_SCRIPT_THRESHOLD = 2048;
     /**
@@ -295,7 +308,7 @@ public class MockupConverter {
      * @param scriptAnchors 脚本引用的 id 锚点（垫片注入判定）
      */
     private record DesignBundle(List<PageDesign> pages, Map<String, String> rootTokens,
-                                String scripts, List<String> scriptAnchors) {
+                                String scripts, List<String> scriptAnchors, boolean hasSiteIa) {
     }
 
     // ==================== 主入口 ====================
@@ -309,7 +322,8 @@ public class MockupConverter {
      */
     public ConvertOutcome convert(ConvertContext ctx, DesignSseSink sse) {
         long startTime = System.currentTimeMillis();
-        long[] usageAgg = {0L, 0L, 0L};
+        // 并行映射下多 worker 累加（AtomicLongArray）
+        java.util.concurrent.atomic.AtomicLongArray usageAgg = new java.util.concurrent.atomic.AtomicLongArray(3);
         // prepare 置于 try 外：装配失败无模型调用，不产生审计记录（与设计段同口径）
         AgentChatExecutor.Prepared prepared = agentChatExecutor.prepare(
                 BuiltinAgents.TEMPLATE_DESIGNER_ID, ctx.session().getUserId());
@@ -329,9 +343,9 @@ public class MockupConverter {
                     usageRecorder.record(BuiltinAgents.TEMPLATE_DESIGNER_ID, ctx.session().getUserId(),
                             IAiUsageLogService.Scene.TEMPLATE_DESIGN, ctx.session().getSessionId(),
                             prepared.getModelName(),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[0]),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[1]),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[2]),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(0)),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(1)),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(2)),
                             System.currentTimeMillis() - startTime);
                 } else {
                     usageRecorder.recordError(BuiltinAgents.TEMPLATE_DESIGNER_ID, ctx.session().getUserId(),
@@ -345,7 +359,7 @@ public class MockupConverter {
     }
 
     private ConvertOutcome doConvert(ConvertContext ctx, AgentChatExecutor.Prepared prepared,
-                                     DesignSseSink sse, long[] usageAgg) {
+                                     DesignSseSink sse, java.util.concurrent.atomic.AtomicLongArray usageAgg) {
         // ===== Step 1 区块切分（纯代码）=====
         sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "正在切分设计稿区块…");
         DesignBundle bundle = loadDesignBundle(ctx);
@@ -356,35 +370,56 @@ public class MockupConverter {
                 + "（含 nav/footer 公共块），开始组件映射…");
 
         // ===== Step 2 组件映射（唯一 AI 决策点，mappingCache 断点续传）=====
-        Map<String, SectionMapping> mappingByUnit = new LinkedHashMap<>();
+        // 并发容器：mapping-concurrency > 1 时多批并行写入（LinkedHashMap 并发写会炸）
+        Map<String, SectionMapping> mappingByUnit = new java.util.concurrent.ConcurrentHashMap<>();
         if (ctx.mappingCache() != null) {
             for (SectionMapping m : ctx.mappingCache()) {
                 mappingByUnit.put(mappingKey(m.page(), m.sectionIdx()), m);
             }
         }
+
+        // ===== Step 2a 语义标记确定性映射（2026-09-25）=====
+        // 设计稿用受控 data-block 语义名显式声明的 CMS 数据区（契约见 DesignContractPrompt 契约 7），
+        // 在此直连对应组件/内置标记——保证动态内容一律用 fastcms 标签渲染，不交给 AI 猜测、
+        // 也不落成静态 HTML（语义是设计稿的强声明，优先于 mappingCache 与 AI 判定）。
+        applySemanticMappings(bundle, mappingByUnit, sse);
+
         List<SectionUnitRef> pending = units.stream()
                 .filter(u -> !mappingByUnit.containsKey(mappingKey(u.page(), u.idx()))).toList();
+        // 批次清单先切好（串行/并行共用口径）
+        List<List<SectionUnitRef>> batches = new ArrayList<>();
         for (int i = 0; i < pending.size(); i += MAPPING_BATCH_SIZE) {
-            if (sse.isCancelled()) {
-                throw new DesignCancelledException();
-            }
-            List<SectionUnitRef> batch = pending.subList(i, Math.min(i + MAPPING_BATCH_SIZE, pending.size()));
-            sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
-                    "正在映射区块 " + (i + 1) + "~" + (i + batch.size()) + "/" + pending.size() + "…");
-            mapBatch(ctx, prepared, bundle, batch, mappingByUnit, sse, usageAgg);
-            // 进度点即时持久化：每批映射完成即回传全量快照（编排器写回 plan.json——中断重入不重问本批）
-            if (ctx.mappingProgressSink() != null) {
-                ctx.mappingProgressSink().accept(List.copyOf(mappingByUnit.values()));
+            batches.add(List.copyOf(pending.subList(i, Math.min(i + MAPPING_BATCH_SIZE, pending.size()))));
+        }
+        int mappingConcurrency = aiProperties.getTemplate().getDesign().getMappingConcurrency();
+        if (mappingConcurrency > 1 && batches.size() > 1) {
+            mapBatchesParallel(ctx, prepared, bundle, batches, mappingByUnit, sse, usageAgg, mappingConcurrency);
+        } else {
+            for (int i = 0; i < batches.size(); i++) {
+                if (sse.isCancelled()) {
+                    throw new DesignCancelledException();
+                }
+                List<SectionUnitRef> batch = batches.get(i);
+                sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                        "正在映射区块 " + (i * MAPPING_BATCH_SIZE + 1) + "~"
+                                + (i * MAPPING_BATCH_SIZE + batch.size()) + "/" + pending.size() + "…");
+                mapBatch(ctx, prepared, bundle, batch, mappingByUnit, sse, usageAgg, () -> false);
+                // 进度点即时持久化：每批映射完成即回传全量快照（编排器写回 plan.json——中断重入不重问本批）
+                if (ctx.mappingProgressSink() != null) {
+                    ctx.mappingProgressSink().accept(List.copyOf(mappingByUnit.values()));
+                }
             }
         }
 
-        // ===== 导入型会话 nav/footer 强制保真（确定性改判，2026-09-22 用户决议）=====
+        // ===== 导入型会话 nav/footer 强制保真（确定性改判，2026-09-22 用户决议；
+        //       2026-09-25 决议升级：保真保留结构与类名，但导航一律尝试菜单化接 CMS）=====
         // 用户上传 HTML 由 AI 照写时，原生 nav/footer 是设计骨架；被 AI 映射成组件（tw:navbar 等）
         // 会用组件自带骨架 + Tailwind 样式替换原结构，与保真主体视觉打架（白底导航条压深色页面）。
         // 改判 custom → addNavFooterSection 的 custom 路径：原结构 + 原 CSS 类逐页原样保留
         // （adaptCustomHtml 只重写链接 href），布局 head 注入的上传站 inline CSS 随即生效。
-        // 锚点型导航（#features 等）本就不接 CMS 菜单，保留静态锚点是上传站原状；
-        // 带 ul&gt;li&gt;a 菜单的导航仍走既有 R3 menuifyNav 接 CMS 动态菜单。
+        // 2026-09-25 起：锚点型导航（#features 等）不再豁免——menuifyNav 已支持 div>a 链接组，
+        // 锚文本命中站点信息架构即替换为 menuTag 动态菜单（未命中项保留静态锚点并播报），
+        // 上传 HTML 也能产出菜单接 CMS 的整站模板。带 ul>li>a 菜单的导航仍走既有 R3 menuifyNav。
         if (AiTemplateConstants.isImportMode(ctx.session())) {
             boolean rejudged = false;
             for (SectionMapping m : new ArrayList<>(mappingByUnit.values())) {
@@ -421,12 +456,21 @@ public class MockupConverter {
             sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, "\n⚠ " + menuWarn);
             report.add(menuWarn);
         }
+        // 首页 CMS 数据区扫描（2026-09-25）：首页无任何 CMS 数据区（文章/分类/标签/单页列表）→ 告警。
+        // 保真搬入的 landing 天然没有数据区——用户需知道"后台发布内容不会出现在首页"，
+        // 并据此要求 AI 补区块（设计稿把该区块标为 data-block="article-list" 等受控语义名即可）。
+        if (!anyProductHasCmsDataBlock(ctx, attempt.writtenFiles())) {
+            String cmsWarn = "首页未接入 CMS 数据区：未发现文章/分类/标签/单页列表区块，后台发布的内容不会出现在首页"
+                    + "（可要求 AI 在首页补一个「最新文章」区块——设计稿中把该区块标为 data-block=\"article-list\"）";
+            sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, "\n⚠ " + cmsWarn);
+            report.add(cmsWarn);
+        }
 
         sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "");
         log.info("设计稿转化完成: sessionId={}, status={}, pages={}, mappedUnits={}",
                 ctx.session().getSessionId(), status, pageResults.size(), mappingByUnit.size());
         return new ConvertOutcome(status, pageResults, List.copyOf(new ArrayList<>(mappingByUnit.values())),
-                report, attempt.writtenFiles(), usageAgg[0], usageAgg[1], usageAgg[2]);
+                report, attempt.writtenFiles(), usageAgg.get(0), usageAgg.get(1), usageAgg.get(2));
     }
 
     // ==================== Step 1 区块切分 ====================
@@ -488,7 +532,11 @@ public class MockupConverter {
                 }
             }
         }
-        return new DesignBundle(pages, rootTokens, scripts, scriptAnchors);
+        // 站点结构梳理产物是否在场（ANALYZING 阶段落盘）：决定栏目来源是"AI 推导的页面规划"
+        // 还是"从 nav 锚点反推"，二者只能取其一，否则同一栏目会出两个菜单项
+        boolean hasSiteIa = Files.isRegularFile(
+                ctx.workDir().resolve("design").resolve("site-ia.json"));
+        return new DesignBundle(pages, rootTokens, scripts, scriptAnchors, hasSiteIa);
     }
 
     /** body 直接子级中的 nav 元素（契约结构；非顶层 nav 兜底 selectFirst） */
@@ -576,17 +624,213 @@ public class MockupConverter {
         return page + "#" + idx;
     }
 
+    // ==================== Step 2a 语义标记确定性映射 ====================
+
+    /**
+     * 语义标记 → 映射目标表（组件全名 / 内置标记）。
+     *
+     * <p>设计稿以受控 {@code data-block} 语义名声明 CMS 数据区（设计契约第 7 条），转化段按本表
+     * 直连：动态内容一律用 fastcms 标签渲染（articleListTag / categoryList / tagList /
+     * singlePageList），不落成静态 HTML、不依赖 AI 猜测。</p>
+     */
+    public static final Map<String, String> SEMANTIC_TARGETS = Map.of(
+            "article-list", "tw:article-list",
+            "category-list", "tw:category-list",
+            "tag-cloud", "tw:tag-cloud",
+            "single-page-list", "tw:single-page-list",
+            "content-body", MAP_CONTENT_BODY);
+
+    /**
+     * 应用语义标记确定性映射：命中表且组件可用的区块直接写入映射（source=semantic）。
+     *
+     * <p>跳过条件（移交后续 AI 映射，不静默错配）：语义名不在表内 / 组件不存在 /
+     * 组件 appliesTo 不含该页型 / content-body 标记出现在非内容页 / 已有等价映射。</p>
+     */
+    private void applySemanticMappings(DesignBundle bundle, Map<String, SectionMapping> mappingByUnit,
+                                       DesignSseSink sse) {
+        int applied = 0;
+        for (PageDesign page : bundle.pages()) {
+            String basePageKey = PageSpec.basePageKeyOf(page.plan().fastcmsPageKey());
+            List<Element> sections = page.sections();
+            for (int i = 0; i < sections.size(); i++) {
+                String block = sections.get(i).attr("data-block");
+                String target = resolveSemanticTarget(block, basePageKey, this::descriptorOf);
+                if (target == null) {
+                    continue;
+                }
+                String variant = MAP_CONTENT_BODY.equals(target) ? null : firstVariantOf(target);
+                String key = mappingKey(page.plan().name(), i);
+                SectionMapping existing = mappingByUnit.get(key);
+                if (existing != null && target.equals(existing.component())) {
+                    continue;
+                }
+                mappingByUnit.put(key, new SectionMapping(page.plan().name(), i, target, variant, 1.0,
+                        "语义标记 data-block=" + block + " 确定性映射", "semantic"));
+                applied++;
+            }
+        }
+        if (applied > 0 && sse != null) {
+            sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, "\n语义接入：" + applied
+                    + " 个 CMS 数据区按设计稿 data-block 语义标记确定性映射（动态内容用 fastcms 标签渲染）");
+        }
+    }
+
+    /**
+     * 语义标记 → 映射目标解析（<b>纯函数</b>：转换流程与单测共用，无 Spring/文件依赖）。
+     *
+     * @param blockName        data-block 语义名原文（大小写与空白不敏感）
+     * @param basePageKey      该页基础页类型（index/article_list/article/page，可空）
+     * @param descriptorLookup 组件全名 → 描述符（组件不存在时须返回 null）
+     * @return 映射目标（组件全名，或内置标记 {@link #MAP_CONTENT_BODY}）；
+     *         语义名未命中表 / 组件不存在 / 组件 appliesTo 不含该页型 / 正文标记落在非内容页 → null
+     */
+    static String resolveSemanticTarget(String blockName, String basePageKey,
+                                        java.util.function.Function<String, ComponentDescriptor> descriptorLookup) {
+        if (blockName == null || blockName.isBlank()) {
+            return null;
+        }
+        String target = SEMANTIC_TARGETS.get(blockName.trim().toLowerCase(Locale.ROOT));
+        if (target == null) {
+            return null;
+        }
+        if (MAP_CONTENT_BODY.equals(target)) {
+            // 正文标记仅内容页可用（与 PageSpecValidator 同口径，非内容页移交 AI 判定）
+            return isContentPageKey(basePageKey) ? target : null;
+        }
+        ComponentDescriptor descriptor = descriptorLookup == null ? null : descriptorLookup.apply(target);
+        return descriptor != null && appliesTo(descriptor, basePageKey) ? target : null;
+    }
+
+    /** 组件描述符查询（组件不存在返回 null） */
+    private ComponentDescriptor descriptorOf(String fullId) {
+        var rc = componentRegistry.find(fullId).orElse(null);
+        return rc == null ? null : rc.descriptor();
+    }
+
+    /** 组件首个变体 id（组件缺失或无变体返回 null） */
+    private String firstVariantOf(String fullId) {
+        ComponentDescriptor d = descriptorOf(fullId);
+        return d == null || d.safeVariants().isEmpty() ? null : d.safeVariants().get(0).id();
+    }
+
+    /** 组件适用性（appliesTo 为空 = 全页型；页型未知时不拦） */
+    private static boolean appliesTo(ComponentDescriptor descriptor, String basePageKey) {
+        List<String> appliesTo = descriptor.safeAppliesTo();
+        return appliesTo.isEmpty() || basePageKey == null || appliesTo.contains(basePageKey);
+    }
+
+    /** 内容页类型（article_list/article/page 及其 suffix 变体） */
+    private static boolean isContentPageKey(String basePageKey) {
+        return PageSpec.PAGE_ARTICLE_LIST.equals(basePageKey)
+                || PageSpec.PAGE_ARTICLE.equals(basePageKey)
+                || PageSpec.PAGE_PAGE.equals(basePageKey);
+    }
+
     // ==================== Step 2 组件映射（AI 决策点） ====================
+
+    /**
+     * 映射批次并行执行（mapping-concurrency &gt; 1 时的执行路径）
+     *
+     * <p>批次互相独立（每批独立提示词，mappingByUnit 按 unit key 聚合），固定线程池并发调用，
+     * 映射阶段耗时按批数/并行度压缩。实测整站 ~7 批场景 8 min → ~3 min（3 并发）。</p>
+     *
+     * <p><b>线程安全</b>：mappingByUnit 为 ConcurrentHashMap；进度回写（mappingProgressSink）
+     * 锁内串行化——编排器 lambda 对 planRef 读改写非原子；SSE 经 RunChannel 串行化安全。
+     * fail-fast 与设计段同口径：首因重抛，其余批静默中止。</p>
+     */
+    private void mapBatchesParallel(ConvertContext ctx, AgentChatExecutor.Prepared prepared, DesignBundle bundle,
+                                    List<List<SectionUnitRef>> batches, Map<String, SectionMapping> mappingByUnit,
+                                    DesignSseSink sse, java.util.concurrent.atomic.AtomicLongArray usageAgg,
+                                    int concurrency) {
+        int totalUnits = batches.stream().mapToInt(List::size).sum();
+        sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                "正在并行映射 " + totalUnits + " 个区块（" + batches.size() + " 批 × " + Math.min(concurrency, batches.size()) + " 并发）…");
+        // 批次聚合进度：每批完成推一条「k/M 批完成」（覆盖式 status，多批并发不逐批播报防闪烁）
+        java.util.concurrent.atomic.AtomicInteger doneBatches = new java.util.concurrent.atomic.AtomicInteger();
+        int threads = Math.min(concurrency, batches.size());
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors
+                .newFixedThreadPool(threads, new MappingWorkerThreadFactory());
+        java.util.concurrent.atomic.AtomicBoolean aborted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        Object sinkLock = new Object();
+        try {
+            List<java.util.concurrent.Future<?>> futures = new ArrayList<>(batches.size());
+            for (List<SectionUnitRef> batch : batches) {
+                java.util.function.BooleanSupplier abortSignal = aborted::get;
+                futures.add(pool.submit(() -> {
+                    mapBatch(ctx, prepared, bundle, batch, mappingByUnit, sse, usageAgg, abortSignal);
+                    // 进度点即时持久化（与串行路径同语义）：锁内串行化防编排器 planRef 丢更新
+                    if (ctx.mappingProgressSink() != null) {
+                        synchronized (sinkLock) {
+                            ctx.mappingProgressSink().accept(List.copyOf(mappingByUnit.values()));
+                        }
+                    }
+                    // 聚合进度播报（锁外安全：status 经 RunChannel 串行化，计数原子）
+                    sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                            "组件映射（" + doneBatches.incrementAndGet() + "/" + batches.size() + " 批完成）…");
+                }));
+            }
+            RuntimeException firstFailure = null;
+            for (java.util.concurrent.Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    aborted.set(true);
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    if (firstFailure == null && !(cause instanceof MappingAbortException)) {
+                        if (cause instanceof RuntimeException re) {
+                            firstFailure = re;
+                        } else {
+                            firstFailure = new IllegalStateException("映射批次失败: " + cause, cause);
+                        }
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    aborted.set(true);
+                    if (firstFailure == null) {
+                        firstFailure = new IllegalStateException("映射段被中断", ie);
+                    }
+                }
+            }
+            if (firstFailure != null) {
+                throw firstFailure;
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** 映射 worker 线程工厂（守护线程 + 命名） */
+    private static final class MappingWorkerThreadFactory implements java.util.concurrent.ThreadFactory {
+        private static final java.util.concurrent.atomic.AtomicInteger SEQ = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "ai-template-mapping-" + SEQ.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        }
+    }
+
+    /** 并行映射的中止信号异常（内部静默用，主线程过滤后重抛首因） */
+    static final class MappingAbortException extends RuntimeException {
+        MappingAbortException() {
+            super("并行映射中止（其他批次已失败）", null, false, false);
+        }
+    }
 
     private void mapBatch(ConvertContext ctx, AgentChatExecutor.Prepared prepared, DesignBundle bundle,
                           List<SectionUnitRef> batch, Map<String, SectionMapping> mappingByUnit,
-                          DesignSseSink sse, long[] usageAgg) {
+                          DesignSseSink sse, java.util.concurrent.atomic.AtomicLongArray usageAgg,
+                          java.util.function.BooleanSupplier abortSignal) {
         String manifest = buildMappingManifest();
         String batchPrompt = buildBatchPrompt(ctx, bundle, batch);
         String lastError = null;
         for (int round = 1; round <= MAX_MAPPING_ROUNDS; round++) {
             if (sse.isCancelled()) {
                 throw new DesignCancelledException();
+            }
+            if (abortSignal.getAsBoolean()) {
+                throw new MappingAbortException();
             }
             String raw = callMappingModel(prepared, manifest, batchPrompt, lastError, usageAgg);
             List<SectionMapping> parsed;
@@ -614,11 +858,19 @@ public class MockupConverter {
         }
     }
 
-    /** 组件清单：registry manifest + 特殊标记说明（custom-html 逃生舱对 AI 隐藏——输出用 custom 标记） */
+    /** 组件清单：registry manifest + 语义标记优先映射 + 特殊标记说明（custom-html 逃生舱对 AI 隐藏——输出用 custom 标记） */
     private String buildMappingManifest() {
         StringBuilder sb = new StringBuilder();
         sb.append(componentRegistry.buildManifest());
         sb.append("""
+                ## 语义标记优先映射（data-block 命中以下受控语义名时必须映射到对应组件）
+                - data-block="article-list"     → tw:article-list     （文章列表，自动绑定 CMS 文章数据）
+                - data-block="category-list"    → tw:category-list    （分类导航，自动绑定 CMS 分类数据）
+                - data-block="tag-cloud"        → tw:tag-cloud        （标签云，自动绑定 CMS 标签数据）
+                - data-block="single-page-list" → tw:single-page-list （单页入口，自动绑定 CMS 单页数据）
+                设计稿已用受控语义名声明 CMS 数据区的区块，系统会在你的判定前做确定性覆盖——
+                你照常逐项输出即可，但**禁止**把这类区块映射成 custom（动态内容必须用组件渲染）。
+
                 ## 特殊映射标记
                 - "custom"：区块不匹配任何组件，原样保留设计 HTML（结构差异大时果断使用，宁可 custom 不可错配）
                 - "content-body"：区块替换为该页 CMS 正文骨架（文章列表/单页正文），仅 article_list/article/page 类内容页的"列表/正文主体"区块可用
@@ -690,7 +942,8 @@ public class MockupConverter {
 
     /** 映射模型调用（非流式：输出小 JSON，reasoning 不播报） */
     private String callMappingModel(AgentChatExecutor.Prepared prepared, String manifest,
-                                    String batchPrompt, String prevError, long[] usageAgg) {
+                                    String batchPrompt, String prevError,
+                                    java.util.concurrent.atomic.AtomicLongArray usageAgg) {
         String system = "你是模板组件映射专家。任务：把设计稿区块映射到组件库组件或降级标记。"
                 + "只输出 JSON 数组，不要输出任何解释文字。\n\n" + manifest;
         StringBuilder user = new StringBuilder(batchPrompt);
@@ -703,19 +956,30 @@ public class MockupConverter {
                 .build();
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(system), new UserMessage(user.toString())), options);
-        var response = prepared.getChatClient().prompt(prompt).call().chatResponse();
-        if (response.getMetadata() != null && response.getMetadata().getUsage() != null) {
-            var u = response.getMetadata().getUsage();
-            usageAgg[0] += u.getPromptTokens() != null ? u.getPromptTokens() : 0;
-            usageAgg[1] += u.getCompletionTokens() != null ? u.getCompletionTokens() : 0;
-            usageAgg[2] += u.getTotalTokens() != null ? u.getTotalTokens() : 0;
+        IllegalStateException lastBlank = null;
+        for (int attempt = 1; attempt <= MAPPING_CALL_ATTEMPTS; attempt++) {
+            var response = prepared.getChatClient().prompt(prompt).call().chatResponse();
+            if (response.getMetadata() != null && response.getMetadata().getUsage() != null) {
+                var u = response.getMetadata().getUsage();
+                if (u.getPromptTokens() != null) {
+                    usageAgg.addAndGet(0, u.getPromptTokens());
+                }
+                if (u.getCompletionTokens() != null) {
+                    usageAgg.addAndGet(1, u.getCompletionTokens());
+                }
+                if (u.getTotalTokens() != null) {
+                    usageAgg.addAndGet(2, u.getTotalTokens());
+                }
+            }
+            String text = response.getResult() == null || response.getResult().getOutput() == null
+                    ? null : response.getResult().getOutput().getText();
+            if (StringUtils.hasText(text)) {
+                return text;
+            }
+            lastBlank = new IllegalStateException("映射模型返回空响应（已尝试 " + attempt + "/"
+                    + MAPPING_CALL_ATTEMPTS + " 次；推理型模型请确认 maxTokens 覆盖思考链+输出）");
         }
-        String text = response.getResult() == null || response.getResult().getOutput() == null
-                ? null : response.getResult().getOutput().getText();
-        if (!StringUtils.hasText(text)) {
-            throw new IllegalStateException("映射模型返回空响应");
-        }
-        return text;
+        throw lastBlank;
     }
 
     /** 解析 + 校验 AI 映射输出（返回与本批区块一一对应的映射；违规项确定性降 custom） */
@@ -981,7 +1245,7 @@ public class MockupConverter {
         String stylePreset = ctx.direction() != null && StringUtils.hasText(ctx.direction().stylePreset())
                 ? ctx.direction().stylePreset() : TokenEngine.DEFAULT_PRESET;
         return new PageSpec(PageSpec.SPEC_VERSION, BuiltinFoundation.TAILWIND_V4, templateName,
-                siteName, null, stylePreset, primaryColor, buildSiteContent(bundle), pages, null);
+                siteName, null, stylePreset, primaryColor, buildSiteContent(bundle, sse), pages, null);
     }
 
     /** 内置地基常量（避免直接依赖 BuiltinTailwindPackProvider 具体类） */
@@ -1261,11 +1525,11 @@ public class MockupConverter {
     // ==================== R3 custom nav 菜单化（menuTag 替换） ====================
 
     /** 菜单化结果（审计口径：matched/total + 未命中锚文本清单） */
-    private record MenuifyResult(String html, int matched, int total, List<String> misses) {
+    record MenuifyResult(String html, int matched, int total, List<String> misses) {
     }
 
     /** 锚文本 × 站点信息架构匹配结果：indexItem=命中的是首页项（menuTag 数据不含首页，静态保留） */
-    private record NavMatch(boolean indexItem) {
+    record NavMatch(boolean indexItem) {
     }
 
     /**
@@ -1278,7 +1542,7 @@ public class MockupConverter {
      * @return 变换后的 nav HTML；无可菜单化 ul（或异常）时原样返回
      */
     private String menuifyNav(String navHtml, DesignBundle bundle, boolean announce, DesignSseSink sse) {
-        MenuifyResult result = doMenuifyNav(navHtml, bundle);
+        MenuifyResult result = doMenuifyNav(navHtml, buildSiteContent(bundle).menus());
         if (announce && sse != null && result.total() > 0) {
             String note = "\n菜单接入：custom 导航已菜单化 " + result.matched() + "/" + result.total()
                     + " 个静态菜单项（CMS 后台菜单配置生效）";
@@ -1292,20 +1556,30 @@ public class MockupConverter {
     }
 
     /**
-     * 菜单化实现：候选 ul（≥2 个 li&gt;a 直接子项）内锚文本四级匹配站点信息架构
-     * （buildSiteContent 的 NavItem 名单）：归一化精确 → 中英同义词组 → 包含匹配
-     * （较短一方 ≥2 字）→ 失败。≥1 项命中即视为菜单 ul 并替换：ul 属性原样保留，
-     * 首页项与未命中项保留静态 li（不丢菜单项、预览数据口径不含首页防双首页），
-     * 其余交给 menuTag（li/a 类名取首个命中项，样式不变）；无命中则原样返回。
+     * 菜单化实现（两级扫描，2026-09-25 扩展）：
+     * <ol>
+     *     <li><b>ul 扫描</b>：候选 ul（≥2 个 li&gt;a 直接子项）——原有 R3 逻辑</li>
+     *     <li><b>链接组扫描</b>：同一容器下 ≥2 个直接子 {@code <a>}（div.nav-links &gt; a 等无列表
+     *     结构的导航，landing 类设计稿的主流写法）——锚文本同样四级匹配</li>
+     * </ol>
+     * 锚文本四级匹配站点信息架构（buildSiteContent 的 NavItem 名单）：
+     * 归一化精确 → 中英同义词组 → 包含匹配（较短一方 ≥2 字）→ 失败。
+     * ≥1 项命中即替换：容器属性原样保留，首页项与未命中项保留静态（不丢菜单项、
+     * 预览数据口径不含首页防双首页），其余交给 menuTag（类名取首个命中项，样式不变）；
+     * 无命中则原样返回。menuTag 产物带 active 前缀匹配高亮 + 子菜单递归
+     * （对齐 template-spec 技能规范第 11 节）。
+     *
+     * <p>无状态纯函数（static）：信息架构名单由调用方传入，便于单测直接覆盖
+     * （见 {@code MockupConverterNavMenuifyTest}）——{@code menuifyNav} 从 bundle 推导名单后委托本方法。</p>
      */
-    private MenuifyResult doMenuifyNav(String navHtml, DesignBundle bundle) {
+    static MenuifyResult doMenuifyNav(String navHtml, List<SiteContentSpec.NavItem> navItems) {
         int totalMatched = 0;
         int totalAnchors = 0;
         List<String> misses = new ArrayList<>();
         try {
             Document fragment = Jsoup.parseBodyFragment(navHtml);
-            List<SiteContentSpec.NavItem> navItems = buildSiteContent(bundle).menus();
             boolean changed = false;
+            // Pass 1：ul > li > a 列表结构（原有 R3 逻辑）
             for (Element ul : fragment.select("ul")) {
                 List<Element> lis = new ArrayList<>();
                 for (Element child : ul.children()) {
@@ -1316,20 +1590,17 @@ public class MockupConverter {
                 if (lis.size() < 2) {
                     continue;
                 }
-                int matched = 0;
+                List<Element> staticKeep = new ArrayList<>();
                 Element firstMatchedLi = null;
                 Element firstMatchedA = null;
-                List<Element> staticKeep = new ArrayList<>();
+                int matched = 0;
                 for (Element li : lis) {
                     Element a = li.selectFirst("> a");
                     totalAnchors++;
                     NavMatch r = matchNavAnchor(a.text(), navItems);
                     if (r == null) {
                         staticKeep.add(li);
-                        String t = a.text().trim();
-                        if (!t.isEmpty() && !misses.contains(t)) {
-                            misses.add(t);
-                        }
+                        addMiss(a.text(), misses);
                     } else {
                         matched++;
                         totalMatched++;
@@ -1345,7 +1616,57 @@ public class MockupConverter {
                 if (matched < 1 || firstMatchedA == null) {
                     continue;
                 }
-                ul.replaceWith(new DataNode(buildMenuifiedUl(ul, staticKeep, firstMatchedLi, firstMatchedA)));
+                ul.replaceWith(new DataNode(
+                        buildMenuifiedUl(ul, staticKeep, firstMatchedLi, firstMatchedA, navItems)));
+                changed = true;
+            }
+            // Pass 2：容器直接子 <a> 链接组（div.nav-links > a 等，无列表结构的导航）。
+            // 排除：ul/li/a 自身；仅统计直接子 a（嵌套结构不误伤）
+            for (Element container : fragment.select("*")) {
+                String tag = container.tagName();
+                if ("ul".equals(tag) || "li".equals(tag) || "a".equals(tag)) {
+                    continue;
+                }
+                List<Element> directLinks = new ArrayList<>();
+                for (Element child : container.children()) {
+                    if ("a".equals(child.tagName()) && StringUtils.hasText(child.attr("href"))) {
+                        directLinks.add(child);
+                    }
+                }
+                if (directLinks.size() < 2) {
+                    continue;
+                }
+                List<Element> staticKeep = new ArrayList<>();
+                Element firstMatchedA = null;
+                int matched = 0;
+                for (Element a : directLinks) {
+                    // 品牌 logo / CTA 按钮：结构原样保留（不能丢），但不计入菜单项口径
+                    // （否则 SSE 播报会把"源码下载/免费开始使用"报成未匹配菜单项）
+                    if (isNavChromeAnchor(a)) {
+                        staticKeep.add(a);
+                        continue;
+                    }
+                    totalAnchors++;
+                    NavMatch r = matchNavAnchor(a.text(), navItems);
+                    if (r == null) {
+                        staticKeep.add(a);
+                        addMiss(a.text(), misses);
+                    } else {
+                        matched++;
+                        totalMatched++;
+                        if (firstMatchedA == null) {
+                            firstMatchedA = a;
+                        }
+                        if (r.indexItem()) {
+                            staticKeep.add(a);
+                        }
+                    }
+                }
+                if (matched < 1 || firstMatchedA == null) {
+                    continue;
+                }
+                container.replaceWith(new DataNode(
+                        buildMenuifiedLinkGroup(container, staticKeep, firstMatchedA, navItems)));
                 changed = true;
             }
             if (changed) {
@@ -1357,39 +1678,156 @@ public class MockupConverter {
         return new MenuifyResult(navHtml, totalMatched, totalAnchors, misses);
     }
 
+    /** 未命中锚文本记账（去重 + 非空） */
+    static void addMiss(String text, List<String> misses) {
+        String t = text == null ? "" : text.trim();
+        if (!t.isEmpty() && !misses.contains(t)) {
+            misses.add(t);
+        }
+    }
+
     /**
-     * 组装菜单化 ul：ul 全部属性原样保留 + 静态项（首页/未命中，原 outerHtml）+
-     * menuTag 动态块（li/a 类名取首个命中项；url=='/' 项跳过，与组件 navbar 防双首页口径一致）
+     * 组装菜单化 ul（ul&gt;li&gt;a 结构）：ul 全部属性原样保留 + 静态项（首页/未命中，
+     * 原 outerHtml，首页项注入 active 高亮判断）+ menuTag 动态块（li/a 类名取首个命中项；
+     * url=='/' 项跳过，与组件 navbar 防双首页口径一致）
      */
-    private String buildMenuifiedUl(Element ul, List<Element> staticKeep,
-                                    Element firstMatchedLi, Element firstMatchedA) {
-        StringBuilder sb = new StringBuilder("<ul");
+    static String buildMenuifiedUl(Element ul, List<Element> staticKeep,
+                                   Element firstMatchedLi, Element firstMatchedA,
+                                   List<SiteContentSpec.NavItem> navItems) {
+        StringBuilder sb = new StringBuilder();
+        // 请求上下文必须先于一切 FTL 表达式求值（静态首页项的高亮条件也引用 _navUri）
+        sb.append(NAV_CONTEXT_ASSIGN);
+        sb.append("<ul");
         for (Attribute attr : ul.attributes()) {
             sb.append(" ").append(attr.getKey()).append("=\"").append(attr.getValue()).append("\"");
         }
         sb.append(">\n");
         for (Element li : staticKeep) {
-            sb.append(li.outerHtml()).append('\n');
+            sb.append(injectHomeActive(li.outerHtml(), navItems)).append('\n');
         }
-        sb.append("<@menuTag>\n<#if data??>\n<#list data as item>\n")
-                .append("<#if item.menuName?? && item.menuName?has_content")
-                .append(" && (item.url!'') != '' && (item.url!'') != '/'>\n")
-                .append("<li");
-        if (StringUtils.hasText(firstMatchedLi.className())) {
-            sb.append(" class=\"").append(firstMatchedLi.className()).append("\"");
-        }
-        sb.append("><a href=\"${item.url!''}\" target=\"${item.target!'_self'}\"");
-        if (StringUtils.hasText(firstMatchedA.className())) {
-            sb.append(" class=\"").append(firstMatchedA.className()).append("\"");
-        }
-        sb.append(">${item.menuName}</a></li>\n")
-                .append("</#if>\n</#list>\n</#if>\n</@menuTag>\n")
-                .append("</ul>");
+        String liClass = firstMatchedLi.className();
+        String aClass = firstMatchedA.className();
+        sb.append(buildMenuTagBlock(liClass, aClass, true));
+        sb.append("</ul>");
         return sb.toString();
     }
 
+    /**
+     * 组装菜单化链接组（div.nav-links &gt; a 等无列表结构）：容器全部属性原样保留 +
+     * 静态项（首页/未命中，原 outerHtml，首页项注入 active 高亮判断）+ menuTag 动态块
+     * （a 类名取首个命中项；子菜单以 a 后跟 ul.submenu 输出，配合 site.css 兜底样式）
+     */
+    static String buildMenuifiedLinkGroup(Element container, List<Element> staticKeep,
+                                          Element firstMatchedA,
+                                          List<SiteContentSpec.NavItem> navItems) {
+        StringBuilder sb = new StringBuilder();
+        // 请求上下文必须先于一切 FTL 表达式求值（静态首页项的高亮条件也引用 _navUri）
+        sb.append(NAV_CONTEXT_ASSIGN);
+        sb.append("<").append(container.tagName());
+        for (Attribute attr : container.attributes()) {
+            sb.append(" ").append(attr.getKey()).append("=\"").append(attr.getValue()).append("\"");
+        }
+        sb.append(">\n");
+        for (Element a : staticKeep) {
+            sb.append(injectHomeActive(a.outerHtml(), navItems)).append('\n');
+        }
+        sb.append(buildMenuTagBlock(null, firstMatchedA.className(), false));
+        sb.append("</").append(container.tagName()).append(">");
+        return sb.toString();
+    }
+
+    /** 菜单 active 判断所需的请求上下文（幂等：同一物化片段只注入一次） */
+    private static final String NAV_CONTEXT_ASSIGN =
+            "<#assign _navCp = (request.contextPath)!''>\n"
+                    + "<#assign _navUri = _navCp + (request.requestURI)!''>\n";
+
+    /** 首页 active 判断（静态首页项注入用）：URI 等于根或上下文根 */
+    private static final String HOME_ACTIVE_COND =
+            "<#if (_navUri == _navCp + '/') || (_navUri == _navCp)> active</#if>";
+
+    /**
+     * menuTag 动态菜单块（ul 版与链接组版共用）：
+     * active 前缀匹配高亮 + 子菜单递归一级（对齐 template-spec 技能规范第 11 节，
+     * 子菜单命中时父级因前缀包含关系天然 active）
+     *
+     * @param liClass ul 版 li 类名（链接组版传 null，不输出 li 包裹）
+     * @param aClass  a 类名（取首个命中项，保留设计稿样式）
+     * @param withLi  true=ul&gt;li&gt;a 结构；false=容器直接子 a 结构
+     */
+    static String buildMenuTagBlock(String liClass, String aClass, boolean withLi) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<@menuTag>\n<#if data??>\n<#list data as item>\n")
+                .append("<#if item.menuName?? && item.menuName?has_content")
+                .append(" && (item.url!'') != '' && (item.url!'') != '/'>\n");
+        if (withLi) {
+            sb.append("<li class=\"").append(liClass == null ? "" : liClass)
+                    .append("<#if (_navUri?starts_with(item.url!''))> active</#if>\">\n");
+        }
+        sb.append("<a href=\"${item.url!''}\" target=\"${item.target!'_self'}\" class=\"")
+                .append(aClass == null ? "" : aClass)
+                .append("<#if (_navUri?starts_with(item.url!''))> active</#if>\">")
+                .append("${item.menuName}</a>\n");
+        // 子菜单（二级）：ul 版嵌在 li 内，链接组版跟在 a 后（同为 ul.submenu，样式由 site.css 兜底）
+        sb.append("<#if item.children?? && (item.children?size > 0)>\n<ul class=\"submenu\">\n")
+                .append("<#list item.children as child>\n")
+                .append("<#if child.menuName?? && child.menuName?has_content && (child.url!'') != ''>\n")
+                .append("<li class=\"<#if (child.url?? && _navUri?starts_with(child.url!''))>active</#if>\">")
+                .append("<a href=\"${child.url!''}\" target=\"${child.target!'_self'}\">${child.menuName}</a></li>\n")
+                .append("</#if>\n</#list>\n</ul>\n</#if>\n");
+        if (withLi) {
+            sb.append("</li>\n");
+        }
+        sb.append("</#if>\n</#list>\n</#if>\n</@menuTag>\n");
+        return sb.toString();
+    }
+
+    /**
+     * 静态保留项中的首页项注入 active 高亮判断（字符串级，不动 Jsoup——
+     * 属性值里的 FTL 表达式经 Jsoup 序列化会被转义）
+     *
+     * @return 首页项返回注入后的 HTML；非首页项原样返回
+     */
+    static String injectHomeActive(String elementHtml, List<SiteContentSpec.NavItem> navItems) {
+        try {
+            Element el = Jsoup.parseBodyFragment(elementHtml).body().selectFirst("> *");
+            if (el == null) {
+                return elementHtml;
+            }
+            Element a = "a".equals(el.tagName()) ? el : el.selectFirst("a");
+            if (a == null) {
+                return elementHtml;
+            }
+            NavMatch r = matchNavAnchor(a.text(), navItems);
+            if (r == null || !r.indexItem()) {
+                return elementHtml;
+            }
+            Matcher tagMatcher = FIRST_OPEN_TAG_PATTERN.matcher(elementHtml);
+            if (!tagMatcher.find()) {
+                return elementHtml;
+            }
+            String openTag = tagMatcher.group();
+            // 有 class 属性 → 追加条件段；无 → 开标签名后插入 class 属性
+            Matcher classAttr = Pattern.compile("class=\"([^\"]*)\"").matcher(openTag);
+            if (classAttr.find()) {
+                String merged = "class=\"" + classAttr.group(1) + HOME_ACTIVE_COND + "\"";
+                String newTag = openTag.substring(0, classAttr.start()) + merged
+                        + openTag.substring(classAttr.end());
+                return elementHtml.substring(0, tagMatcher.start()) + newTag
+                        + elementHtml.substring(tagMatcher.end());
+            }
+            String newTag = openTag + " class=\"" + HOME_ACTIVE_COND + "\"";
+            return elementHtml.substring(0, tagMatcher.start()) + newTag
+                    + elementHtml.substring(tagMatcher.end());
+        } catch (Exception e) {
+            return elementHtml;
+        }
+    }
+
+    /** 首个 HTML 开标签（注入首页 active 判断用，跳过 FTL 指令标签） */
+    private static final Pattern FIRST_OPEN_TAG_PATTERN = Pattern.compile("<[a-zA-Z][a-zA-Z0-9-]*[^>]*>");
+
     /** 锚文本四级匹配站点信息架构名单；命中返回 NavMatch，四级全败返回 null（告警由调用方） */
-    private NavMatch matchNavAnchor(String anchorText, List<SiteContentSpec.NavItem> navItems) {
+    static NavMatch matchNavAnchor(String anchorText, List<SiteContentSpec.NavItem> navItems) {
         String a = normalizeAnchor(anchorText);
         if (a.isEmpty()) {
             return null;
@@ -1428,7 +1866,7 @@ public class MockupConverter {
     }
 
     /** 锚文本归一化：trim + 去空白 + 全角转半角 + 小写 */
-    private String normalizeAnchor(String text) {
+    static String normalizeAnchor(String text) {
         if (text == null) {
             return "";
         }
@@ -1449,6 +1887,23 @@ public class MockupConverter {
      * 预览数据与设计稿导航对应
      */
     private SiteContentSpec buildSiteContent(DesignBundle bundle) {
+        return buildSiteContent(bundle, null);
+    }
+
+    /**
+     * 同上，附加"设计稿导航栏目并入 + 播报"（2026-09-25 新增）。
+     *
+     * <p>规划阶段只产出标准页（index/article_list/article/page）时，"上传的站点到底有哪些栏目"
+     * 这个事实只存在于设计稿 nav 里，从未进过信息架构——于是 nav 菜单化锚文本必然全不匹配、
+     * 菜单永远静态、{@code _preview_data.json} 的菜单与实际导航脱节。这里把 nav 中的栏目锚点
+     * 补成信息架构条目（各派生一个 {@code page_{slug}} 专属页），使
+     * <b>菜单 → _pagespec.json / _preview_data.json → 栏目页</b> 三者同源：菜单化天然命中
+     * （同一份名单，无需求助同义词匹配），预览菜单与设计稿导航一致且可整站点击，
+     * apply 时菜单与栏目页一起落库。</p>
+     *
+     * @param sse 非 null 时播报并入结果（{@link #menuifyNav} 侧传 null 防重复播报）
+     */
+    private SiteContentSpec buildSiteContent(DesignBundle bundle, DesignSseSink sse) {
         List<SiteContentSpec.NavItem> menus = new ArrayList<>();
         menus.add(new SiteContentSpec.NavItem("首页", SiteContentSpec.NavItem.TYPE_INDEX, null, null));
         List<SiteContentSpec.CatalogItem> singlePages = new ArrayList<>();
@@ -1472,6 +1927,13 @@ public class MockupConverter {
                 if (key.startsWith("page_")) {
                     navType = SiteContentSpec.NavItem.TYPE_PAGE;
                     isCategory = false;
+                } else if (key.equals(PageSpec.PAGE_ARTICLE_LIST)) {
+                    // 基础文章列表页（fastcms 内置能力页，article_list.html 本体）：
+                    // 菜单项不带 suffix（直接指向基础页），也不进分类——带 suffix 会派生
+                    // article_list_article_list.html 冗余专属页（suffixedPageKey(type=自身)）
+                    menus.add(new SiteContentSpec.NavItem(title,
+                            SiteContentSpec.NavItem.TYPE_ARTICLE_LIST, null, null));
+                    continue;
                 } else if (key.startsWith("article_list")) {
                     navType = SiteContentSpec.NavItem.TYPE_ARTICLE_LIST;
                     isCategory = true;
@@ -1486,9 +1948,33 @@ public class MockupConverter {
             }
             menus.add(new SiteContentSpec.NavItem(title, navType, name, null));
         }
+        // 设计稿导航栏目并入信息架构（插在首页之后、规划页之前：设计稿导航即站点栏目顺序）
+        Set<String> takenSuffixes = new HashSet<>();
+        for (SiteContentSpec.NavItem item : menus) {
+            if (!SiteContentSpec.NavItem.TYPE_INDEX.equals(item.safeType())
+                    && StringUtils.hasText(item.suffix())) {
+                takenSuffixes.add(item.suffix());
+            }
+        }
+        // 设计稿导航栏目并入（仅"AI 未做站点结构梳理"时兜底）：单文件导入会先跑 ANALYZING，
+        // AI 已把导航栏目推导成真实页面规划（进 bundle.pages → 上面的循环已生成菜单项），
+        // 此时再从 nav 锚点反推会与 AI 的 slug 命名打架（同一栏目出两个菜单项，其一指向不存在的页）。
+        // 仅在无 IA 的会话（多页 zip 导入 / 站点分析降级）才用 nav 锚点兜底补栏目。
+        List<SiteContentSpec.NavItem> navDerived = bundle.hasSiteIa()
+                ? List.of()
+                : deriveNavMenus(bundle, menus, takenSuffixes);
+        if (!navDerived.isEmpty()) {
+            menus.addAll(1, navDerived);
+        }
         // 菜单上限截断（与 PageSpecValidator.MAX_TOP_MENUS 同口径防规划失控；首页恒在首位）
         if (menus.size() > MAX_NAV_ITEMS) {
             menus = new ArrayList<>(menus.subList(0, MAX_NAV_ITEMS));
+        }
+        // 导航派生栏目落 singlePages（截断后被丢弃的不落，保持菜单与页面一致）
+        for (SiteContentSpec.NavItem item : navDerived) {
+            if (menus.contains(item)) {
+                singlePages.add(new SiteContentSpec.CatalogItem(item.name(), item.suffix()));
+            }
         }
         // 演示文章（预览用，通用占位与管线内置演示数据同性质；有分类才有列表页可展示）
         List<SiteContentSpec.PreviewArticle> articles = new ArrayList<>();
@@ -1497,7 +1983,184 @@ public class MockupConverter {
             articles.add(new SiteContentSpec.PreviewArticle("行业资讯与深度观察", "精选行业相关资讯，帮助访客了解领域趋势。"));
             articles.add(new SiteContentSpec.PreviewArticle("团队故事与幕后花絮", "介绍团队日常工作与产品背后的故事。"));
         }
+        if (sse != null && !navDerived.isEmpty()) {
+            List<String> names = new ArrayList<>();
+            for (SiteContentSpec.NavItem item : navDerived) {
+                if (menus.contains(item)) {
+                    names.add(item.name());
+                }
+            }
+            if (!names.isEmpty()) {
+                sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, "\n导航栏目接入：设计稿导航 " + names.size()
+                        + " 个栏目并入信息架构（" + String.join("、", names)
+                        + "），各派生对应栏目页并接 CMS 菜单——预览菜单与设计稿导航一致，链接可整站跳转");
+            }
+        }
         return new SiteContentSpec(menus, categories, singlePages, articles);
+    }
+
+    // ==================== 设计稿导航 → 信息架构（2026-09-25） ====================
+
+    /** nav 中应跳过的锚点类名：品牌/首页（logo/brand）与 CTA 按钮（btn/button/cta） */
+    private static final Pattern NAV_SKIP_CLASS_PATTERN = Pattern.compile(
+            "(?i)(^|[\\s_-])(logo|brand|btn|button|cta)([\\s_-]|$)");
+    /** nav 中不参与信息架构的外链/脚本链接前缀（NavItem 表达不了自定义外链） */
+    private static final List<String> NAV_LINK_SKIP_PREFIXES =
+            List.of("http://", "https://", "//", "mailto:", "tel:", "javascript:");
+    /** 品牌/首页锚点 href 白名单（顶锚、空锚、根路径——对应"首页"菜单项） */
+    private static final Set<String> NAV_HOME_HREFS =
+            Set.of("", "#", "/", "#top", "#home", "index.html", "./", "./index.html");
+    /** 派生 slug 最长长度（控制文件名长度） */
+    private static final int NAV_SLUG_MAX_LEN = 32;
+
+    /**
+     * 设计稿 nav → 信息架构栏目（零 AI，确定性）：
+     * 逐个锚点取文本为菜单名、href 的 fragment/路径段为 slug，一律派生 {@code page_{slug}} 单页。
+     *
+     * <p>跳过：品牌/首页链接、外链与 javascript/mailto 链接、CTA 按钮、空白锚文本、
+     * 已命中既有信息架构（同名或中英同义）的栏目、同一 nav 内重名栏目。
+     * slug 由 href 净化：{@code #features → features}、{@code /products.html?a=1 → products}，
+     * 净化后为空（纯中文锚点 {@code #核心能力}）时退化为 {@code nav-序号}，
+     * 与已占用 suffix 冲突时追加序号（保证 validator 的菜单内 suffix 唯一约束）。</p>
+     *
+     * @param bundle        设计稿解析产物（取锚点页 nav，与布局区 nav 抽取同源）
+     * @param existingMenus 既有菜单名单（规划派生；命中判定用）
+     * @param takenSuffixes 已占用 suffix 集合（就地扩展去重）
+     */
+    static List<SiteContentSpec.NavItem> deriveNavMenus(DesignBundle bundle,
+                                                        List<SiteContentSpec.NavItem> existingMenus,
+                                                        Set<String> takenSuffixes) {
+        if (bundle == null || bundle.pages().isEmpty()) {
+            return List.of();
+        }
+        return deriveNavMenus(bundle.pages().get(0).nav(), existingMenus, takenSuffixes);
+    }
+
+    /** {@link #deriveNavMenus(DesignBundle, List, Set)} 的 nav 元素版（单测入口） */
+    static List<SiteContentSpec.NavItem> deriveNavMenus(Element nav,
+                                                        List<SiteContentSpec.NavItem> existingMenus,
+                                                        Set<String> takenSuffixes) {
+        if (nav == null) {
+            return List.of();
+        }
+        List<SiteContentSpec.NavItem> existing = existingMenus == null ? List.of() : existingMenus;
+        Set<String> taken = takenSuffixes == null ? new HashSet<>() : takenSuffixes;
+        List<SiteContentSpec.NavItem> derived = new ArrayList<>();
+        int ordinal = 0;
+        for (Element a : nav.select("a")) {
+            ordinal++;
+            String href = a.attr("href").trim();
+            String text = a.text().trim();
+            if (!StringUtils.hasText(text) || isNavSkippedAnchor(a, href)) {
+                continue;
+            }
+            // 已命中既有信息架构（含首页与中英同义）→ 该栏目已有页面，不重复建
+            if (matchNavAnchor(text, existing) != null) {
+                continue;
+            }
+            if (containsNavName(derived, text)) {
+                continue;
+            }
+            String slug = navSlug(href, ordinal, taken);
+            derived.add(new SiteContentSpec.NavItem(text, SiteContentSpec.NavItem.TYPE_PAGE, slug, null));
+        }
+        return derived;
+    }
+
+    /** nav 装饰锚点（品牌 logo / CTA 按钮，按类名识别）：结构必须保留，但不参与菜单项口径 */
+    static boolean isNavChromeAnchor(Element a) {
+        String cls = a == null ? "" : a.className();
+        return StringUtils.hasText(cls) && NAV_SKIP_CLASS_PATTERN.matcher(cls).find();
+    }
+
+    /** 该 nav 锚点是否应跳过（品牌/CTA 按钮、首页链接、外链、伪按钮容器内的链接） */
+    static boolean isNavSkippedAnchor(Element a, String href) {
+        if (isNavChromeAnchor(a)) {
+            return true;
+        }
+        String h = href == null ? "" : href.trim();
+        if (NAV_HOME_HREFS.contains(h.toLowerCase(Locale.ROOT))) {
+            return true;
+        }
+        String lower = h.toLowerCase(Locale.ROOT);
+        for (String prefix : NAV_LINK_SKIP_PREFIXES) {
+            if (lower.startsWith(prefix)) {
+                return true;
+            }
+        }
+        Element parent = a.parent();
+        return parent != null && "button".equalsIgnoreCase(parent.tagName());
+    }
+
+    /** 派生名单内是否已有同名栏目（归一化比较，与锚文本匹配同口径） */
+    private static boolean containsNavName(List<SiteContentSpec.NavItem> items, String name) {
+        String n = normalizeAnchor(name);
+        for (SiteContentSpec.NavItem item : items) {
+            if (normalizeAnchor(item.name()).equals(n)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 导航 href → ASCII slug（对齐 suffix 契约 {@code [a-zA-Z0-9_-]+}）：
+     * {@code #features} 取 fragment；{@code /products.html?a=1} 取末段去扩展名；
+     * 净化后为空时退化为 {@code nav-序号}；与已占用 suffix 冲突时追加 {@code -2/-3…}
+     */
+    static String navSlug(String href, int ordinal, Set<String> taken) {
+        String raw = href == null ? "" : href.trim();
+        String source;
+        int hash = raw.indexOf('#');
+        if (hash == 0) {
+            source = raw.substring(1);
+        } else {
+            String path = hash > 0 ? raw.substring(0, hash) : raw;
+            int query = path.indexOf('?');
+            if (query >= 0) {
+                path = path.substring(0, query);
+            }
+            while (path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            int slash = path.lastIndexOf('/');
+            source = slash >= 0 ? path.substring(slash + 1) : path;
+            int dot = source.lastIndexOf('.');
+            if (dot > 0) {
+                source = source.substring(0, dot);
+            }
+        }
+        String base = sanitizeSlug(source);
+        if (base.isEmpty()) {
+            base = "nav-" + ordinal;
+        }
+        String slug = base;
+        int seq = 2;
+        while (taken.contains(slug)) {
+            slug = base + "-" + seq++;
+        }
+        taken.add(slug);
+        return slug;
+    }
+
+    /** slug 净化：小写 + 非 {@code [a-z0-9_-]} 字符统一转 '-' + 折叠连字符 + 去首尾分隔符 + 截断 */
+    static String sanitizeSlug(String source) {
+        if (source == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(source.length());
+        for (char c : source.toLowerCase(Locale.ROOT).toCharArray()) {
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+                sb.append(c);
+            } else {
+                sb.append('-');
+            }
+        }
+        String s = sb.toString().replaceAll("-{2,}", "-").replaceAll("^[-_]+|[-_]+$", "");
+        if (s.length() > NAV_SLUG_MAX_LEN) {
+            s = s.substring(0, NAV_SLUG_MAX_LEN).replaceAll("[-_]+$", "");
+        }
+        return s;
     }
 
     /** 站点名：nav brand 文本 → 设计稿 title → 默认 */
@@ -1790,12 +2453,42 @@ public class MockupConverter {
     /** R3 收尾扫描：产物 html（含 _layout.html）任一含 menuTag 即视为菜单已接入 CMS */
     private boolean anyProductHasMenuTag(ConvertContext ctx, List<String> writtenFiles) {
         for (String relPath : writtenFiles) {
-            if (!relPath.endsWith(".html")) {
+            // menuTag 不只出现在页面 html：菜单化后的导航物化为 _components/cap__nav-*__*.ftl
+            // 组件（页面只留 <#include> 引用）——只扫 .html 会把"已接 CMS 的菜单"误报为静态链接
+            //（e2e 实证：产物组件目录有 <@menuTag> 仍报警）。.html 与 _components/ 的 .ftl 都要扫。
+            if (!relPath.endsWith(".html") && !(relPath.endsWith(".ftl") && relPath.contains("_components"))) {
                 continue;
             }
             try {
                 if (Files.readString(ctx.workDir().resolve(relPath), StandardCharsets.UTF_8)
                         .contains("menuTag")) {
+                    return true;
+                }
+            } catch (IOException e) {
+                // 单文件读失败不阻断扫描
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 首页产物是否含 CMS 数据区：直接含 CMS 指令（custom 场景），或引用了 CMS 数据组件
+     * （组件源码落在 _components/ 下，页面只留引用名，故按引用名判定）。
+     *
+     * <p>仅扫 index 开头的页面——内容页正文骨架自带 articleVoPage / article 等，
+     * 不代表首页有数据区（判定口径针对"首页能否显示后台内容"这个问题）。</p>
+     */
+    private boolean anyProductHasCmsDataBlock(ConvertContext ctx, List<String> writtenFiles) {
+        for (String relPath : writtenFiles) {
+            if (!relPath.endsWith(".html") || !relPath.startsWith("index")) {
+                continue;
+            }
+            try {
+                String html = Files.readString(ctx.workDir().resolve(relPath), StandardCharsets.UTF_8);
+                if (html.contains("<@articleListTag") || html.contains("<@categoryList")
+                        || html.contains("<@tagList") || html.contains("<@singlePageList")
+                        || html.contains("tw__article-list__") || html.contains("tw__category-list__")
+                        || html.contains("tw__tag-cloud__") || html.contains("tw__single-page-list__")) {
                     return true;
                 }
             } catch (IOException e) {

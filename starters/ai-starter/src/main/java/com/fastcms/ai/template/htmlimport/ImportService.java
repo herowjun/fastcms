@@ -214,11 +214,9 @@ public class ImportService {
         List<String> pageSummaries = new ArrayList<>();
         // 首页 inline <style> 内容（首页口径，与 nav/footer 公共块一致；多页 zip 其他页差异进 note）
         String firstPageInlineStyle = null;
-        // 首页原始 HTML（归一化前的 Files.readString 结果；c 形态单文件触发时作为 referenceHtml
-        // 注入 AI 设计 prompt，让 AI 读 landing 设计语言推导子页设计稿）
+        // 首页原始 HTML（归一化前的 Files.readString 结果；单文件导入时作为 referenceHtml
+        // 注入 AI 设计 prompt，让 AI 读首页设计语言推导各栏目页设计稿）
         String firstPageRawHtml = null;
-        // 首页归一化形态（c 形态单文件触发全站 AI 推导的条件之一）
-        HtmlNormalizer.Form firstPageForm = null;
         for (PageKeyResolver.ResolvedPage page : resolution.pages()) {
             String html = Files.readString(staging.resolve(page.sourceRelPath()), StandardCharsets.UTF_8);
             String htmlDir = parentDirOf(page.sourceRelPath());
@@ -242,7 +240,6 @@ public class ImportService {
             boolean firstPage = resolution.pages().get(0) == page;
             if (firstPage) {
                 firstPageRawHtml = html;
-                firstPageForm = result.form();
                 // 首页 inline <style> 提取（全量保留，含 :root 变量与 class 定义）：
                 // 转化段 MockupConverter 只提取 :root 变量到 tokens.css，
                 // inline style 中除 :root 外的 class 定义（.hero/.nav/.chat/.btn/...）会全部丢失，
@@ -269,33 +266,34 @@ public class ImportService {
             }
         }
 
-        // c 形态单文件 landing → 触发 AI 推导全站子页（§4.2 页型闭环扩展）：
-        // 首页 design/index.html 已 done（保真 landing），追加 article_list/article/page 3 个 pending
-        // PageState，让 MockupOrchestrator.runDesigning 的 pendingPages 过滤命中——AI 读
-        // plan.json.referenceHtml 推导生成 3 个子页设计稿（用 landing 设计语言重新设计 CMS 数据流页面）。
-        // 多页 zip 不触发（避免覆盖用户实际多页 zip 行为）；a/b 形态不触发（走 AI 映射）。
-        boolean fullSiteDesign = resolution.pages().size() == 1
-                && firstPageForm == HtmlNormalizer.Form.C;
-        if (fullSiteDesign) {
+        // 单文件导入（上传物通常只有一个首页 index.html）→ 触发「AI 读懂站点 → 整站推导」全链路：
+        // 首页已由本方法归一化落盘并保持保真，随后由 ANALYZING 态让 AI 读首页 HTML
+        // **提取顶部导航栏目**、推导整站页面清单（各静态栏目 → page_<slug> 设计页），
+        // 再由 DESIGNING 态逐页出设计稿（读 referenceHtml 继承首页设计语言）。
+        // 标准三页（文章列表/文章详情/单页）是 fastcms 模板的必备页型：无论站点有无对应栏目
+        // 都先备齐（列表型栏目复用全站唯一的 article_list 模板，故不随栏目数增长）。
+        // 多页 zip 不触发——页面已按文件名推导齐备，直接走转化（保住用户实际多页 zip 行为）。
+        boolean singleFileImport = resolution.pages().size() == 1;
+        if (singleFileImport) {
             pageStates.add(new MockupOrchestrator.PageState("article_list", "文章列表",
                     "design/article_list.html", "pending", "article_list"));
             pageStates.add(new MockupOrchestrator.PageState("article", "文章详情",
                     "design/article.html", "pending", "article"));
             pageStates.add(new MockupOrchestrator.PageState("page", "单页",
                     "design/page.html", "pending", "page"));
-            pageSummaries.add("article_list（article_list，pending，AI 推导继承 landing 设计语言）");
-            pageSummaries.add("article（article，pending，AI 推导继承 landing 设计语言）");
-            pageSummaries.add("page（page，pending，AI 推导继承 landing 设计语言）");
-            notes.add("[AI 推导] 首页保真 landing，3 个子页待 AI 读 landing 设计语言推导生成");
+            pageSummaries.add("article_list（article_list，pending，AI 推导继承首页设计语言）");
+            pageSummaries.add("article（article，pending，AI 推导继承首页设计语言）");
+            pageSummaries.add("page（page，pending，AI 推导继承首页设计语言）");
+            notes.add("[AI 推导] 首页保真；先由 AI 梳理站点结构（提取顶部导航栏目），再逐页推导子页设计");
         }
 
-        // plan.json：c 形态单文件 landing → state=DESIGNING（触发 AI 推导子页），其他形态 → state=CONVERTING（原行为）
-        // referenceHtml 仅 c 形态单文件时传入（首页原始 HTML，AI 设计子页时作为"设计语言权威参照"注入 prompt）
-        String initialState = fullSiteDesign
-                ? MockupOrchestrator.STATE_DESIGNING
+        // plan.json：单文件导入 → state=ANALYZING（AI 梳理站点结构 + 推导栏目页），其他形态 → CONVERTING
+        // referenceHtml 单文件导入时传入（首页原始 HTML，AI 设计子页时作为"设计语言权威参照"注入 prompt）
+        String initialState = singleFileImport
+                ? MockupOrchestrator.STATE_ANALYZING
                 : MockupOrchestrator.STATE_CONVERTING;
-        String historyEntry = fullSiteDesign
-                ? "IMPORT→DESIGNING: " + sourceName + "，首页保真 landing + 3 子页待 AI 推导 / "
+        String historyEntry = singleFileImport
+                ? "IMPORT→ANALYZING: " + sourceName + "，首页保真 + 待 AI 梳理站点结构推导栏目页 / "
                         + assetFiles.size() + " 资产 / " + mappings.size() + " 首页确定性映射"
                 : "IMPORT: " + sourceName + "，" + pageStates.size() + " 页 / "
                         + assetFiles.size() + " 资产 / " + mappings.size() + " 确定性映射";
@@ -303,7 +301,7 @@ public class ImportService {
                 1, initialState, null,
                 pageStates, mappings, List.of(), null, 0,
                 List.of(historyEntry),
-                fullSiteDesign ? firstPageRawHtml : null);
+                singleFileImport ? firstPageRawHtml : null);
         Files.writeString(designDir.resolve("plan.json"),
                 JSON_MAPPER.writeValueAsString(plan), StandardCharsets.UTF_8);
 

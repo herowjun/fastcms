@@ -21,6 +21,10 @@
             <el-button size="small" title="新窗口打开" @click="openInNewWindow">
                 <el-icon><ele-FullScreen /></el-icon>
             </el-button>
+            <!-- 收起预览：仅 collapsible 场景显示（手动编辑视图）；收起后的展开竖条由持有方渲染 -->
+            <el-button v-if="collapsible" size="small" title="收起预览" @click="emit('collapse')">
+                <el-icon><ele-DArrowLeft /></el-icon>
+            </el-button>
         </div>
         <div class="preview-stage" :class="viewport">
             <div v-if="url" class="stage-frame" :class="viewport">
@@ -51,12 +55,15 @@ const props = withDefaults(defineProps<{
     emptyTip?: string;
     /** 视口档位：桌面 / 平板 768 / 手机 375 */
     viewport?: Viewport;
+    /** 是否显示收起按钮（手动编辑视图专用；AI 工作台不传则不显示） */
+    collapsible?: boolean;
 }>(), {
     entry: '',
     pageOptions: () => [],
     url: '',
     emptyTip: '暂无可预览页面',
-    viewport: 'desktop'
+    viewport: 'desktop',
+    collapsible: false
 });
 
 const emit = defineEmits<{
@@ -64,6 +71,7 @@ const emit = defineEmits<{
     (e: 'update:viewport', v: Viewport): void;
     (e: 'refresh'): void;
     (e: 'frame-load'): void;
+    (e: 'collapse'): void;
 }>();
 
 const frameRef = ref<HTMLIFrameElement>();

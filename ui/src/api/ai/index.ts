@@ -337,6 +337,22 @@ export function AiTemplateApi() {
 			});
 		},
 
+		/**
+		 * 删除预览导航数据中的一个条目（预览"缺页面引导页"→「删除该条目」）
+		 *
+		 * 组件化模板（目录含 _pagespec.json，_preview_data.json 由它派生）会同时修改真源
+		 * site.*，否则下一次 AI 渲染从真源重新派生会把删掉的条目复原。
+		 * @param data { scope: 'session' | 'template', sessionId, templateId, ref }
+		 * @returns 被修改的文件清单（逗号分隔，如 _preview_data.json,_pagespec.json）
+		 */
+		removePreviewMenuItem(data: { scope: string; sessionId?: string; templateId?: string; ref: string }) {
+			return request({
+				url: '/admin/ai/template/preview-menu/remove',
+				method: 'post',
+				data: data
+			});
+		},
+
 		// ==================== 会话工作目录文件编辑（生成型会话，应用前的手工打磨） ====================
 
 		/**

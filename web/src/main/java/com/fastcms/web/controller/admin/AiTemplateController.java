@@ -19,6 +19,7 @@ package com.fastcms.web.controller.admin;
 import com.fastcms.ai.template.AiTemplateChatRequest;
 import com.fastcms.ai.template.AiTemplateSessionRequest;
 import com.fastcms.ai.template.IAiTemplateGenService;
+import com.fastcms.ai.template.PreviewMenuEditor;
 import com.fastcms.common.auth.ActionTypes;
 import com.fastcms.common.auth.Secured;
 import com.fastcms.common.constants.FastcmsConstants;
@@ -65,6 +66,18 @@ public class AiTemplateController {
      */
     @Autowired
     private com.fastcms.ai.autoconfigure.FastcmsAiProperties aiProperties;
+
+    /**
+     * 预览导航条目编辑（预览"缺页面引导页"的「删除该条目」落地：真源分流见 PreviewMenuEditor）
+     */
+    @Autowired
+    private PreviewMenuEditor previewMenuEditor;
+
+    /**
+     * 正式模板服务（预览条目删除的 template 作用域：按 templateId 定位模板目录）
+     */
+    @Autowired
+    private com.fastcms.core.template.TemplateService templateService;
 
     /**
      * 加载会话并校验属主：会话属于创建者本人，其他管理员（即使拥有 ai:template 权限）
@@ -565,6 +578,98 @@ public class AiTemplateController {
 
         public void setAttachmentId(Long attachmentId) {
             this.attachmentId = attachmentId;
+        }
+    }
+
+    /**
+     * 删除预览导航数据中的一个条目（预览"缺页面引导页"→「删除该菜单」）
+     *
+     * <p>菜单/分类/标签/单页指向的 {@code {type}_{suffix}.html} 不存在时，预览把它导向引导页
+     * 由用户决定"生成页面"或"删除条目"。本接口处理后者：从预览数据中移除该条目。</p>
+     *
+     * <p>{@code _preview_data.json} 对组件化模板是派生文件（每次 AI 渲染从 {@code _pagespec.json}
+     * 的 site 段全量重写），因此服务层会同时修改真源，否则用户删完下一次 AI 调整就复原
+     * （详见 {@link com.fastcms.ai.template.PreviewMenuEditor}）。</p>
+     */
+    @PostMapping("preview-menu/remove")
+    @Secured(name = RESOURCE_NAME_AI_TEMPLATE_CHAT, resource = "ai:template:chat", action = ActionTypes.WRITE)
+    public RestResult<String> removePreviewMenuItem(@RequestBody PreviewMenuRemoveRequest request) {
+        if (request == null || !org.springframework.util.StringUtils.hasText(request.getRef())) {
+            return RestResultUtils.failed("缺少条目引用");
+        }
+        java.nio.file.Path workDir;
+        if (PreviewMenuRemoveRequest.SCOPE_TEMPLATE.equalsIgnoreCase(request.getScope())) {
+            com.fastcms.core.template.Template template = templateService.getTemplate(request.getTemplateId());
+            if (template == null || template.getTemplatePath() == null) {
+                return RestResultUtils.failed("模板不存在");
+            }
+            workDir = template.getTemplatePath();
+        } else {
+            AiTemplateSession session = requireOwnedSession(request.getSessionId());
+            if (session == null) {
+                return RestResultUtils.failed("会话不存在");
+            }
+            workDir = templateGenService.resolveEffectiveWorkDir(session);
+        }
+        if (workDir == null || !java.nio.file.Files.isDirectory(workDir)) {
+            return RestResultUtils.failed("模板目录不存在");
+        }
+        try {
+            PreviewMenuEditor.Result result = previewMenuEditor.removeItem(workDir, request.getRef());
+            if (!result.changed()) {
+                return RestResultUtils.failed("未找到该条目（预览数据可能已被修改，请刷新预览后重试）");
+            }
+            return RestResultUtils.success(String.join(",", result.files()));
+        } catch (java.io.IOException e) {
+            return RestResultUtils.failed("删除失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 预览条目删除请求体
+     *
+     * <p>scope=session 时用 sessionId 定位会话工作目录；scope=template（或为空以外的一切值）时
+     * 用 templateId 定位正式模板目录。ref 为预览渲染期生成的条目引用（如 m0-2 / c1 / s3）。</p>
+     */
+    public static class PreviewMenuRemoveRequest {
+
+        public static final String SCOPE_TEMPLATE = "template";
+
+        private String scope;
+        private String sessionId;
+        private String templateId;
+        private String ref;
+
+        public String getScope() {
+            return scope;
+        }
+
+        public void setScope(String scope) {
+            this.scope = scope;
+        }
+
+        public String getSessionId() {
+            return sessionId;
+        }
+
+        public void setSessionId(String sessionId) {
+            this.sessionId = sessionId;
+        }
+
+        public String getTemplateId() {
+            return templateId;
+        }
+
+        public void setTemplateId(String templateId) {
+            this.templateId = templateId;
+        }
+
+        public String getRef() {
+            return ref;
+        }
+
+        public void setRef(String ref) {
+            this.ref = ref;
         }
     }
 

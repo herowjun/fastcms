@@ -118,18 +118,22 @@ class PageSpecRendererTest {
         PageSpecRenderer.RenderResult result = renderer.render(sampleSpec(), dir);
 
         // 产物齐全：页面 + 公共布局 + 共享组件源码 + 静态资产 + 元数据
-        for (String file : List.of("index.html", "article_list.html", "article.html", "page.html",
-                "_layout.html",
+        List<String> expectedFiles = List.of(
+                "index.html", "article_list.html", "article.html", "page.html",
+                "_layout.html", "_articlePage.html",
                 "_components/tw__navbar__sticky.ftl",
                 "_components/tw__hero__centered.ftl",
                 "_components/tw__feature-grid__three-col.ftl",
                 "_components/tw__article-list__cards.ftl",
                 "_components/tw__footer__simple.ftl",
                 "static/css/pack-tw.css", "static/css/tokens.css", "static/css/site.css",
-                "_pagespec.json", "_template.properties", "_preview_data.json")) {
+                "_pagespec.json", "_template.properties", "_preview_data.json");
+        for (String file : expectedFiles) {
             assertTrue(Files.isRegularFile(dir.resolve(file)), "缺少产物: " + file);
         }
-        assertEquals(16, result.writtenFiles().size());
+        // 断言与清单同源：新增产物只需改清单，数量不再单独漂移
+        assertEquals(expectedFiles.size(), result.writtenFiles().size(),
+                "产物数量应与清单一致，实际: " + result.writtenFiles());
 
         // 公共布局：骨架 + 导航区（structural）+ 页脚区（footer）+ <#nested>
         String layout = Files.readString(dir.resolve("_layout.html"));
@@ -367,6 +371,47 @@ class PageSpecRendererTest {
         assertTrue(validator.validate(fabricated).stream()
                         .anyMatch(e -> e.contains("槽位 image 值非法")),
                 "应提示非协议图片值非法: " + validator.validate(fabricated));
+    }
+
+    /**
+     * custom-html 跨页去重：不同页面、不同 sectionId、内容相同的 custom 区块
+     * （典型如各页的 nav/footer）必须共享同一 cap__{指纹}.ftl——文件名只含内容指纹，
+     * 不含 sectionId（历史实现把 id 拼进文件名，8 页站 nav/footer 曾产出 16 份重复文件）
+     */
+    @Test
+    void shouldDedupIdenticalCustomHtmlAcrossPages() throws Exception {
+        String sameNav = "<section class=\"site-nav\"><a href=\"/\">首页</a><a href=\"/about\">关于</a></section>";
+        String sameFooter = "<footer class=\"site-footer\"><p>© FastCMS</p></footer>";
+        PageSpec spec = new PageSpec(
+                PageSpec.SPEC_VERSION, BuiltinTailwindPackProvider.FOUNDATION,
+                "cap-dedup-demo", "演示站点", "demo", "minimal", "#2563eb", null,
+                Map.of(
+                        PageSpec.PAGE_INDEX, new PageSpecPage(List.of(
+                                new SectionSpec("nav-home", "tw:custom-html", "default", Map.of("html", sameNav)),
+                                new SectionSpec("footer-home", "tw:custom-html", "default", Map.of("html", sameFooter)))),
+                        "page_about", new PageSpecPage(List.of(
+                                new SectionSpec("nav-about", "tw:custom-html", "default", Map.of("html", sameNav)),
+                                new SectionSpec("footer-about", "tw:custom-html", "default", Map.of("html", sameFooter))))),
+                null);
+
+        Path dir = tempDir.resolve("cap-dedup-template");
+        PageSpecRenderer.RenderResult result = renderer.render(spec, dir);
+
+        // 4 个 custom section（2 种内容 × 2 页）只落 2 个 cap 文件
+        List<String> capFiles = result.writtenFiles().stream()
+                .filter(p -> p.startsWith("_components/cap__")).toList();
+        assertEquals(2, capFiles.size(), "内容相同的 custom 区块应共享同一文件: " + capFiles);
+
+        // 两个页面各自引用同一份 nav 源码（id 差异由 _aiSection assign 承载）
+        String index = Files.readString(dir.resolve("index.html"));
+        String about = Files.readString(dir.resolve("page_about.html"));
+        String navRef = capFiles.stream().filter(index::contains).findFirst().orElse("");
+        assertFalse(navRef.isEmpty(), "首页应引用 nav 组件文件: " + capFiles);
+        assertTrue(about.contains(navRef), "about 页应引用同一 nav 组件文件: " + navRef);
+
+        // 共享源码渲染校验通过
+        List<String> errors = previewRenderer.checkRenderedFiles(dir, List.of("index.html", "page_about.html"));
+        assertEquals(List.of(), errors, "渲染校验应通过: " + errors);
     }
 
     private PageSpec mediaSlotSpec(String imageValue) {

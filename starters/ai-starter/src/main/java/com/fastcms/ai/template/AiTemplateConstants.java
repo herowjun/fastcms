@@ -119,6 +119,15 @@ public final class AiTemplateConstants {
     public static final String FILE_PREVIEW_DATA = "_preview_data.json";
 
     /**
+     * PageSpec 快照文件（组件化模板的事实源；_preview_data.json 由它派生）
+     *
+     * <p>组件化模板每次 AI 调整都会由 PageSpecRenderer 从本文件的 {@code site} 段
+     * 全量重写 {@code _preview_data.json}，因此对预览导航的<b>持久</b>修改必须落在本文件上，
+     * 只改派生文件会在下一轮渲染被还原。</p>
+     */
+    public static final String FILE_PAGESPEC = "_pagespec.json";
+
+    /**
      * 文章分页宏文件（规范产物：_layout.html 顶层 include，页面以 <@layout._articlePage/> 调用；
      * 渲染器（PageSpecRenderer）与合规校验器（TemplateComplianceChecker）共用此单一内容源，防两处漂移）
      */

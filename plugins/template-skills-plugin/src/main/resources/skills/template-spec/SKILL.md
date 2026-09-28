@@ -22,6 +22,7 @@ ${templateName}/
 ├── article_list.html         # 文章列表页（必备）
 ├── page.html                 # 单页面（必备）
 ├── _preview_data.json        # 预览演示数据（必备，内容贴合需求主题）
+├── _components/              # 组件目录（可选，AI 生成模板管线使用，见下方说明）
 └── static/                   # 静态资源目录
     ├── css/
     │   └── base.css          # 基础样式
@@ -29,6 +30,30 @@ ${templateName}/
     │   └── main.js           # 交互脚本（可选——有交互脚本时才生成）
     └── images/               # 图片资源
 ```
+
+### 1.1 栏目专属页（可选）
+
+站点有多个栏目、且希望某栏目使用专属版式时，可生成带后缀的专属页，命名约定
+`{基础页类型}_{栏目后缀}.html`，文件内变量注入与对应基础页一致：
+
+- `article_list_news.html` → 分类栏目"news"的专属列表页（注入 category + articleVoPage）
+- `page_about.html` → 单页栏目"about"的专属页（注入 singlePage）
+
+规则：后缀只能是 `[a-zA-Z0-9_-]+`；某栏目没有专属页时自动回落到基础页
+（article_list.html / page.html）；**后缀不得与基础页类型同名**（如 article_list_article_list.html
+是冗余页，禁止生成——默认文章列表直接用 article_list.html）。
+
+### 1.2 _components 组件目录（AI 生成模板管线）
+
+AI 生成模板（设计稿转化链路）会把可复用区块物化为 `_components/*.ftl` 片段，
+页面通过 `<#include "_components/xxx.ftl">` 引用。该目录为可选扩展：
+
+- 每个片段是独立 FreeMarker 模板，正式渲染引擎按目录加载模板，相对路径 include 天然可用
+- 片段内可直接使用 `<@articleListTag>` 等内置指令；页面在 include 之前以
+  `<#assign comp = {...}>` 提供该区块的槽位数据（文案/图片等），实现同组件跨页复用、每页差异化内容
+- 槽位数据是纯文本/数字/布尔值，**不得包含 FTL 指令或 `${...}` 插值**——需要动态
+  渲染的逻辑直接写在片段内（片段是可执行 FTL，不是字符串）
+- 手工制作模板可不使用该目录（把区块直接写在页面里）
 
 ## 2. _template.properties 模板元信息
 

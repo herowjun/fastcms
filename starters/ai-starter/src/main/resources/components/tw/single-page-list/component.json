@@ -1,0 +1,15 @@
+{
+  "id": "single-page-list",
+  "name": "单页列表",
+  "description": "站点单页入口（自动绑定 CMS 单页数据 singlePageListTag，适合页脚导航或侧栏）",
+  "category": "content",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "links", "description": "竖向链接列表，适合页脚与侧栏" },
+    { "id": "grid", "description": "卡片网格，适合关于我们/服务等入口区" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": false, "maxLength": 16, "desc": "区块标题，如：关于与帮助" }
+  ],
+  "cmsBindings": ["single-page"]
+}

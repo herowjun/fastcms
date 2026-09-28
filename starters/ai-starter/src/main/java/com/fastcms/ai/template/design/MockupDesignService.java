@@ -49,6 +49,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -194,8 +202,8 @@ public class MockupDesignService {
      */
     public DesignOutcome designPages(DesignContext ctx, List<DesignPagePlanner.PagePlan> pendingPages, DesignSseSink sse) {
         long startTime = System.currentTimeMillis();
-        // 聚合本次全部模型调用的 token 用量（多页×多轮）
-        long[] usageAgg = {0L, 0L, 0L};
+        // 聚合本次全部模型调用的 token 用量（多页×多轮；AtomicLongArray——并行路径多 worker 累加）
+        AtomicLongArray usageAgg = new AtomicLongArray(3);
         // prepare 置于 try 外：装配失败（智能体停用/模型缺失/配额超限）无模型调用发生，
         // 不产生审计记录（与管线 doChatStream 同口径）。
         // injectSkills=false：design-brief 经全文直注系统提示词（见 doDesignPages），不走
@@ -218,9 +226,9 @@ public class MockupDesignService {
                     usageRecorder.record(BuiltinAgents.TEMPLATE_DESIGNER_ID, ctx.session().getUserId(),
                             IAiUsageLogService.Scene.TEMPLATE_DESIGN, ctx.session().getSessionId(),
                             prepared.getModelName(),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[0]),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[1]),
-                            (int) Math.min(Integer.MAX_VALUE, usageAgg[2]),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(0)),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(1)),
+                            (int) Math.min(Integer.MAX_VALUE, usageAgg.get(2)),
                             System.currentTimeMillis() - startTime);
                 } else {
                     usageRecorder.recordError(BuiltinAgents.TEMPLATE_DESIGNER_ID, ctx.session().getUserId(),
@@ -235,19 +243,25 @@ public class MockupDesignService {
     }
 
     private DesignOutcome doDesignPages(DesignContext ctx, List<DesignPagePlanner.PagePlan> pendingPages,
-                                        DesignSseSink sse, long[] usageAgg, AgentChatExecutor.Prepared prepared) {
+                                        DesignSseSink sse, AtomicLongArray usageAgg, AgentChatExecutor.Prepared prepared) {
         if (pendingPages == null || pendingPages.isEmpty()) {
             return new DesignOutcome(List.of(), true, 0, 0, 0);
         }
         OpenAiChatOptions designOptions = buildDesignOptions(prepared);
-        // 系统提示词 = 设计契约基底 + design-brief 技能全文直注（技能未安装时仅契约基底，
-        // 措辞已条件化不做虚假声明）。一次设计任务装配一次，多页多轮复用
+        // 系统提示词 = 设计契约基底 + design-brief（设计方法论）+ template-spec（fastcms 模板规范：
+        // 目录结构 + 内置 FreeMarker 指令 + CMS 数据模型）。2026-09-25 起 template-spec 一并注入——
+        // AI 必须知道设计稿最终转成什么样的模板、有哪些内置指令可用，契约 7 的 CMS 数据区语义标记
+        // 才有落点（否则 AI 无法判断哪些区块应声明为 article-list 等受控语义名）。
+        // 技能未安装时对应段不注入（措辞已条件化不做虚假声明）。一次设计任务装配一次，多页多轮复用
         String designSystemPrompt = DesignContractPrompt.buildInjectedSystemPrompt(
                 prepared.getBaseSystemPrompt(),
-                skillRegistry.loadContent(BuiltinAgents.DESIGN_BRIEF_SKILL_ID));
+                skillRegistry.loadContent(BuiltinAgents.DESIGN_BRIEF_SKILL_ID),
+                skillRegistry.loadContent(BuiltinAgents.TEMPLATE_SPEC_SKILL_ID));
         String sitePageContext = buildSitePageContext(ctx.allPages());
-        // 断点续传：已落盘的设计稿文件（跨页共享的占位 SVG 等）视作在场，V5 不再要求重出
-        Set<String> existingPaths = scanExistingDesignFiles(ctx.workDir());
+        // 断点续传：已落盘的设计稿文件（跨页共享的占位 SVG 等）视作在场，V5 不再要求重出。
+        // 并发集合：并行路径下多 worker 同时校验（读）与落盘后登记（写），HashSet 迭代/并发写会炸
+        Set<String> existingPaths = ConcurrentHashMap.newKeySet();
+        existingPaths.addAll(scanExistingDesignFiles(ctx.workDir()));
 
         // 设计段启动播报（§6.2：方向名让用户知道本轮设计基调）
         String directionName = ctx.direction() == null ? null : ctx.direction().name();
@@ -255,37 +269,139 @@ public class MockupDesignService {
                 ? "正在设计设计稿（方向：" + directionName + "）…"
                 : "正在设计设计稿（AI 自选方向）…");
 
-        List<PageResult> results = new ArrayList<>(pendingPages.size());
-        for (DesignPagePlanner.PagePlan page : pendingPages) {
-            if (sse.isCancelled()) {
-                throw new DesignCancelledException();
-            }
-            PageResult result = designPage(ctx, prepared, designOptions, designSystemPrompt, page,
-                    sitePageContext, existingPaths, sse, usageAgg);
-            results.add(result);
-            // 页级进度即时持久化：DONE 页落盘后立即回调（编排器写回 plan.json——中断重入不重做该页）。
-            // PLACEHOLDER 页不回调：重入重设计（降级页有机会翻盘，与 pendingPages 筛选语义一致）
-            if (ctx.pageDoneSink() != null && result.status() == PageStatus.DONE) {
-                ctx.pageDoneSink().accept(page.name());
+        List<PageResult> results;
+        int concurrency = aiProperties.getTemplate().getDesign().getDesignConcurrency();
+        if (concurrency > 1 && pendingPages.size() > 1) {
+            results = designPagesParallel(ctx, prepared, designOptions, designSystemPrompt,
+                    pendingPages, sitePageContext, existingPaths, sse, usageAgg, concurrency);
+        } else {
+            results = new ArrayList<>(pendingPages.size());
+            for (DesignPagePlanner.PagePlan page : pendingPages) {
+                if (sse.isCancelled()) {
+                    throw new DesignCancelledException();
+                }
+                PageResult result = designPage(ctx, prepared, designOptions, designSystemPrompt, page,
+                        sitePageContext, existingPaths, sse, usageAgg, () -> false, null, null);
+                results.add(result);
+                // 页级进度即时持久化：DONE 页落盘后立即回调（编排器写回 plan.json——中断重入不重做该页）。
+                // PLACEHOLDER 页不回调：重入重设计（降级页有机会翻盘，与 pendingPages 筛选语义一致）
+                if (ctx.pageDoneSink() != null && result.status() == PageStatus.DONE) {
+                    ctx.pageDoneSink().accept(page.name());
+                }
             }
         }
         // 清空状态条（与管线同口径：空 status 前端隐藏）
         sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "");
         boolean allPassed = results.stream().noneMatch(r -> r.status() == PageStatus.PLACEHOLDER);
-        return new DesignOutcome(List.copyOf(results), allPassed, usageAgg[0], usageAgg[1], usageAgg[2]);
+        return new DesignOutcome(List.copyOf(results), allPassed,
+                usageAgg.get(0), usageAgg.get(1), usageAgg.get(2));
+    }
+
+    /**
+     * 页级并行设计（design-concurrency &gt; 1 时的执行路径）
+     *
+     * <p>页面设计互相独立（提示词只依赖站点规划与上轮审计意见，不依赖其他页的产物），
+     * 固定线程池并发调用模型，把设计阶段耗时从「页数 × 单页时长」压到
+     * 「页数 / 并行度 × 单页时长」。实测整站 8 页场景该阶段 35 min → ~12 min（3 并发）。</p>
+     *
+     * <p><b>线程安全边界</b>：</p>
+     * <ul>
+     *     <li>SSE：经 {@link DesignSseSink} 宿主适配进 RunChannel（方法级 synchronized），多 worker
+     *     并发推送安全；状态/思考流事件跨页交错属预期（文案均带页名）</li>
+     *     <li>existingPaths：ConcurrentHashMap.newKeySet（弱一致迭代，contains 判定安全）</li>
+     *     <li>usageAgg：AtomicLongArray（每 chunk 累加）</li>
+     *     <li>pageDoneSink：锁内串行化调用——编排器 lambda 对 planRef 读改写非原子，
+     *     并发调用会丢页级 DONE 标记（中断重入时该页被重做）</li>
+     * </ul>
+     *
+     * <p><b>fail-fast</b>：任一 worker 抛真异常（模型调用级）即置 aborted，其余 worker 在
+     * 下一 chunk / 下一轮校验边界感知退出（{@link ParallelAbortException} 静默中止）；
+     * 主线程收拢后重抛首因（保留 FAILED 断点续传语义）。用户取消（DesignCancelledException）
+     * 同路径传播。</p>
+     */
+    private List<PageResult> designPagesParallel(DesignContext ctx, AgentChatExecutor.Prepared prepared,
+                                                 OpenAiChatOptions designOptions, String designSystemPrompt,
+                                                 List<DesignPagePlanner.PagePlan> pendingPages,
+                                                 String sitePageContext, Set<String> existingPaths,
+                                                 DesignSseSink sse, AtomicLongArray usageAgg, int concurrency) {
+        int threads = Math.min(concurrency, pendingPages.size());
+        ExecutorService pool = Executors.newFixedThreadPool(threads, new DesignWorkerThreadFactory());
+        AtomicBoolean aborted = new AtomicBoolean(false);
+        Object sinkLock = new Object();
+        // 状态条聚合板：并行时逐页 status 是覆盖式文案，多页并发会互相闪烁——
+        // 收敛为「k/N 完成 + 在途页清单」单条文案（页开始/结束时锁内重推）
+        ParallelDesignStatusBoard statusBoard = new ParallelDesignStatusBoard(sse, pendingPages.size());
+        try {
+            List<Future<PageResult>> futures = new ArrayList<>(pendingPages.size());
+            for (DesignPagePlanner.PagePlan page : pendingPages) {
+                BooleanSupplier abortSignal = aborted::get;
+                futures.add(pool.submit(() -> {
+                    PageResult result = designPage(ctx, prepared, designOptions, designSystemPrompt, page,
+                            sitePageContext, existingPaths, sse, usageAgg, abortSignal,
+                            statusBoard, page.name() + "/" + page.title());
+                    // 页级进度即时持久化（与串行路径同语义）：锁内串行化，防编排器 planRef 丢更新
+                    if (ctx.pageDoneSink() != null && result.status() == PageStatus.DONE) {
+                        synchronized (sinkLock) {
+                            ctx.pageDoneSink().accept(page.name());
+                        }
+                    }
+                    return result;
+                }));
+            }
+            List<PageResult> results = new ArrayList<>(pendingPages.size());
+            RuntimeException firstFailure = null;
+            for (int i = 0; i < futures.size(); i++) {
+                try {
+                    results.add(futures.get(i).get());
+                } catch (ExecutionException e) {
+                    aborted.set(true);
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    if (firstFailure == null && !(cause instanceof ParallelAbortException)) {
+                        if (cause instanceof RuntimeException re) {
+                            firstFailure = re;
+                        } else {
+                            firstFailure = new IllegalStateException("设计页失败: " + cause, cause);
+                        }
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    aborted.set(true);
+                    if (firstFailure == null) {
+                        firstFailure = new IllegalStateException("设计段被中断", ie);
+                    }
+                }
+            }
+            if (firstFailure != null) {
+                throw firstFailure;
+            }
+            return results;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /**
      * 单页设计 loop（生成 → 校验 → 修正重试 → 降级占位页）
+     *
+     * @param abortSignal    并行路径的 fail-fast 信号（其他页模型调用失败时静默中止本页）；
+     *                       串行路径恒 false
+     * @param statusBoard    并行路径的状态聚合板（页开始/结束播报聚合进度）；串行路径 null（逐页 status 原样）
+     * @param reasoningTag   并行路径的思考流页面标识（"page/title"，reasoning 事件 JSON 前缀）；
+     *                       串行路径 null（reasoning 保持纯文本增量，与旧前端/回放兼容）
      */
     private PageResult designPage(DesignContext ctx, AgentChatExecutor.Prepared prepared,
                                   OpenAiChatOptions designOptions, String designSystemPrompt,
                                   DesignPagePlanner.PagePlan page,
                                   String sitePageContext, Set<String> existingPaths,
-                                  DesignSseSink sse, long[] usageAgg) {
+                                  DesignSseSink sse, AtomicLongArray usageAgg, BooleanSupplier abortSignal,
+                                  ParallelDesignStatusBoard statusBoard, String reasoningTag) {
         String title = page.title();
-        sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
-                "正在设计「" + title + "」（design/" + page.name() + ".html）…");
+        if (statusBoard != null) {
+            statusBoard.pageStarted(page.name(), title);
+        } else {
+            sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                    "正在设计「" + title + "」（design/" + page.name() + ".html）…");
+        }
 
         int maxRounds = Math.max(1, aiProperties.getTemplate().getDesign().getMaxFormatRounds());
         List<String> lastErrors = List.of();
@@ -296,6 +412,9 @@ public class MockupDesignService {
             if (sse.isCancelled()) {
                 throw new DesignCancelledException();
             }
+            if (abortSignal.getAsBoolean()) {
+                throw new ParallelAbortException();
+            }
             roundsUsed = round;
             // 提示词场景段：审计问题仅第 1 轮注入（修正目标）；格式错误仅第 2 轮起注入（上轮修正指令）
             String userPrompt = DesignContractPrompt.build(ctx.requirement(), ctx.direction(), page,
@@ -304,7 +423,8 @@ public class MockupDesignService {
                     round == 1 ? null : String.join("\n", lastErrors),
                     ctx.userComment(),
                     ctx.userReferenceHtml());
-            String raw = callDesignModel(prepared, designOptions, designSystemPrompt, userPrompt, sse, usageAgg);
+            String raw = callDesignModel(prepared, designOptions, designSystemPrompt, userPrompt,
+                    sse, usageAgg, abortSignal, reasoningTag, statusBoard != null);
             Map<String, String> files = parseFileBlocks(raw);
             if (files.isEmpty()) {
                 // 协议收编兜底：模型未按 ===FILE:=== 文件块输出、但直出了完整 HTML 文档
@@ -332,6 +452,9 @@ public class MockupDesignService {
 
         if (accepted != null) {
             persistFiles(ctx, accepted, page, existingPaths, sse, true);
+            if (statusBoard != null) {
+                statusBoard.pageFinished(page.name());
+            }
             log.info("设计稿就绪: sessionId={}, page={}, rounds={}",
                     ctx.session().getSessionId(), page.name(), roundsUsed);
             return new PageResult(page.name(), title, PageStatus.DONE, roundsUsed, List.of());
@@ -343,6 +466,9 @@ public class MockupDesignService {
         Map<String, String> placeholder = new LinkedHashMap<>();
         placeholder.put("design/" + page.name() + ".html", buildPlaceholderPage(page, ctx.direction()));
         persistFiles(ctx, placeholder, page, existingPaths, sse, true);
+        if (statusBoard != null) {
+            statusBoard.pageFinished(page.name());
+        }
         log.warn("设计稿降级为占位页: sessionId={}, page={}, lastErrors={}",
                 ctx.session().getSessionId(), page.name(), lastErrors);
         return new PageResult(page.name(), title, PageStatus.PLACEHOLDER, roundsUsed, lastErrors);
@@ -357,9 +483,18 @@ public class MockupDesignService {
      * {@link ReasoningStreamAccumulator}，本方法只推送其产出的真实增量；
      * 正文不推 message 事件（正文是文件块原文，前端以 status 阶段文案呈现，
      * 与管线"文件内容不进对话流"同口径）；断开检测在每个 chunk 头部。</p>
+     *
+     * <p><b>并行思考流标识</b>：reasoningTag 非空（并行路径）时 reasoning 事件数据改为
+     * {@code {"page":"name/title","delta":"…"}} JSON——多页思考流并发推送时前端按页分节
+     * 渲染，不再交织成乱流；串行路径（tag 为 null）保持纯文本增量，与旧会话回放兼容。</p>
+     *
+     * @param suppressFileStatus 并行路径置 true：文件块级"正在生成 path…"status 被聚合板取代
+     *                           （多页并发的逐文件 status 是覆盖式文案，互相闪烁无信息量）
      */
     private String callDesignModel(AgentChatExecutor.Prepared prepared, OpenAiChatOptions designOptions,
-                                   String designSystemPrompt, String userPrompt, DesignSseSink sse, long[] usageAgg) {
+                                   String designSystemPrompt, String userPrompt, DesignSseSink sse,
+                                   AtomicLongArray usageAgg, BooleanSupplier abortSignal,
+                                   String reasoningTag, boolean suppressFileStatus) {
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(designSystemPrompt), new UserMessage(userPrompt)), designOptions);
 
@@ -380,13 +515,23 @@ public class MockupDesignService {
                     if (sse.isCancelled()) {
                         throw new DesignCancelledException();
                     }
+                    // 并行 fail-fast：其他页已失败，静默中止本页（主线程收拢首因重抛）
+                    if (abortSignal.getAsBoolean()) {
+                        throw new ParallelAbortException();
+                    }
                     // token 用量（OpenAI 兼容流式仅最后 chunk 携带 usage，累加聚合）
                     if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null) {
                         Usage u = resp.getMetadata().getUsage();
                         if (u.getTotalTokens() != null || u.getPromptTokens() != null || u.getCompletionTokens() != null) {
-                            usageAgg[0] += u.getPromptTokens() != null ? u.getPromptTokens() : 0;
-                            usageAgg[1] += u.getCompletionTokens() != null ? u.getCompletionTokens() : 0;
-                            usageAgg[2] += u.getTotalTokens() != null ? u.getTotalTokens() : 0;
+                            if (u.getPromptTokens() != null) {
+                                usageAgg.addAndGet(0, u.getPromptTokens());
+                            }
+                            if (u.getCompletionTokens() != null) {
+                                usageAgg.addAndGet(1, u.getCompletionTokens());
+                            }
+                            if (u.getTotalTokens() != null) {
+                                usageAgg.addAndGet(2, u.getTotalTokens());
+                            }
                         }
                     }
                     if (resp.getResult() == null || resp.getResult().getOutput() == null) {
@@ -399,7 +544,16 @@ public class MockupDesignService {
                     if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
                         String delta = reasoningAcc.feed(String.valueOf(reasoning));
                         if (delta != null && !delta.isEmpty()) {
-                            sse.send(AiTemplateConstants.SSE_EVENT_REASONING, delta);
+                            if (reasoningTag != null) {
+                                // 并行路径：JSON 分节格式（前端按页分桶重组，防多页思考流交织）
+                                Map<String, String> payload = new LinkedHashMap<>();
+                                payload.put("page", reasoningTag);
+                                payload.put("delta", delta);
+                                sse.send(AiTemplateConstants.SSE_EVENT_REASONING,
+                                        JSON_MAPPER.writeValueAsString(payload));
+                            } else {
+                                sse.send(AiTemplateConstants.SSE_EVENT_REASONING, delta);
+                            }
                             reasoningTotal[0] += delta.length();
                         }
                         if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
@@ -415,7 +569,7 @@ public class MockupDesignService {
                     String content = output.getText();
                     if (content != null && !content.isEmpty()) {
                         textBuf.append(content);
-                        pushMarkerStatus(textBuf, markerScanPos, markerCount, sse);
+                        pushMarkerStatus(textBuf, markerScanPos, markerCount, sse, suppressFileStatus);
                     }
                 })
                 // 双超时兜底：OkHttp callTimeout（baseOptionsBuilder 已设 10 分钟）在流死时
@@ -433,8 +587,11 @@ public class MockupDesignService {
      *
      * <p>增量扫描：游标回退到上一个换行后的行首（标记的 ^ 锚定真实行首，避免行中误配）；
      * 计数单调递增（重扫区域只会重复命中已计数标记），无新增即静默。</p>
+     *
+     * @param suppress 并行路径置 true：不推 status（聚合板统一播报），仅更新扫描游标/计数
      */
-    private static void pushMarkerStatus(StringBuilder textBuf, int[] scanPosRef, int[] countRef, DesignSseSink sse) {
+    private static void pushMarkerStatus(StringBuilder textBuf, int[] scanPosRef, int[] countRef,
+                                         DesignSseSink sse, boolean suppress) {
         int from = scanPosRef[0];
         int nl = textBuf.lastIndexOf("\n", from - 1);
         if (nl >= 0) {
@@ -453,7 +610,9 @@ public class MockupDesignService {
         if (found > countRef[0] && lastPath != null) {
             countRef[0] = found;
             scanPosRef[0] = textBuf.length();
-            sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "正在生成 " + lastPath + "…");
+            if (!suppress) {
+                sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "正在生成 " + lastPath + "…");
+            }
         }
     }
 
@@ -751,5 +910,74 @@ public class MockupDesignService {
                 </body>
                 </html>
                 """.formatted(title, primary, title, title);
+    }
+
+    // ==================== 并行支撑 ====================
+
+    /**
+     * 并行设计的中止信号异常（内部静默用）：某页模型调用失败后其余页快速退出，
+     * 主线程 {@link #designPagesParallel} 收拢时按 ParallelAbortException 过滤、重抛首因。
+     * 不携带堆栈（无诊断价值，纯控制流）。
+     */
+    static final class ParallelAbortException extends RuntimeException {
+        ParallelAbortException() {
+            super("并行设计中止（其他页已失败）", null, false, false);
+        }
+    }
+
+    /** 设计 worker 线程工厂（守护线程 + 命名，便于线程 dump 定位） */
+    private static final class DesignWorkerThreadFactory implements java.util.concurrent.ThreadFactory {
+        private static final java.util.concurrent.atomic.AtomicInteger SEQ = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "ai-template-design-" + SEQ.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        }
+    }
+
+    /**
+     * 并行设计段的状态条聚合板
+     *
+     * <p>status 事件在前端是覆盖式单行文案（新 status 覆盖旧文案）。串行时代逐页播报
+     * 没有问题，但页级并行后 3 个 worker 各自推"正在设计「X」…"/"正在生成 Y…"会互相
+     * 闪烁。聚合板把并行段的所有 status 收敛为一条可读文案：</p>
+     *
+     * <pre>并行设计（2/8 完成）：文章页、文档页…</pre>
+     *
+     * <p>页开始（pageStarted）/页结束（pageFinished，DONE 与 PLACEHOLDER 均计）时在锁内
+     * 重推全量文案；文件块级细粒度 status 在并行段被 {@link #pushMarkerStatus} 抑制。
+     * 线程安全：全部方法 synchronized（低频调用，锁开销可忽略）。
+     * 包可见（package-private）供单测直接构造验证聚合文案。</p>
+     */
+    static final class ParallelDesignStatusBoard {
+        private final DesignSseSink sse;
+        private final int total;
+        private final Map<String, String> active = new LinkedHashMap<>();
+        private int done = 0;
+
+        ParallelDesignStatusBoard(DesignSseSink sse, int total) {
+            this.sse = sse;
+            this.total = total;
+        }
+
+        synchronized void pageStarted(String pageName, String title) {
+            active.put(pageName, title);
+            push();
+        }
+
+        synchronized void pageFinished(String pageName) {
+            if (active.remove(pageName) != null) {
+                done++;
+            }
+            push();
+        }
+
+        private void push() {
+            String names = String.join("、", active.values());
+            sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                    "并行设计（" + done + "/" + total + " 完成）：" + names + "…");
+        }
     }
 }

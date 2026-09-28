@@ -195,8 +195,8 @@ const { preview, previewPageOptions, aiPreviewUrl, previewEmptyTip, initEntry: i
     getSessionTreeNodes: () => tree.sessionData
 });
 
-// 预览点选钩子：换图/选区/链接拦截（iframe 元素经预览面板 expose 获取）
-const { pickMode, sectionMode, selectedSection, toggleImagePickMode, toggleSectionSelectMode, clearSelectedSection, resetModes, onPreviewFrameLoad } = usePreviewIframeHooks({
+// 预览点选钩子：换图/选区/链接拦截（iframe 元素经预览面板 expose 获取）+ 缺口引导消息回报
+const { pickMode, sectionMode, selectedSection, toggleImagePickMode, toggleSectionSelectMode, clearSelectedSection, resetModes, onPreviewFrameLoad, startMessageBridge, stopMessageBridge } = usePreviewIframeHooks({
     getFrame: () => previewPanelRef.value?.frameEl(),
     hasSession: () => !!currentSession.value?.sessionId,
     isSessionReadonly: () => sessionReadonly.value,
@@ -206,8 +206,110 @@ const { pickMode, sectionMode, selectedSection, toggleImagePickMode, toggleSecti
     getPreviewEntry: () => preview.entry,
     setPreviewEntry: (entry: string) => { preview.entry = entry; },
     refreshPreview: () => refreshAiPreview(),
-    onOpenImagePick: (sectionId: string, slot: string, rawSrc: string) => imagePickDialogRef.value?.open(sectionId, slot, rawSrc)
+    onOpenImagePick: (sectionId: string, slot: string, rawSrc: string) => imagePickDialogRef.value?.open(sectionId, slot, rawSrc),
+    onMissingPage: onPreviewMissingPage,
+    onPlanMenu: onPreviewPlanMenu
 });
+
+/** AI 会话就绪校验（缺口引导的两个出口都要走 AI 面板，未开会话时给出明确指引而非静默失败） */
+const requireSessionForGuide = (): boolean => {
+    if (!currentSession.value?.sessionId) {
+        ElMessage.warning('当前没有 AI 会话，请先点「AI 调整」再操作');
+        return false;
+    }
+    if (aiChatRef.value?.isChatting?.()) {
+        ElMessage.warning('AI 正在处理上一轮请求，请等本轮结束后再试');
+        return false;
+    }
+    return true;
+};
+
+/**
+ * 缺口引导「生成对应页面」：把缺口信息作为一轮对话发给 AI
+ *
+ * 走标准 chat 流，AI 的思考与生成过程在右侧对话面板可见（与「补齐缺失文件」同款入口）。
+ * 提示词带上期望文件名与条目名，并约束对齐现有页面的结构与公共布局。
+ */
+function requestGenerateMissingPage(payload: { name: string; expectedFile: string; kindLabel: string }) {
+    if (!requireSessionForGuide()) return;
+    const file = payload.expectedFile || '该页面文件';
+    aiChatRef.value?.autoSend(
+        `模板目录里缺少页面文件 ${file}：预览数据中${payload.kindLabel}「${payload.name}」指向它，但文件不存在。`
+        + `请参照模板中已有页面的结构、样式与公共布局（_layout.html）生成这个页面，`
+        + `并确保${payload.kindLabel}「${payload.name}」能正常跳转到它。`
+    );
+}
+
+/**
+ * 缺口引导「删除该条目」：从预览数据中移除该条目
+ *
+ * 组件化模板（目录含 _pagespec.json）的真源是 _pagespec.json 的 site 段，后端会一并修改，
+ * 否则下一轮 AI 渲染从真源重新派生会把删掉的条目复原。删除后刷新预览即可看到导航变化。
+ *
+ * @param scope 预览数据作用域：AI tab 的预览跟随当前会话/模板；手动编辑 tab 的预览恒为正式模板
+ */
+async function requestRemovePreviewItem(payload: { ref: string; name: string; kindLabel: string },
+                                        scope: 'session' | 'template' = sessionView.value ? 'session' : 'template') {
+    try {
+        await ElMessageBox.confirm(
+            `将从预览数据中删除${payload.kindLabel}「${payload.name}」，模板里的页面文件不会被删除。是否继续？`,
+            '删除预览条目',
+            { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+        );
+    } catch {
+        return;
+    }
+    try {
+        const res: any = await AiTemplateApi.removePreviewMenuItem({
+            scope,
+            sessionId: currentSession.value?.sessionId || '',
+            templateId: props.templateId || '',
+            ref: payload.ref
+        });
+        if (res?.data) {
+            ElMessage.success(`已删除${payload.kindLabel}「${payload.name}」`);
+            refreshAiPreview();
+        } else {
+            ElMessage.error(res?.msg || '删除失败，请刷新预览后重试');
+        }
+    } catch (e: any) {
+        ElMessage.error(e?.message || '删除失败');
+    }
+}
+
+/**
+ * 缺口引导「让 AI 规划导航菜单」：交给 AI 先了解站点再规划栏目
+ *
+ * 无 _preview_data.json 时预览导航区为空（预览层不再伪造默认栏目）。此处刻意让 AI
+ * 先向用户确认站点主题与栏目，而不是自行编造——栏目名属于用户业务信息，猜错比空着更糟。
+ */
+function requestPlanMenu() {
+    if (!requireSessionForGuide()) return;
+    aiChatRef.value?.autoSend(
+        '当前模板还没有配置导航菜单（_preview_data.json 里没有 menus），预览的导航区是空的。'
+        + '请先确认这个站点是做什么的、需要哪些栏目，如果信息不足请先问我，'
+        + '确认后再规划主导航并为每个栏目生成对应的页面文件。'
+    );
+}
+
+/** AI tab 预览 iframe 的缺口引导回调（iframe 消息已在 composable 内校验来源） */
+function onPreviewMissingPage(payload: {
+    action: 'generate' | 'remove';
+    ref: string;
+    name: string;
+    expectedFile: string;
+    kindLabel: string;
+}) {
+    if (payload.action === 'remove') {
+        requestRemovePreviewItem(payload);
+        return;
+    }
+    requestGenerateMissingPage(payload);
+}
+
+function onPreviewPlanMenu() {
+    requestPlanMenu();
+}
 
 /** 换图对话框应用成功：刷新预览；槽位图重渲染了模板文件需同步刷新文件树 */
 const onPickApplied = (isPreviewOnly: boolean) => {
@@ -631,6 +733,8 @@ const onMqChange = () => {
 onMounted(() => {
     // 页面默认打开在 AI 视图时 active 初始即为 true，watch 不会触发，这里补一次初始化
     if (props.active) enterAdjustContext();
+    // 预览缺口引导的窗口消息桥（父组件持续存在，跨 iframe 重载无需重挂）
+    startMessageBridge();
     if (typeof window.matchMedia === 'function') {
         narrowMq = window.matchMedia('(max-width: 768px)');
         if (narrowMq.addEventListener) {
@@ -641,6 +745,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    stopMessageBridge();
     if (narrowMq?.addEventListener) {
         narrowMq.removeEventListener('change', onMqChange);
     }
@@ -670,6 +775,14 @@ defineExpose({
     currentSession,
     /** 左面板文件树点选在 AI tab 下的分发目标：聚焦该文件 + 预览联动 + 树高亮 */
     focusTreeNode,
+    // ===== 预览缺口引导（手动编辑 tab 的预览面板复用：该 tab 无 AI 对话面板，
+    //        由 edit.vue 监听 iframe 消息后切到 AI tab 再调这里）=====
+    /** 让 AI 生成缺失的页面（缺页面引导页的「生成对应页面」） */
+    requestGenerateMissingPage,
+    /** 删除预览数据中的条目（缺页面引导页的「删除该条目」）；手动编辑 tab 传 'template' */
+    requestRemovePreviewItem,
+    /** 让 AI 规划导航菜单（菜单未配置引导条） */
+    requestPlanMenu,
 });
 </script>
 

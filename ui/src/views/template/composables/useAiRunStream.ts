@@ -81,6 +81,22 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
     // 累积 AI 响应文本（后端流式推送 message 事件为高频小增量，逐段拼接即打字机效果）
     let assistantContent = '';
     let reasoningContent = '';
+    /**
+     * 终态失败原因（失败时经 setTerminalError 写入，由 applyStream 兜底填充）
+     *
+     * <p><b>不能直接改 msg.content</b>：失败收口会调用 finish() → flushStream() → applyStream()，
+     * 而 applyStream 会把 msg.content <b>重新赋值</b>为累积正文。失败轮若没产出任何正文
+     * （模型服务挂死、工具调用卡住、ROUND_TOTAL_TIMEOUT 兜底中断都属此类），累积正文就是空串，
+     * 先写进去的失败原因会被就地抹成空 —— 表现为"失败信息要刷新页面才看得到"
+     * （刷新走 loadSessionData 从库里读，所以刷新反而正常，掩盖了真正的原因）。</p>
+     */
+    let terminalError = '';
+    // 并行设计段思考流分桶（2026-09-25 页级并行）：后端 reasoning 事件在并行路径推送
+    // JSON {page,delta}，按页分桶累积后重组为「### 「页名」」分节的思考流——复用既有
+    // 渲染管线（doRenderReasoning 已把 # 标题渲染为独立加粗行），渲染缓存/窗口/滚动
+    // 跟随逻辑零改动；串行路径与旧会话回放仍是纯文本增量，直接拼接（完全兼容）
+    const reasoningBuckets: { page: string; title: string; content: string }[] = [];
+    let bucketTotal = 0;
     state.messages.push({
         role: 'assistant',
         content: '',
@@ -114,7 +130,9 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
     const applyStream = (full: boolean) => {
         const msg = state.messages[assistantIndex];
         if (!msg) return;
-        msg.content = assistantContent;
+        // 正文优先；失败轮没有正文时用失败原因填充口径
+        // （与后端一致：只在没有 AI 正文时才提示失败，已有正文则保留正文）
+        msg.content = assistantContent || terminalError;
         msg.reasoning = !full && reasoningContent.length > REASONING_RENDER_WINDOW
             ? '…（思考过长，流式期间仅显示尾部，完成后可查看全文）\n' + reasoningContent.slice(-REASONING_RENDER_WINDOW)
             : reasoningContent;
@@ -137,6 +155,18 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
             flushTimer = null;
         }
         lastFlushAt = 0;
+        applyStream(true);
+    };
+
+    /**
+     * 写入终态失败原因并立即渲染
+     *
+     * <p>必须走这里而不是直接改 msg.content：随后的 finish() 会用累积正文重写 msg.content。
+     * 值存进 terminalError 后，applyStream（含 finish 内的 flushStream）会以
+     * "正文 || 失败原因" 兜底，任何顺序都不会被覆盖成空。</p>
+     */
+    const setTerminalError = (text: string) => {
+        terminalError = text;
         applyStream(true);
     };
 
@@ -197,11 +227,9 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
             }
         }
         // 与后端落库逻辑一致：失败写入当前 assistant 占位消息，
-        // 即时触发失败态 UI（红色消息 + 重新生成入口），无需刷新页面
-        const last = state.messages[assistantIndex];
-        if (last && !last.content) {
-            last.content = FAIL_MSG_PREFIX + msg;
-        }
+        // 即时触发失败态 UI（红色消息 + 重新生成入口），无需刷新页面。
+        // 必须走 setTerminalError——直接改 msg.content 会被紧接着的 finish() 抹掉
+        setTerminalError(FAIL_MSG_PREFIX + msg);
         ElMessage.error(msg);
         finish();
         // 失败前可能已有部分文件落盘（如设计稿逐页产物）：文件表与父组件的
@@ -233,9 +261,40 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
                 // 节流渲染：不直接写响应式状态（每 chunk 全量重渲会打爆内存），攒批 150ms
                 scheduleFlush();
                 break;
-            case 'reasoning':
-                // 累积上限防爆：超限丢弃增量并标注一次（后端保险丝正常时单轮最多 256KB）
-                if (reasoningContent.length < REASONING_ACCUM_MAX) {
+            case 'reasoning': {
+                // 并行设计段：JSON {page,delta} → 按页分桶重组（分节展示，防多页思考流交织）；
+                // 纯文本 → 串行/旧会话格式，直接拼接。两条路径共用累积上限防爆保险丝
+                let bucketPage: string | null = null;
+                let bucketTitle = '';
+                let bucketDelta = '';
+                if (data.startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed && typeof parsed.delta === 'string' && typeof parsed.page === 'string') {
+                            bucketPage = parsed.page;
+                            bucketTitle = parsed.page;
+                            bucketDelta = parsed.delta;
+                        }
+                    } catch (err) {
+                        /* JSON 解析失败按旧纯文本格式处理 */
+                    }
+                }
+                if (bucketPage !== null && bucketTotal < REASONING_ACCUM_MAX) {
+                    let bucket = reasoningBuckets.find((b) => b.page === bucketPage);
+                    if (!bucket) {
+                        bucket = { page: bucketPage, title: bucketTitle, content: '' };
+                        reasoningBuckets.push(bucket);
+                    }
+                    bucket.content += bucketDelta;
+                    bucketTotal += bucketDelta.length;
+                    if (bucketTotal >= REASONING_ACCUM_MAX) {
+                        bucket.content += '\n…（思考过程超出展示上限，已停止接收；完整记录以对话历史为准）';
+                    }
+                    reasoningContent = reasoningBuckets
+                        .map((b) => `### 「${b.title}」\n${b.content}`)
+                        .join('\n\n');
+                } else if (bucketPage === null && reasoningContent.length < REASONING_ACCUM_MAX) {
+                    // 累积上限防爆：超限丢弃增量并标注一次（后端保险丝正常时单轮最多 256KB）
                     reasoningContent += data;
                     if (reasoningContent.length >= REASONING_ACCUM_MAX) {
                         reasoningContent += '\n…（思考过程超出展示上限，已停止接收；完整记录以对话历史为准）';
@@ -243,6 +302,7 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
                 }
                 scheduleFlush();
                 break;
+            }
             case 'file':
                 // AI 每写完一个文件推送一次：实时更新文件列表 + 通知父组件（刷新实时预览）。
                 // 阶段状态条不在此清除：由后端状态链负责（新 status 覆盖旧文案，结束时发空 status 清除）
@@ -331,7 +391,7 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
         }
     };
 
-    return { assistantIndex, dispatch, finish };
+    return { assistantIndex, dispatch, finish, setTerminalError };
 };
 
 /**
@@ -339,52 +399,82 @@ const createRunContext = (styleUpgrade: boolean, resume: boolean) => {
  *
  * id 字段为 RunChannel 分配的单调递增事件 seq（chat 提交流与 stream 续看流均携带）：
  * 记录进 state.lastSeq，断线重连时作为 stream 端点 since 参数增量回放（不重播已收事件）
+ *
+ * 空闲看门狗：连接上连续 IDLE_ABORT_MS 无任何字节（模型服务挂起时后端无事件可推，
+ * 连接既不出错也不出数据）则主动 abort——转普通错误抛出，由调用方转入观察循环续看。
+ * 没有它，挂死任务的连接会永远挂住 fetch，终态（失败/完成）永远无人接收
  */
-const consumeSse = async (resp: any, ctx: ReturnType<typeof createRunContext>) => {
+const SSE_IDLE_ABORT_MS = 3 * 60 * 1000;
+
+const consumeSse = async (resp: any, ctx: ReturnType<typeof createRunContext>, controller: AbortController) => {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buf = '';
     let currentEvent = 'message';
     let currentData: string[] = [];
     let sawEvent = false;
+    let lastByteAt = Date.now();
+    let idleAborted = false;
 
-    // 逐块读取 SSE 流，按行解析（兼容 \r\n / \n）
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf('\n')) >= 0) {
-            const raw = buf.slice(0, idx);
-            buf = buf.slice(idx + 1);
-            const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-
-            if (line === '') {
-                // 空行 = 事件结束
-                if (sawEvent && currentData.length > 0) {
-                    ctx.dispatch(currentEvent, currentData.join('\n'));
-                }
-                currentEvent = 'message';
-                currentData = [];
-                sawEvent = false;
-            } else if (line.startsWith('event:')) {
-                const name = line.slice(6).trim();
-                if (name) {
-                    currentEvent = name;
-                    sawEvent = true;
-                }
-            } else if (line.startsWith('data:')) {
-                currentData.push(line.slice(5).replace(/^ /, ''));
-                sawEvent = true;
-            } else if (line.startsWith('id:')) {
-                // SSE id = 事件 seq（RunChannel 单调递增）：记录续连游标
-                const id = Number(line.slice(3).trim());
-                if (Number.isFinite(id) && id > state.lastSeq) {
-                    state.lastSeq = id;
-                }
+    const watchdog = setInterval(() => {
+        if (Date.now() - lastByteAt > SSE_IDLE_ABORT_MS) {
+            idleAborted = true;
+            try {
+                controller.abort();
+            } catch (e) {
+                /* ignore */
             }
-            // 其余字段（retry:/注释）忽略
         }
+    }, 30 * 1000);
+
+    try {
+        // 逐块读取 SSE 流，按行解析（兼容 \r\n / \n）
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            lastByteAt = Date.now();
+            buf += decoder.decode(value, { stream: true });
+            let idx: number;
+            while ((idx = buf.indexOf('\n')) >= 0) {
+                const raw = buf.slice(0, idx);
+                buf = buf.slice(idx + 1);
+                const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+
+                if (line === '') {
+                    // 空行 = 事件结束
+                    if (sawEvent && currentData.length > 0) {
+                        ctx.dispatch(currentEvent, currentData.join('\n'));
+                    }
+                    currentEvent = 'message';
+                    currentData = [];
+                    sawEvent = false;
+                } else if (line.startsWith('event:')) {
+                    const name = line.slice(6).trim();
+                    if (name) {
+                        currentEvent = name;
+                        sawEvent = true;
+                    }
+                } else if (line.startsWith('data:')) {
+                    currentData.push(line.slice(5).replace(/^ /, ''));
+                    sawEvent = true;
+                } else if (line.startsWith('id:')) {
+                    // SSE id = 事件 seq（RunChannel 单调递增）：记录续连游标
+                    const id = Number(line.slice(3).trim());
+                    if (Number.isFinite(id) && id > state.lastSeq) {
+                        state.lastSeq = id;
+                    }
+                }
+                // 其余字段（retry:/注释）忽略
+            }
+        }
+    } catch (e: any) {
+        // 看门狗触发的 abort 转普通错误：调用方据此转观察循环（而非当作主动断开收口）
+        if (idleAborted && e?.name === 'AbortError') {
+            throw new Error('sse-idle-timeout');
+        }
+        throw e;
+    } finally {
+        clearInterval(watchdog);
     }
 };
 
@@ -446,7 +536,7 @@ const observeLoop = async (ctx: ReturnType<typeof createRunContext>) => {
                 ctx.finish();
                 return;
             }
-            await consumeSse(resp, ctx);
+            await consumeSse(resp, ctx, controller);
             if (!state.chatting) return; // done/error 已收口
             // 流结束但未终态（服务端断开/任务仍在跑）：探测后重连
         } catch (e: any) {
@@ -460,10 +550,41 @@ const observeLoop = async (ctx: ReturnType<typeof createRunContext>) => {
         // 网络异常/未终态断开：指数退避后重连
         await new Promise((r) => setTimeout(r, Math.min(30000, 1000 * Math.pow(2, attempt))));
     }
-    // 重连次数用尽（长时间断网）：收口并提示（任务仍在后台跑，重开页面可再次续看）
+    // 重连次数用尽（长时间断网）：转入慢速轮询——每 30s 探测运行态，
+    // 直到任务结束再重载终态消息。原来直接收口会让"任务比预算活得久"的
+    // 终态（失败/完成）永远无人接收，只能靠用户刷新页面才能看到。
+    // 注意：轮询期间保持 chatting=true（运行态 UI 保留，停止按钮可用），
+    // 不能先 finish——finish 会置 chatting=false 使轮询循环立即退出
+    ElMessage.info('连接不稳定，已切换为后台跟踪模式，任务结束后自动显示结果');
+    const pollController = new AbortController();
+    state.abortController = pollController;
+    while (state.chatting && getProps().session?.sessionId) {
+        try {
+            // 可中断休眠：用户新发消息/切换会话会 abort 掉该 controller，轮询立即让位
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, 30 * 1000);
+                pollController.signal.addEventListener('abort', () => {
+                    clearTimeout(timer);
+                    reject(new DOMException('aborted', 'AbortError'));
+                }, { once: true });
+            });
+        } catch (e) {
+            return; // 主动 abort：新消息/会话切换的流程接管
+        }
+        if (!state.chatting || !getProps().session?.sessionId) return;
+        try {
+            const res: any = await templateApi.runStatus(sessionId);
+            if (res?.data?.running !== true) {
+                // 任务已结束（终态消息已落库）：重载收口，失败/完成即刻可见
+                ctx.finish();
+                await reloadRunTerminal();
+                return;
+            }
+        } catch (e) {
+            console.error(e); // 单次探测失败不阻断：下一轮继续
+        }
+    }
     ctx.finish();
-    ElMessage.info('连接已断开，任务仍在后台处理，重新打开会话可继续查看进度');
-    await reloadRunTerminal();
 };
 
 /**
@@ -561,11 +682,9 @@ const onSend = async (rawOpts?: any) => {
             } catch (err) {
                 /* ignore */
             }
-            // HTTP 层失败同样写入占位消息触发失败态 UI
-            const last = state.messages[ctx.assistantIndex];
-            if (last && !last.content) {
-                last.content = FAIL_MSG_PREFIX + msg;
-            }
+            // HTTP 层失败同样写入占位消息触发失败态 UI（走 setTerminalError：
+            // 直接改 content 会被随后的 ctx.finish() 用累积正文覆盖成空）
+            ctx.setTerminalError(FAIL_MSG_PREFIX + msg);
             // 401 = 登录过期/已在别处登录：AI 对话走原生 fetch，axios 的 401 拦截器不生效，
             // 此处清缓存 + 弹窗提示 + 跳转管理后台入口（/fastcms → SPA 检测无 token 自动进登录页）
             if (resp.status === 401) {
@@ -582,7 +701,7 @@ const onSend = async (rawOpts?: any) => {
             return;
         }
 
-        await consumeSse(resp, ctx);
+        await consumeSse(resp, ctx, controller);
         // 流结束但后端未发 done/error：任务在后台仍可能运行（连接中断/另一端停止/
         // 服务端静默终止）——转观察循环：仍在跑则增量续连，已结束则重载终态消息收口
         if (state.chatting) {

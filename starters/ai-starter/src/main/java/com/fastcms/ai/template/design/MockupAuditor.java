@@ -125,14 +125,35 @@ public final class MockupAuditor {
      *                         对导入页误判会把保真页重置重设计，毁掉导入内容。其切分合规由
      *                         ingest 归一化保证，缺失文件由转化段兜底报错）
      * @param mobileAdaptive   是否移动端适配（false 时 A3 整体跳过——桌面端契约不要求断点）
+     * @param importAnchorHtml 导入保真首页设计稿路径（非导入会话传 null）：
+     *                         导入会话中 AI 子页的视觉基准来自保真首页，故 A2 以首页色值集合为
+     *                         "继承调色板"（子页命中调色板不计硬编码——继承原站色彩是预期而非缺陷，
+     *                         只有调色板外的新发色值才计；否则子页必然超限、修正轮永不收敛）；
+     *                         A4 以首页 nav/footer 为基准签名（子页应与首页同构，而非子页互相比）
      * @return 问题清单（空 = 审计通过）
      */
     public static List<AuditIssue> audit(Path workDir, List<DesignPagePlanner.PagePlan> pages,
                                          Set<String> placeholderPages, Set<String> importedPages,
-                                         boolean mobileAdaptive) {
+                                         boolean mobileAdaptive, Path importAnchorHtml) {
         List<AuditIssue> issues = new ArrayList<>();
         Map<String, Document> docs = new LinkedHashMap<>();
         Map<String, String> htmls = new LinkedHashMap<>();
+
+        // 导入会话：提取保真首页的继承调色板 + nav/footer 基准签名
+        Set<String> inheritedPalette = null;
+        String anchorNavSig = null;
+        String anchorFooterSig = null;
+        if (importAnchorHtml != null && Files.isRegularFile(importAnchorHtml)) {
+            try {
+                String anchorHtml = Files.readString(importAnchorHtml, StandardCharsets.UTF_8);
+                inheritedPalette = extractPalette(anchorHtml);
+                Document anchorDoc = Jsoup.parse(anchorHtml);
+                anchorNavSig = signatureOf(anchorDoc.selectFirst("nav"));
+                anchorFooterSig = signatureOf(anchorDoc.selectFirst("#footer, footer"));
+            } catch (Exception e) {
+                // 锚点提取失败退回通用口径（不因锚点问题阻塞审计）
+            }
+        }
 
         // 载入需审计页面（导入保真页整体跳过；缺文件按 A1 报——审计对象是落盘产物）
         for (DesignPagePlanner.PagePlan page : pages) {
@@ -156,7 +177,7 @@ public final class MockupAuditor {
             String pageName = entry.getKey();
             Document doc = entry.getValue();
             auditSlicing(pageName, doc, issues);                        // A1
-            auditTokenConvergence(pageName, htmls.get(pageName), doc, issues); // A2
+            auditTokenConvergence(pageName, htmls.get(pageName), doc, issues, inheritedPalette); // A2
             if (mobileAdaptive) {
                 auditResponsive(pageName, htmls.get(pageName), doc, issues); // A3
             }
@@ -164,8 +185,36 @@ public final class MockupAuditor {
             auditJsWhitelist(pageName, doc, issues);                    // A6
             auditSizeGuard(pageName, htmls.get(pageName), issues);      // A7
         }
-        auditCrossPageConsistency(docs, placeholderPages, issues);      // A4
+        auditCrossPageConsistency(docs, placeholderPages, issues, anchorNavSig, anchorFooterSig,
+                importAnchorHtml != null); // A4
         return issues;
+    }
+
+    /**
+     * 从保真锚点页提取色值集合（style 属性 + style 标签全部内容，含 :root——
+     * 锚点页整体是设计基准，其色值全部视为"继承可用"）。统一小写去空白，供 A2 比对
+     */
+    private static Set<String> extractPalette(String html) {
+        Set<String> palette = new HashSet<>();
+        Document doc = Jsoup.parse(html);
+        for (Element el : doc.select("[style]")) {
+            Matcher m = COLOR_PATTERN.matcher(el.attr("style"));
+            while (m.find()) {
+                palette.add(normalizeColor(m.group()));
+            }
+        }
+        for (Element style : doc.select("style")) {
+            Matcher m = COLOR_PATTERN.matcher(style.data());
+            while (m.find()) {
+                palette.add(normalizeColor(m.group()));
+            }
+        }
+        return palette;
+    }
+
+    /** 色值归一（大小写/空白）：#FFF 与 #fff 视为同一色值 */
+    private static String normalizeColor(String color) {
+        return color.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
     }
 
     // ==================== A1 区块可切分性 ====================
@@ -216,13 +265,20 @@ public final class MockupAuditor {
     /**
      * A2：正文硬编码色值 ≤ {@link #MAX_HARDCODED_COLORS}（:root token 定义除外）。
      * 扫描面：style 属性 + style 标签内容（剥离 :root 块）。
+     *
+     * <p>导入会话（inheritedPalette 非 null）命中继承调色板的色值不计——
+     * 子页继承保真首页色彩是预期，只有调色板外的新发色值才计入上限。</p>
      */
-    private static void auditTokenConvergence(String pageName, String html, Document doc, List<AuditIssue> issues) {
+    private static void auditTokenConvergence(String pageName, String html, Document doc,
+                                              List<AuditIssue> issues, Set<String> inheritedPalette) {
         List<String> samples = new ArrayList<>();
         int count = 0;
         for (Element el : doc.select("[style]")) {
             Matcher m = COLOR_PATTERN.matcher(el.attr("style"));
             while (m.find()) {
+                if (inheritedPalette != null && inheritedPalette.contains(normalizeColor(m.group()))) {
+                    continue;
+                }
                 count++;
                 if (samples.size() < 3) {
                     samples.add(m.group());
@@ -234,6 +290,9 @@ public final class MockupAuditor {
             String css = stripRootBlock(style.data());
             Matcher m = COLOR_PATTERN.matcher(css);
             while (m.find()) {
+                if (inheritedPalette != null && inheritedPalette.contains(normalizeColor(m.group()))) {
+                    continue;
+                }
                 count++;
                 if (samples.size() < 3) {
                     samples.add(m.group());
@@ -244,7 +303,8 @@ public final class MockupAuditor {
             issues.add(new AuditIssue("A2", pageName,
                     "正文硬编码色值 " + count + " 处（上限 " + MAX_HARDCODED_COLORS
                             + "，样例：" + String.join("、", samples) + "），色彩必须统一走 :root CSS 变量"
-                            + "（var(--c-primary) 等），请将色值收敛为变量引用"));
+                            + "（var(--c-primary) 等），请将色值收敛为变量引用"
+                            + (inheritedPalette != null ? "；继承首页已有色值不计入，仅统计新发明的颜色" : "")));
         }
     }
 
@@ -277,16 +337,28 @@ public final class MockupAuditor {
     /**
      * A4：各页 nav / #footer 结构签名一致（结构 + id + class，不含文本）。
      * 占位页豁免；差异报出全部不一致页名（修正指令指认到页）。
+     *
+     * <p>导入会话（anchorNavSig/anchorFooterSig 非 null 或锚点缺失标记）以保真首页为基准：
+     * 子页 nav/footer 应与首页同构（原稿长什么样就什么样——包括首页没有 #footer 时
+     * 不强求子页有，避免"审计契约"与"保真继承"互相矛盾导致修正轮永不收敛）。</p>
      */
     private static void auditCrossPageConsistency(Map<String, Document> docs, Set<String> placeholderPages,
-                                                  List<AuditIssue> issues) {
-        if (docs.size() < 2) {
+                                                  List<AuditIssue> issues,
+                                                  String anchorNavSig, String anchorFooterSig,
+                                                  boolean importAnchorMode) {
+        if (docs.size() < 2 && !importAnchorMode) {
             return;
         }
-        // 基准取第一个非占位页
+        // 基准：导入会话取保真首页签名（锚点无该项时该项签名为 null = 不比较）；
+        // 否则取第一个非占位页
         String refPage = null;
         String refNav = null;
         String refFooter = null;
+        if (importAnchorMode) {
+            refPage = "导入首页";
+            refNav = anchorNavSig;
+            refFooter = anchorFooterSig;
+        }
         Map<String, String> navDiffPages = new LinkedHashMap<>();
         Map<String, String> footerDiffPages = new LinkedHashMap<>();
         for (Map.Entry<String, Document> entry : docs.entrySet()) {
@@ -296,39 +368,55 @@ public final class MockupAuditor {
             }
             Document doc = entry.getValue();
             String navSig = signatureOf(doc.selectFirst("nav"));
-            String footerSig = signatureOf(doc.selectFirst("#footer"));
-            if (navSig == null) {
-                navDiffPages.put(pageName, "缺少 nav 元素");
+            // 导入模式下 footer 提取口径与锚点一致（#footer 或 footer 元素——原稿 footer 不一定有 id=footer，
+            // 若锚点用宽口径提取、子页用 #footer 窄口径，子页照抄首页也会被判缺失）
+            String footerSig = signatureOf(doc.selectFirst(
+                    importAnchorMode ? "#footer, footer" : "#footer"));
+            if (!importAnchorMode) {
+                if (navSig == null) {
+                    navDiffPages.put(pageName, "缺少 nav 元素");
+                }
+                if (footerSig == null) {
+                    footerDiffPages.put(pageName, "缺少 #footer 元素");
+                }
+                if (refPage == null) {
+                    refPage = pageName;
+                    refNav = navSig;
+                    refFooter = footerSig;
+                    continue;
+                }
             }
-            if (footerSig == null) {
-                footerDiffPages.put(pageName, "缺少 #footer 元素");
+            // 锚点基准为 null（首页无该项）时不比较该项
+            if (refNav != null) {
+                if (navSig == null) {
+                    navDiffPages.put(pageName, "缺少 nav 元素");
+                } else if (!refNav.equals(navSig)) {
+                    navDiffPages.put(pageName, "nav 结构与 " + refPage + " 不一致");
+                }
             }
-            if (refPage == null) {
-                refPage = pageName;
-                refNav = navSig;
-                refFooter = footerSig;
-                continue;
-            }
-            if (navSig != null && refNav != null && !refNav.equals(navSig)) {
-                navDiffPages.put(pageName, "nav 结构与 " + refPage + " 不一致");
-            }
-            if (footerSig != null && refFooter != null && !refFooter.equals(footerSig)) {
-                footerDiffPages.put(pageName, "footer 结构与 " + refPage + " 不一致");
+            if (refFooter != null) {
+                if (footerSig == null) {
+                    footerDiffPages.put(pageName, "缺少 #footer 元素");
+                } else if (!refFooter.equals(footerSig)) {
+                    footerDiffPages.put(pageName, "footer 结构与 " + refPage + " 不一致");
+                }
             }
         }
         if (!navDiffPages.isEmpty()) {
             issues.add(new AuditIssue("A4", String.join("、", navDiffPages.keySet()),
                     "导航结构跨页不一致：" + navDiffPages.values().stream()
                             .map(v -> "[" + v + "]").collect(Collectors.joining())
-                            + "（导航与页脚必须在所有页面保持相同结构与 id：#nav-toggle / #footer），"
-                            + "请以 " + refPage + " 页为基准统一各页 nav"));
+                            + "（导航必须在所有页面保持相同结构与 id：#nav-toggle），"
+                            + "请以 " + refPage + " 为基准统一各页 nav"
+                            + (importAnchorMode ? "（导入首页是保真原稿，子页 nav 请复制首页 nav 的标记结构）" : "")));
         }
         if (!footerDiffPages.isEmpty()) {
             issues.add(new AuditIssue("A4", String.join("、", footerDiffPages.keySet()),
                     "页脚结构跨页不一致：" + footerDiffPages.values().stream()
                             .map(v -> "[" + v + "]").collect(Collectors.joining())
-                            + "（页脚必须为 #footer 且结构跨页一致），"
-                            + "请以 " + refPage + " 页为基准统一各页 footer"));
+                            + "（页脚结构跨页一致），"
+                            + "请以 " + refPage + " 为基准统一各页 footer"
+                            + (importAnchorMode ? "（导入首页是保真原稿，子页 footer 请复制首页 footer 的标记结构）" : "")));
         }
     }
 

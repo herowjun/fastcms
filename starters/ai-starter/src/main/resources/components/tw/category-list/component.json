@@ -1,0 +1,15 @@
+{
+  "id": "category-list",
+  "name": "分类导航",
+  "description": "文章分类导航（自动绑定 CMS 分类数据 categoryListTag，可用于分类筛选条或首页分类入口）",
+  "category": "content",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "chips", "description": "横向胶囊标签条，适合筛选与顶部导航" },
+    { "id": "cards", "description": "卡片网格，适合首页分类入口" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": false, "maxLength": 16, "desc": "区块标题，如：文章分类" }
+  ],
+  "cmsBindings": ["category"]
+}

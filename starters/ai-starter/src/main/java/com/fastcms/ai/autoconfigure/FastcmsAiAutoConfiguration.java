@@ -23,11 +23,21 @@ import com.fastcms.ai.tool.AiToolCallbackProvider;
 import com.fastcms.ai.tool.AiToolPluginRegister;
 import com.fastcms.ai.tool.AiToolRegister;
 import com.fastcms.ai.tool.AiToolRegistry;
+import com.fastcms.ai.tool.GhostToolCallbackResolver;
 import com.fastcms.plugin.FastcmsPluginManager;
 import com.fastcms.service.IAiUsageLogService;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.model.tool.DefaultToolCallingManager;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.tool.execution.ToolExecutionExceptionProcessor;
+import org.springframework.ai.tool.observation.ToolCallingObservationConvention;
+import org.springframework.ai.tool.resolution.DelegatingToolCallbackResolver;
+import org.springframework.ai.tool.resolution.ToolCallbackResolver;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -55,10 +65,18 @@ import org.springframework.context.annotation.Configuration;
  * <p>Advisor 链、默认系统提示词等增强能力在后续 AdvisorAutoConfiguration 里独立提供，
  * 通过 Spring 容器自动被 ChatClient.Builder 收集。</p>
  *
+ * <p><b>ToolCallingManager 覆盖</b>：本配置先于 Spring AI 的 ToolCallingAutoConfiguration
+ * 处理（@AutoConfigureBefore 按 name 引用，类不在 classpath 时安全跳过），用
+ * {@code resolutionFallbackEnabled(true)} + {@link GhostToolCallbackResolver} 重建 manager——
+ * 模型拼错工具名（如 search_template_files 幻觉成单数）时不再抛
+ * {@code IllegalStateException} 崩掉整轮流式任务，而是回流纠错提示让模型自我纠正
+ * （实测：Qwen3.6-27B 拼错一次工具名导致 247 秒的样式升级轮全部作废）。</p>
+ *
  * @author wjun_java@163.com
  * @since 0.2.0
  */
 @Configuration
+@AutoConfigureBefore(name = "org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfiguration")
 @ConditionalOnClass(ChatClient.class)
 @ConditionalOnProperty(prefix = "fastcms.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(FastcmsAiProperties.class)
@@ -133,6 +151,48 @@ public class FastcmsAiAutoConfiguration {
     @ConditionalOnMissingBean
     public AiQuotaChecker aiQuotaChecker(IAiUsageLogService usageLogService) {
         return new AiQuotaChecker(usageLogService, properties);
+    }
+
+    /**
+     * 工具调用管理器（覆盖 Spring AI 默认）：开启请求外工具名解析兜底 +
+     * 幽灵回调（未注册名 → 纠错提示回流，不抛异常崩流）。
+     *
+     * <p><b>顺序说明</b>：本配置类先于 Spring AI 的 ToolCallingAutoConfiguration 处理
+     * （@AutoConfigureBefore），本 bean 注册后其同名 bean 自动让位（@ConditionalOnMissingBean）。
+     * resolver 经 ObjectProvider 惰性注入——配置处理期 spring-ai 的 resolver 尚未注册
+     * （不能用 @ConditionalOnBean 判定），实例化期按类型正常解析；极端场景（spring-ai
+     * 自动配置未生效）回落到空 DelegatingToolCallbackResolver，幽灵兜底依然可用。</p>
+     *
+     * <p>组件与 Spring AI 自动配置保持一致（resolver / exceptionProcessor /
+     * observationRegistry / observationConvention 均注入既有 bean）；调用次数上限用
+     * builder 默认值（单工具 40 / 总量 150，与 ToolCallingProperties 未配置时的默认相同）。
+     * 预期宿主不配置 spring.ai.tools.limits.*；若确有配置需求，可自行定义
+     * ToolCallingManager bean 覆盖本 bean（@ConditionalOnMissingBean 让位）。</p>
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(DefaultToolCallingManager.class)
+    public ToolCallingManager toolCallingManager(
+            ObjectProvider<ToolCallbackResolver> toolCallbackResolver,
+            ObjectProvider<ToolExecutionExceptionProcessor> toolExecutionExceptionProcessor,
+            ObjectProvider<ObservationRegistry> observationRegistry,
+            ObjectProvider<ToolCallingObservationConvention> observationConvention) {
+        ToolCallbackResolver delegate = toolCallbackResolver.getIfAvailable(
+                () -> new DelegatingToolCallbackResolver(java.util.List.of()));
+        ToolExecutionExceptionProcessor processor = toolExecutionExceptionProcessor.getIfAvailable(
+                () -> org.springframework.ai.tool.execution.DefaultToolExecutionExceptionProcessor.builder().build());
+        DefaultToolCallingManager manager = DefaultToolCallingManager.builder()
+                .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP))
+                .toolCallbackResolver(new GhostToolCallbackResolver(delegate))
+                .toolExecutionExceptionProcessor(processor)
+                .resolutionFallbackEnabled(true)
+                .build();
+        ToolCallingObservationConvention convention = observationConvention.getIfAvailable();
+        if (convention != null) {
+            manager.setObservationConvention(convention);
+        }
+        log.info("ToolCallingManager 已启用幽灵工具兜底（未注册工具名回流纠错提示，不再抛异常崩流）");
+        return manager;
     }
 
 }

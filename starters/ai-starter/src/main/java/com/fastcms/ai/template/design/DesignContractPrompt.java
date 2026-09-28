@@ -49,7 +49,11 @@ public final class DesignContractPrompt {
      * 设计契约（系统提示词，§4.3 原文）
      *
      * <p>可转化性契约 1~5 与 {@code DesignHtmlValidator} V1~V6、{@code MockupAuditor} A1~A7
-     * 一一对应——契约文本变更时需同步校验/审计规则。</p>
+     * 一一对应——契约文本变更时需同步校验/审计规则。契约 6~7 为<b>软约束</b>（无单页硬校验，
+     * 校验器拿不到全站上下文）：契约 6（导航菜单语义化）由转化段 menuifyNav 的四级锚文本匹配兜底
+     * （未命中项保留静态链接并播报）；契约 7（CMS 数据区受控语义名）由转化段
+     * {@code MockupConverter.applySemanticMappings} 按 {@code SEMANTIC_TARGETS} 做确定性映射兜底，
+     * 语义名未命中/组件不适用的区块落回 AI 映射（或 custom），并使"首页未接 CMS 数据区"告警触发。</p>
      */
     public static final String DESIGN_SYSTEM_PROMPT = """
             你是资深网站设计师。按用户描述设计一个完整网站的静态设计稿（纯 HTML + Tailwind CDN + 内联样式变量）。
@@ -59,6 +63,17 @@ public final class DesignContractPrompt {
             3. 导航与页脚在所有页面保持相同结构与 id（#nav-toggle / #footer）
             4. 图片不用外链图床：优先用内联 <svg>（简单几何图形）或 CSS 渐变/纯色占位；若用 <img>，src 必须是 design/assets/placeholder-<语义>.svg 并在文档之后以 ===FILE: 该路径=== 追加输出对应 SVG 文件块，img 上加 data-src-hint="真实图描述"
             5. 交互 JS 只允许：汉堡菜单切换 + 锚点平滑滚动 + 简单滚动渐显（其余交互会被丢弃）
+            6. 导航菜单必须是真实站点栏目：菜单项名称与【全站页面清单】中的栏目名一致（如"关于我们/新闻动态/产品中心"），链接用语义路径（如 /about、/news）或页内锚点（#hero）；禁止虚构清单外栏目的锚点导航——菜单会在转化时接入 CMS 动态菜单（menuTag），清单外锚点项将保留为死链接
+            7. CMS 数据区必须用受控语义名声明：凡需接入 CMS 动态数据的区块，data-block 必须取以下受控值
+               （转化时据此自动绑定 fastcms 内置指令；写成自由文本会导致动态数据接不上、页面变成静态死内容）：
+               · article-list —— 文章列表区（标题/摘要/缩略图/日期/阅读量由文章数据自动填充）
+               · category-list —— 分类导航区（自动列出全部文章分类及链接）
+               · tag-cloud —— 标签云区（自动列出全部文章标签及链接）
+               · single-page-list —— 单页入口区（自动列出站点单页及链接）
+               要求：① 首页与内容页都应至少包含一个 CMS 数据区（首页建议安排"最新文章"区块），
+               否则后台发布的内容不会出现在页面上；② 该区块内部照常按视觉写卡片/列表结构即可，
+               转化时系统会替换为等价的标签驱动组件（故不必为其精雕样式，语义名与内容主旨正确更重要）；
+               ③ 其余区块（hero/features/cta/gallery 等）data-block 继续用自由语义名，保持设计保真。
             【审美契约】：留白优先、字号三级、每个区块一个视觉重点；若下方附有《设计方法论》全文则严格遵循（契约优先，方法论补充细化）。
             【输出契约】：直接输出该页的完整 HTML 文档（<!DOCTYPE html> 起、</html> 止），不要 markdown 围栏、不要解释性文字；确需附加占位 SVG 文件时才使用 ===FILE: path=== 文件块（追加在文档之后）。""";
 
@@ -78,11 +93,32 @@ public final class DesignContractPrompt {
      *                           不做"已注入"的虚假声明
      */
     public static String buildInjectedSystemPrompt(String baseSystemPrompt, String designBriefContent) {
-        if (!StringUtils.hasText(designBriefContent)) {
-            return baseSystemPrompt;
+        return buildInjectedSystemPrompt(baseSystemPrompt, designBriefContent, null);
+    }
+
+    /**
+     * 直注模式系统提示词 = 设计契约基底 + 设计方法论（design-brief）+ fastcms 模板规范（template-spec）
+     *
+     * <p><b>template-spec 注入（2026-09-25）</b>：设计稿最终要转成 fastcms 模板，AI 必须知道目标
+     * 模板的目录结构（_template.properties / _layout.html / _articlePage.html / 四个必备页）与内置
+     * 指令能力（articleListTag / menuTag / categoryList / tagList / singlePageList / formatTime /
+     * seoTag / ctx 等）——既避免设计出无法转化的结构，也让契约 7 的 CMS 数据区语义标记有明确落点。
+     * 技能未安装（内容空）时该段不注入，契约措辞已条件化，不做虚假声明。</p>
+     *
+     * @param templateSpecContent template-spec 技能 L2 正文（SkillRegistry.loadContent 产出）；空/null 不注入
+     */
+    public static String buildInjectedSystemPrompt(String baseSystemPrompt, String designBriefContent,
+                                                   String templateSpecContent) {
+        StringBuilder sb = new StringBuilder(baseSystemPrompt);
+        if (StringUtils.hasText(designBriefContent)) {
+            sb.append("\n\n# 设计方法论（完整指令，已直接注入系统提示词）\n\n").append(designBriefContent.trim());
         }
-        return baseSystemPrompt + "\n\n# 设计方法论（完整指令，已直接注入系统提示词）\n\n"
-                + designBriefContent.trim();
+        if (StringUtils.hasText(templateSpecContent)) {
+            sb.append("\n\n# fastcms 模板规范（设计稿的转化目标——目录结构、内置 FreeMarker 指令、")
+              .append("CMS 数据模型与页面路由已直接注入系统提示词，设计时必须与之对齐）\n\n")
+              .append(templateSpecContent.trim());
+        }
+        return sb.toString();
     }
 
     /**
@@ -159,6 +195,8 @@ public final class DesignContractPrompt {
 
         sb.append("\n【全站页面清单】\n").append(sitePageContext).append('\n');
         sb.append("导航与页脚必须在所有页面保持相同结构与 id（#nav-toggle / #footer）。\n");
+        sb.append("导航菜单项 = 页面清单中的栏目（名称与清单一致、数量不超出清单），")
+          .append("禁止虚构清单外的栏目或纯装饰锚点导航——菜单转化时接入 CMS 动态菜单，清单外项无法匹配。\n");
 
         sb.append("\n【本次任务】设计页面：").append(page.name()).append(".html（").append(page.title()).append("）\n");
         if (StringUtils.hasText(page.description())) {

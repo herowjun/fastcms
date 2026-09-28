@@ -25,6 +25,7 @@
         <module>twplus-components-plugin</module>
         <module>article-skills-plugin</module>
         <module>template-skills-plugin</module>
+        <module>ai-subscription-plugin</module>
     </modules>
 
     <dependencyManagement>

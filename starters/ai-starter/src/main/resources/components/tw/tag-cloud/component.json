@@ -1,0 +1,14 @@
+{
+  "id": "tag-cloud",
+  "name": "标签云",
+  "description": "文章标签云（自动绑定 CMS 标签数据 tagListTag，适合侧栏或页脚上方）",
+  "category": "content",
+  "appliesTo": ["index", "article_list", "article", "page"],
+  "variants": [
+    { "id": "cloud", "description": "紧凑标签云，自动换行" }
+  ],
+  "slots": [
+    { "name": "title", "type": "string", "required": false, "maxLength": 16, "desc": "区块标题，如：热门标签" }
+  ],
+  "cmsBindings": ["tag"]
+}

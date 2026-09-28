@@ -10,6 +10,10 @@ import { isRoutableHtml } from '/@/views/template/composables/useAiPreview';
  *
  * 两个点选模式互斥；iframe 因刷新键重载后由 onPreviewFrameLoad 向新文档重新注入。
  * 页面状态（会话/预览入口）通过 getter 注入，对话框打开通过回调交还页面处理。
+ *
+ * 另承接预览内"缺口引导"的消息回报（引导页由后端渲染，页面内按钮经 postMessage 上抛）：
+ * - 缺页面引导页 → onMissingPage（生成该页面 / 删除该条目）
+ * - 菜单未配置引导条 → onPlanMenu（让 AI 规划导航菜单）
  */
 export function usePreviewIframeHooks(options: {
     /** 预览 iframe 元素（同源，可直接操作 contentDocument） */
@@ -32,6 +36,17 @@ export function usePreviewIframeHooks(options: {
     refreshPreview: () => void;
     /** 打开换图对话框（sectionId/slot 为空串时表示演示图换图） */
     onOpenImagePick: (sectionId: string, slot: string, rawSrc: string) => void;
+    /** 缺页面引导页按钮回调：generate=让 AI 生成该页面，remove=从预览数据中删除该条目 */
+    onMissingPage: (payload: {
+        action: 'generate' | 'remove';
+        ref: string;
+        name: string;
+        expectedFile: string;
+        pageType: string;
+        kindLabel: string;
+    }) => void;
+    /** 菜单未配置引导条回调：让 AI 规划导航菜单 */
+    onPlanMenu: () => void;
 }) {
     // ===== 预览页点选换图 =====
     // 换图模式：开启后向预览 iframe 注入点选钩子（全部图片边框高亮可点选，
@@ -327,6 +342,43 @@ export function usePreviewIframeHooks(options: {
         doc?.addEventListener('click', onPreviewLinkClick, true);
     };
 
+    // ===== 预览缺口引导的消息回报 =====
+    // 缺页面引导页 / 菜单未配置引导条由后端注入渲染（AiTemplatePreviewController），
+    // 页面内按钮经 window.parent.postMessage 上抛。消息类型常量与后端保持一致。
+    const MSG_MISSING_PAGE = 'ai:missing-page';
+    const MSG_PLAN_MENU = 'ai:plan-menu';
+
+    /**
+     * 窗口消息分发：只接受<b>本预览 iframe</b>发来的消息（e.source 比对 contentWindow），
+     * 避免同一页面内其他脚本或嵌套 iframe 伪造引导动作
+     */
+    const onWindowMessage = (e: MessageEvent) => {
+        const frame = options.getFrame();
+        if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return;
+        const data = e.data as any;
+        if (!data || typeof data.type !== 'string') return;
+        if (data.type === MSG_PLAN_MENU) {
+            options.onPlanMenu();
+            return;
+        }
+        if (data.type === MSG_MISSING_PAGE) {
+            options.onMissingPage({
+                action: data.action === 'remove' ? 'remove' : 'generate',
+                ref: String(data.ref || ''),
+                name: String(data.name || ''),
+                expectedFile: String(data.expectedFile || ''),
+                pageType: String(data.pageType || ''),
+                kindLabel: String(data.kindLabel || '栏目')
+            });
+        }
+    };
+
+    /** 挂载消息桥（父组件 onMounted 调用） */
+    const startMessageBridge = () => window.addEventListener('message', onWindowMessage);
+
+    /** 卸载消息桥（父组件 onBeforeUnmount 调用，避免组件销毁后仍响应引导动作） */
+    const stopMessageBridge = () => window.removeEventListener('message', onWindowMessage);
+
     /** load 兜底：非点击导航（JS 跳转等）后按 iframe 实际地址同步页面下拉 */
     const syncPreviewEntryFromIframe = () => {
         const win = options.getFrame()?.contentWindow;
@@ -363,6 +415,7 @@ export function usePreviewIframeHooks(options: {
     return {
         pickMode, sectionMode, selectedSection,
         toggleImagePickMode, toggleSectionSelectMode,
-        clearSelectedSection, resetModes, onPreviewFrameLoad
+        clearSelectedSection, resetModes, onPreviewFrameLoad,
+        startMessageBridge, stopMessageBridge
     };
 }

@@ -16,6 +16,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
 /**
  * AI 模板预览控制器：用真实 FreeMarker 引擎 + 演示数据渲染预览目录中的模板
@@ -161,6 +162,15 @@ public class AiTemplatePreviewController {
             return;
         }
 
+        // 缺页面引导页：菜单/分类/标签/单页指向的 {type}_{suffix}.html 不存在时，
+        // mock 数据把它们指向此路径段（而非静默回退到基础页）。此处不是真实文件，
+        // 必须在路径穿越/可读性校验之前拦截。
+        String missingPrefix = AiTemplatePreviewMockSupport.MISSING_PAGE_SEGMENT + "/";
+        if (relPath.startsWith(missingPrefix)) {
+            writeMissingPageGuide(workDir, relPath.substring(missingPrefix.length()), response);
+            return;
+        }
+
         // 防路径穿越：解析后必须仍在工作目录内
         Path target = workDir.resolve(relPath).normalize();
         if (!target.startsWith(workDir) || !Files.isReadable(target)) {
@@ -188,6 +198,9 @@ public class AiTemplatePreviewController {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         try {
             String html = previewRenderer.renderPage(urlPrefix, dirPrefix, workDir, relPath);
+            if (!previewRenderer.hasMenuConfig(workDir)) {
+                html = injectMenuNotice(html);
+            }
             response.getWriter().write(html);
             response.getWriter().flush();
         } catch (Exception e) {
@@ -238,6 +251,159 @@ public class AiTemplatePreviewController {
         } catch (IllegalStateException ignored) {
             // 响应已提交，错误页写不进去，日志中已有异常堆栈
         }
+    }
+
+    // ==================== 预览缺口引导（缺页面 / 菜单未配置） ====================
+
+    /**
+     * 渲染"缺页面引导页"
+     *
+     * <p>菜单/分类/标签/单页指向的 {@code {type}_{suffix}.html} 在模板目录中不存在时，
+     * 预览<b>不再静默回退</b>到该类型的基础页——那会让多个条目悄悄并到同一页
+     * （"新闻动态""产品中心"都跳 article_list.html），用户完全看不出配置已失效。
+     * 此处落到本页说明原因，并给出两个出口：让 AI 生成该页面 / 从预览数据中删除该条目。</p>
+     *
+     * @param workDir 模板根目录（用于回读预览数据，取条目的展示信息）
+     * @param ref     条目引用（见 {@code AiTemplatePreviewMockSupport.REF_MENU}）
+     */
+    private void writeMissingPageGuide(Path workDir, String ref, HttpServletResponse response) throws IOException {
+        AiTemplatePreviewMockSupport.PreviewDataConfig config =
+                AiTemplatePreviewMockSupport.loadPreviewDataConfig(workDir);
+        AiTemplatePreviewMockSupport.MissingItem item =
+                AiTemplatePreviewMockSupport.findMissingItem(config, ref);
+        response.setContentType("text/html;charset=UTF-8");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.getWriter().write(missingPageGuideHtml(item, ref));
+        response.getWriter().flush();
+    }
+
+    private String missingPageGuideHtml(AiTemplatePreviewMockSupport.MissingItem item, String rawRef) {
+        String ref = item == null ? rawRef : item.ref();
+        String label = item == null ? "条目" : item.kindLabel();
+        String name = item == null ? rawRef : item.name();
+        String expected = item == null ? "" : item.expectedFile();
+        boolean deletable = item != null && item.deletable();
+        String type = item == null ? "" : item.type();
+
+        StringBuilder sb = new StringBuilder(4096);
+        sb.append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
+                .append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+                .append("<title>预览提示 · 暂无对应页面</title><style>")
+                .append("body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;")
+                .append("background:#f5f6f8;color:#1f2937;font:14px/1.7 -apple-system,'Microsoft YaHei','PingFang SC',sans-serif}")
+                .append(".card{width:min(580px,calc(100% - 48px));background:#fff;border:1px solid #e5e7eb;")
+                .append("border-radius:12px;padding:28px 28px 20px;box-shadow:0 2px 12px rgba(15,23,42,.06)}")
+                .append(".tag{display:inline-block;font-size:12px;color:#b45309;background:#fef3c7;")
+                .append("border-radius:999px;padding:2px 10px;margin-bottom:14px}")
+                .append("h1{font-size:18px;font-weight:600;margin:0 0 12px}")
+                .append("p{margin:0 0 12px;color:#4b5563}")
+                .append("code{background:#f3f4f6;border-radius:4px;padding:1px 6px;color:#111827;")
+                .append("font:13px ui-monospace,Consolas,monospace}")
+                .append(".actions{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0 10px}")
+                .append("button{font:inherit;cursor:pointer;border-radius:8px;padding:8px 16px;")
+                .append("border:1px solid #d1d5db;background:#fff;color:#374151}")
+                .append("button.primary{border-color:#2563eb;background:#2563eb;color:#fff}")
+                .append("button.danger{border-color:#fca5a5;color:#b91c1c}")
+                .append(".hint{font-size:12px;color:#6b7280;min-height:18px;margin:0}")
+                .append("</style></head><body><div class=\"card\">")
+                .append("<span class=\"tag\">模板预览</span>")
+                .append("<h1>「").append(escapeHtml(name)).append("」暂无对应的模板页面</h1>")
+                .append("<p>预览数据 <code>_preview_data.json</code> 中该").append(escapeHtml(label))
+                .append("指向 <code>").append(escapeHtml(expected)).append("</code>，但模板目录里没有这个文件。</p>")
+                .append("<p>为避免把多个").append(escapeHtml(label))
+                .append("悄悄指向同一个页面，此处不会自动回退到其他页面。</p>")
+                .append("<div class=\"actions\">")
+                .append("<button class=\"primary\" id=\"__ai_gen__\">让 AI 生成这个页面</button>")
+                .append("<button class=\"danger\" id=\"__ai_del__\">删除该").append(escapeHtml(label)).append("</button>")
+                .append("<button id=\"__ai_back__\">返回上一页</button></div>")
+                .append("<p class=\"hint\" id=\"__ai_hint__\"></p></div>")
+                .append("<div id=\"__ai_missing__\" hidden")
+                .append(" data-ref=\"").append(escapeHtml(ref)).append("\"")
+                .append(" data-name=\"").append(escapeHtml(name)).append("\"")
+                .append(" data-expected=\"").append(escapeHtml(expected)).append("\"")
+                .append(" data-type=\"").append(escapeHtml(type)).append("\"")
+                .append(" data-label=\"").append(escapeHtml(label)).append("\"")
+                .append(" data-deletable=\"").append(deletable).append("\"></div>")
+                .append("<script>(function(){")
+                .append("var box=document.getElementById('__ai_missing__'),hint=document.getElementById('__ai_hint__');")
+                .append("function send(action){")
+                .append("var msg={type:'").append(MSG_MISSING_PAGE).append("',action:action,")
+                .append("ref:box.dataset.ref,name:box.dataset.name,expectedFile:box.dataset.expected,")
+                .append("pageType:box.dataset.type,kindLabel:box.dataset.label};")
+                .append("try{window.parent.postMessage(msg,window.location.origin);}catch(e){}")
+                .append("hint.textContent=action==='remove'")
+                .append("?'已请求删除该").append(escapeJs(label)).append("，处理后预览会自动刷新…'")
+                .append(":'已发送到 AI 对话，请留意右侧面板的思考与生成过程…';}")
+                .append("var gen=document.getElementById('__ai_gen__');")
+                .append("if(gen){gen.addEventListener('click',function(){send('generate');});}")
+                .append("var del=document.getElementById('__ai_del__');")
+                .append("if(del){if(box.dataset.deletable==='true'){del.addEventListener('click',function(){send('remove');});}")
+                .append("else{del.style.display='none';}}")
+                .append("var back=document.getElementById('__ai_back__');")
+                .append("if(back){back.addEventListener('click',function(){history.back();});}")
+                .append("})();</script></body></html>");
+        return sb.toString();
+    }
+
+    /**
+     * 向渲染结果注入"菜单未配置"引导条（无 {@code _preview_data.json} 或 menus 为空时）
+     *
+     * <p>导航区为空不是渲染故障，而是信息架构尚未确定：{@code AiTemplatePreviewMockSupport}
+     * 不再回退硬编码的默认栏目（那些栏目在模板里没有对应页面，只能全部挤到基础页上），
+     * 因此需要明确告诉用户"为什么导航是空的、下一步做什么"，而不是留一个空白区块让人困惑。</p>
+     */
+    private String injectMenuNotice(String html) {
+        int idx = html.toLowerCase(Locale.ROOT).lastIndexOf("</body>");
+        if (idx < 0) {
+            return html + menuNoticeHtml();
+        }
+        return html.substring(0, idx) + menuNoticeHtml() + html.substring(idx);
+    }
+
+    private String menuNoticeHtml() {
+        return "<div id=\"__ai_menu_notice__\">"
+                + "<span>当前模板还没有配置导航菜单，预览的导航区为空。菜单属于站点信息架构，"
+                + "需要由你确认，预览不会代为编造。</span>"
+                + "<button id=\"__ai_menu_plan__\">让 AI 规划导航菜单</button>"
+                + "<button id=\"__ai_menu_close__\" title=\"暂时隐藏\">×</button></div>"
+                + "<style>#__ai_menu_notice__{position:fixed;left:0;right:0;bottom:0;z-index:2147483647;"
+                + "display:flex;align-items:center;gap:12px;padding:10px 16px;color:#1f2937;background:#fff7e6;"
+                + "border-top:1px solid #f0d9a8;font:13px/1.6 -apple-system,'Microsoft YaHei','PingFang SC',sans-serif}"
+                + "#__ai_menu_notice__ span{flex:1}"
+                + "#__ai_menu_notice__ button{font:inherit;cursor:pointer;border-radius:8px;padding:6px 14px;"
+                + "border:1px solid #d1d5db;background:#fff;color:#374151}"
+                + "#__ai_menu_plan__{border-color:#2563eb;background:#2563eb;color:#fff}"
+                + "#__ai_menu_close__{padding:6px 10px}</style>"
+                + "<script>(function(){var bar=document.getElementById('__ai_menu_notice__');"
+                + "var plan=document.getElementById('__ai_menu_plan__');"
+                + "if(plan){plan.addEventListener('click',function(){"
+                + "try{window.parent.postMessage({type:'" + MSG_PLAN_MENU + "'},window.location.origin);}catch(e){}"
+                + "var s=bar.querySelector('span');if(s){s.textContent='已发送到 AI 对话，请留意右侧面板…';}});}"
+                + "var close=document.getElementById('__ai_menu_close__');"
+                + "if(close){close.addEventListener('click',function(){bar.remove();});}"
+                + "})();</script>";
+    }
+
+    /** 引导页/引导条向宿主预览面板回传消息的类型（前端 usePreviewIframeHooks 按此识别） */
+    private static final String MSG_MISSING_PAGE = "ai:missing-page";
+    private static final String MSG_PLAN_MENU = "ai:plan-menu";
+
+    /** HTML 文本转义（引导页文案取材于预览数据，属用户/AI 可写内容） */
+    private static String escapeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    /** 内联脚本字符串字面量转义（仅用于把中文文案拼进 JS 单引号串） */
+    private static String escapeJs(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("\\", "\\\\").replace("'", "\\'")
+                .replace("\r", "").replace("\n", "").replace("<", "\\u003c");
     }
 
 }

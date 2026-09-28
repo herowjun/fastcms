@@ -24,6 +24,7 @@
 		<jjwt.version>0.11.2</jjwt.version>
 		<maven-flatten-version>1.1.0</maven-flatten-version>
 		<maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
+		<surefire.skip>true</surefire.skip>
 		<spring-boot-dependencies.version>4.1.0</spring-boot-dependencies.version>
 		<spring-ai.version>2.0.1</spring-ai.version>
 		<docker.plugin.version>0.45.1</docker.plugin.version>
@@ -234,7 +235,8 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<version>3.2.5</version>
 				<configuration>
-					<skip>true</skip>
+					<!-- 默认跳过（保持原约定）；跑测试用 -Dmaven.test.skip=false 覆盖 -->
+					<skip>${surefire.skip}</skip>
 				</configuration>
 			</plugin>
 			<plugin>

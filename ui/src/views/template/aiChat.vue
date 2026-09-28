@@ -1262,10 +1262,16 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 		margin-top: 8px;
 		display: flex;
 		align-items: center;
+		// 生成中会多出一个「停止」按钮，右组变宽；此时整体换行（发送/停止 让到下一行），
+		// 而不是压缩左组——左组的「全量注入」是中文标签，可在任意字间断行，被压缩会 1 字 1 行变竖排
+		flex-wrap: wrap;
+		row-gap: 8px;
 
 		.chat-tools {
 			display: flex;
 			align-items: center;
+			// 窄容器下工具按钮整组换行，同样避免把标签挤成竖排文字
+			flex-wrap: wrap;
 			gap: 8px;
 		}
 
@@ -1274,12 +1280,16 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 			display: flex;
 			align-items: center;
 			gap: 4px;
+			flex-shrink: 0;
 			cursor: default;
 
 			.full-inject-label {
 				font-size: 12px;
 				color: #909399;
 				user-select: none;
+				// 中文可在任意字间断行：容器被压缩时「全量注入」会变成 1 字 1 行的竖排，
+				// 这里显式禁止折行，配合上面两组 flex-wrap 让空间不足时由按钮整组让位
+				white-space: nowrap;
 			}
 
 			&:has(.el-switch.is-checked) .full-inject-label {
@@ -1290,6 +1300,8 @@ const { renderReasoning, progressDoneCount, reasoningThinking } = useAiChatRende
 		// 工具按钮不存在时也保持发送按钮靠右
 		.chat-send {
 			margin-left: auto;
+			// 生成中/停止 不参与压缩：宁可整组换行，也不挤扁左侧标签
+			flex-shrink: 0;
 		}
 	}
 }

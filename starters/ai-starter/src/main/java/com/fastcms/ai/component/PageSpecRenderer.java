@@ -397,21 +397,22 @@ public class PageSpecRenderer {
     // ==================== 能力集成（custom-html section 物化） ====================
 
     /**
-     * custom-html section 物化产物文件名：cap__{sectionId}__{内容指纹}.ftl
+     * custom-html section 物化产物文件名：cap__{内容指纹}.ftl
      *
      * <p>每个 custom-html section 的内容互不相同（snippet 参数 / 手写 HTML），
      * 不能像普通组件那样按（组件, 变体）共享源码；指纹取自物化输入
-     * （snippetId + snippetParams + data.html），内容相同的 section 自动去重复用同一文件，
-     * 内容不同的 section 即使 id 撞名也不会互相覆盖（渲染期引用与落盘共用本方法，天然一致）。</p>
+     * （snippetId + snippetParams + data.html），**文件名只含内容指纹、不含 sectionId**——
+     * 不同页面内容相同的 section（典型如各页的 nav/footer custom 块）因此共享同一文件，
+     * 实现真正的"内容相同即去重"。id 若拼入文件名会把去重粒度从"内容"退化为
+     * "内容+id"，多页站会产出大量内容一模一样的冗余文件（8 页站 nav/footer 可达 16 份）。
+     * sectionId 差异由引用处的 {@code _aiSection} assign 注入承载（渲染期解析），
+     * 源码共享不受影响；id 撞名也不再可能互相覆盖（同名必同内容）。</p>
      */
     String customHtmlFileName(SectionSpec section) {
-        String rawId = section.id();
-        String safeId = (rawId == null || rawId.isBlank()) ? "sec"
-                : rawId.replaceAll("[^a-zA-Z0-9_-]", "-");
         String inputs = "snippet=" + section.snippetId()
                 + "|params=" + section.safeSnippetParams()
                 + "|html=" + section.safeData().get("html");
-        return "cap__" + safeId + "__" + shortHash(inputs) + ".ftl";
+        return "cap__" + shortHash(inputs) + ".ftl";
     }
 
     /**
@@ -710,7 +711,13 @@ public class PageSpecRenderer {
      */
     private String renderSection(SectionSpec section) {
         StringBuilder sb = new StringBuilder();
-        sb.append("<#assign comp = ").append(toFtlLiteral(adaptMediaRefs(section))).append(">\n");
+        // custom-html section 不做 comp assign：其内容物化为 cap__*.ftl 原文（保留 <@tag>/<#指令>/${插值}，
+        // include 时真正执行）。若把含 FTL 语法的 HTML 烤进 <#assign comp = {"html": "..."}> 字符串字面量，
+        // FreeMarker 会在赋值时对字面量里的 ${...} 插值求值——赋值处 item 等循环变量未定义，直接 InvalidReferenceException。
+        // 且 cap 物化产物/snippet 展开均不引用 comp（参数在物化期已完成文本替换），该 assign 本就是冗余的。
+        if (!section.isCustomHtml()) {
+            sb.append("<#assign comp = ").append(toFtlLiteral(adaptMediaRefs(section))).append(">\n");
+        }
         sb.append("<#assign _aiSection = ").append(toFtlLiteral(section.id())).append(">\n");
         // custom-html section 引用物化专属文件（见 writeComponentFile），普通组件引用共享源码
         String fileName = section.isCustomHtml() ? customHtmlFileName(section) : componentFileName(section);
@@ -1262,7 +1269,7 @@ public class PageSpecRenderer {
             return expr.expression();
         }
         if (value instanceof String s) {
-            return "\"" + escapeFtl(s) + "\"";
+            return stringLiteral(s);
         }
         if (value instanceof Number || value instanceof Boolean) {
             return value.toString();
@@ -1300,6 +1307,52 @@ public class PageSpecRenderer {
                 .replace("\"", "\\\"")
                 .replace("\n", " ")
                 .replace("\r", " ");
+    }
+
+    /**
+     * 字符串值 → FTL 字面量（插值安全）
+     *
+     * <p>FreeMarker 对普通字符串字面量里的 {@code ${...}} / {@code #{...}} 会在赋值时做插值求值
+     * （实测 2.3.34；{@code \${} 不是合法转义）。若值里出现插值语法（如 AI 在槽位值中写了 FTL），
+     * 求值会因循环变量未定义而抛 InvalidReferenceException。因此：</p>
+     * <ul>
+     *     <li>无插值语法 → 普通转义字面量（原行为）</li>
+     *     <li>含 {@code ${} / {@code #{} 且无 {@code "} → 原始字符串 {@code r"..."}（不转义、不插值）</li>
+     *     <li>含插值语法又含 {@code "} → 分段拼接字面量，把 {@code ${} / {@code #{} 拆进独立小片段，
+     *         拼接结果仍输出原文且不触发求值</li>
+     * </ul>
+     */
+    static String stringLiteral(String s) {
+        String flat = s.replace("\n", " ").replace("\r", " ");
+        if (!flat.contains("${") && !flat.contains("#{")) {
+            return "\"" + escapeFtl(s) + "\"";
+        }
+        if (!flat.contains("\"")) {
+            return "r\"" + flat + "\"";
+        }
+        // 罕见组合（插值 + 双引号）：分段拼接，如 "a$" + "{" + "b"
+        StringBuilder out = new StringBuilder();
+        StringBuilder chunk = new StringBuilder();
+        for (int i = 0; i < flat.length(); i++) {
+            char c = flat.charAt(i);
+            if ((c == '$' || c == '#') && i + 1 < flat.length() && flat.charAt(i + 1) == '{') {
+                if (chunk.length() > 0) {
+                    if (out.length() > 0) {
+                        out.append(" + ");
+                    }
+                    out.append('\"').append(escapeFtl(chunk.toString())).append('\"');
+                    chunk.setLength(0);
+                }
+                out.append(out.length() > 0 ? " + " : "").append('"').append(c).append('"').append(" + \"{\"");
+                i++;
+            } else {
+                chunk.append(c);
+            }
+        }
+        if (chunk.length() > 0) {
+            out.append(out.length() > 0 ? " + " : "").append('\"').append(escapeFtl(chunk.toString())).append('\"');
+        }
+        return out.length() > 0 ? out.toString() : "\"\"";
     }
 
     /**
@@ -1388,6 +1441,22 @@ public class PageSpecRenderer {
             .article-related__thumb img { display: block; aspect-ratio: 16/9; object-fit: cover; width: 100%; }
             .article-related__name { color: #0f172a; font-size: .875rem; font-weight: 600; line-height: 1.5; }
             .article-related__time { color: #94a3b8; font-size: .75rem; }
+
+            /* menuTag 动态菜单兜底（菜单化 nav 物化产物，设计稿 inline CSS 无这些类）：
+               .submenu 二级菜单桌面 hover 下拉、移动端静态展开；.active 前缀匹配高亮 */
+            .submenu { display: none; list-style: none; margin: 0; padding: .375rem 0; }
+            li.active > .submenu { display: block; }
+            .site-nav li:hover > .submenu, .nav-links li:hover > .submenu { display: block; }
+            @media (min-width: 48rem) {
+                li[class] > .submenu { position: absolute; background: #fff; border-radius: .5rem;
+                    box-shadow: 0 10px 25px -5px rgb(0 0 0 / .15); min-width: 10rem; z-index: 60; }
+                .submenu a { color: #334155; display: block; font-size: .875rem;
+                    padding: .5rem 1rem; text-decoration: none; }
+                .submenu a:hover { background: #f1f5f9; }
+                .submenu li.active > a { color: var(--color-primary-600, #2563eb); font-weight: 600; }
+            }
+            a.active { color: var(--color-primary-600, #2563eb); }
+            li.active > a { color: var(--color-primary-600, #2563eb); font-weight: 600; }
             """;
 
 }

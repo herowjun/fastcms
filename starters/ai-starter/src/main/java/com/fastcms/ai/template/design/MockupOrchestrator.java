@@ -18,15 +18,20 @@ package com.fastcms.ai.template.design;
 
 import com.fastcms.ai.autoconfigure.FastcmsAiProperties;
 import com.fastcms.ai.component.DesignDirectionLibrary;
+import com.fastcms.ai.component.PageSpec;
 import com.fastcms.ai.service.IAiTemplateMessageService;
 import com.fastcms.ai.template.AiTemplateConstants;
 import com.fastcms.ai.template.compliance.TemplateComplianceChecker;
 import com.fastcms.entity.AiTemplateSession;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -91,6 +96,14 @@ public class MockupOrchestrator {
 
     // ==================== 状态与动作常量（plan.json / confirm_request 协议字段） ====================
 
+    /**
+     * 站点结构分析：AI 读上传首页推导整站信息架构（栏目清单 + 页型 + 首页数据区文案）。
+     *
+     * <p>单文件导入会话（{@code createMode=import} 且上传物只有一个 HTML）的入口态——
+     * 上传物通常只有首页，其余页面靠这一步推导出来，之后才进 DESIGNING 逐页设计。
+     * 多页 zip 导入不经过此态（页面来自文件名推导，直接 CONVERTING）。</p>
+     */
+    public static final String STATE_ANALYZING = "ANALYZING";
     public static final String STATE_DESIGNING = "DESIGNING";
     public static final String STATE_AUDITING = "AUDITING";
     public static final String STATE_AWAITING_CONFIRM = "AWAITING_CONFIRM";
@@ -114,17 +127,20 @@ public class MockupOrchestrator {
     private final FastcmsAiProperties aiProperties;
     private final com.fastcms.ai.template.htmlimport.ImportService importService;
     private final TemplateComplianceChecker complianceChecker;
+    private final SiteAnalyzer siteAnalyzer;
 
     public MockupOrchestrator(MockupDesignService designService, MockupConverter converter,
                               IAiTemplateMessageService messageService, FastcmsAiProperties aiProperties,
                               com.fastcms.ai.template.htmlimport.ImportService importService,
-                              TemplateComplianceChecker complianceChecker) {
+                              TemplateComplianceChecker complianceChecker,
+                              SiteAnalyzer siteAnalyzer) {
         this.designService = designService;
         this.converter = converter;
         this.messageService = messageService;
         this.aiProperties = aiProperties;
         this.importService = importService;
         this.complianceChecker = complianceChecker;
+        this.siteAnalyzer = siteAnalyzer;
     }
 
     // ==================== plan.json 模型 ====================
@@ -313,16 +329,18 @@ public class MockupOrchestrator {
         }
         persistPlan(workDir, plan);
 
-        // 5. 状态机主循环（DESIGNING → AUDITING →（修正/确认/转化）…）；
-        // 导入会话的页面来自 plan.json（ingest 推导，pageKey 自包含，不依赖 requirement 规划）
-        List<DesignPagePlanner.PagePlan> allPages = importMode
-                ? importPagePlans(plan) : DesignPagePlanner.plan(session.getRequirement());
+        // 5. 状态机主循环（ANALYZING → DESIGNING → AUDITING →（修正/确认/转化）…）；
+        // 导入会话的页面来自 plan.json（ingest + 站点分析推导，pageKey 自包含，不依赖 requirement 规划）。
+        // allPages 每轮重算：ANALYZING 会向 pages 追加栏目页，用循环外快照会让本轮新增页进不了设计
         try {
             while (true) {
                 if (sse.isCancelled()) {
                     throw new DesignCancelledException();
                 }
+                List<DesignPagePlanner.PagePlan> allPages = importMode
+                        ? importPagePlans(workDir, plan) : DesignPagePlanner.plan(session.getRequirement());
                 switch (plan.state()) {
+                    case STATE_ANALYZING -> plan = runAnalyzing(session, workDir, plan, sse);
                     case STATE_DESIGNING -> plan = runDesigning(session, workDir, plan, allPages, sse);
                     case STATE_AUDITING -> {
                         plan = runAuditing(session, workDir, plan, allPages, sse);
@@ -349,6 +367,234 @@ public class MockupOrchestrator {
     }
 
     // ==================== 状态处理 ====================
+
+    /**
+     * ANALYZING：AI 读上传首页推导整站信息架构 → 追加栏目页设计任务 + 首页数据区插桩
+     *
+     * <p>上传物通常只有一个首页，其余页面（各栏目页）靠这一步从 HTML 里推出来：模型按契约
+     * 输出栏目清单与页型，本方法据此向 {@code plan.pages} 追加待设计页（列表型栏目复用全站
+     * 唯一的 {@code article_list} 模板，不追加页），并把 IA 落盘 {@code design/site-ia.json}
+     * 供转化段生成 CMS 菜单。</p>
+     *
+     * <p><b>失败不阻断</b>：模型未配/超时/输出不可解析时播报原因，退回"仅标准页"
+     * （首页 + 文章列表 / 文章详情 / 单页）继续设计——整站的基本可用性不依赖本步。</p>
+     *
+     * @return 推进后的计划（状态已置 DESIGNING 并落盘）
+     */
+    private DesignPlan runAnalyzing(AiTemplateSession session, Path workDir, DesignPlan plan,
+                                    DesignSseSink sse) {
+        Path designDir = workDir.resolve("design");
+        Path iaFile = designDir.resolve("site-ia.json");
+        // 幂等：已分析过（FAILED 续传重入）沿用既有 IA，不重复消耗模型调用
+        if (Files.exists(iaFile)) {
+            return plan.withState(STATE_DESIGNING);
+        }
+        sse.send(AiTemplateConstants.SSE_EVENT_STATUS, "正在梳理上传站点结构（提取顶部导航栏目）…");
+
+        Set<String> reserved = new LinkedHashSet<>();
+        for (PageState p : plan.pages()) {
+            reserved.add(p.name());
+        }
+        // 首页设计稿未必叫 index.html（导入保真场景为 design/<上传文件名>.html，如 fastcms-landing.html），
+        // 一律按 plan 里 pageKey=index 的实际路径读——硬拼 index.html 会把 null 喂给模型直接触发降级
+        String homeRel = homeHtmlPath(plan);
+        SiteAnalyzer.AnalysisResult result = siteAnalyzer.analyze(session,
+                readWorkFile(workDir, homeRel), sourceNameOf(designDir), reserved, sse);
+
+        if (!result.available()) {
+            sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "\n⚠ 站点结构梳理未完成：" + result.degradedReason()
+                            + "。本次按标准页继续（首页 + 文章列表 / 文章详情 / 单页），"
+                            + "栏目页可在对话中补充说明后重试。\n");
+            return plan.withState(STATE_DESIGNING)
+                    .appendHistory("SITE_IA_FAILED: " + result.degradedReason());
+        }
+
+        SiteIa siteIa = result.siteIa();
+        List<PageState> pages = new ArrayList<>(plan.pages());
+        Set<String> existingNames = new LinkedHashSet<>();
+        for (PageState p : pages) {
+            existingNames.add(p.name());
+        }
+        List<String> addedTitles = new ArrayList<>();
+        for (SiteIa.SitePage sp : siteIa.templatePages()) {
+            if (!existingNames.add(sp.slug())) {
+                continue;
+            }
+            pages.add(new PageState(sp.slug(), sp.title(), "design/" + sp.slug() + ".html",
+                    PAGE_PENDING, PageSpec.suffixedPageKey(PageSpec.PAGE_PAGE, sp.slug())));
+            addedTitles.add(sp.title());
+        }
+        boolean homeSection = injectHomeDataSectionAt(workDir.resolve(homeRel), siteIa);
+        try {
+            Files.writeString(iaFile, siteIa.toJson(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.warn("站点 IA 落盘失败（转化段将退回内置菜单口径）: {}", e.getMessage());
+        }
+
+        StringBuilder note = new StringBuilder("\n站点结构梳理完成");
+        if (StringUtils.hasText(siteIa.siteName())) {
+            note.append("（").append(siteIa.siteName()).append("）");
+        }
+        note.append("：导航栏目 ").append(siteIa.menuItems().size()).append(" 个");
+        if (addedTitles.isEmpty()) {
+            note.append("，均为文章流栏目（复用文章列表模板），无需额外页面设计");
+        } else {
+            note.append("，其中 ").append(addedTitles.size())
+                    .append(" 个静态栏目将各出一份页面设计：").append(String.join("、", addedTitles));
+        }
+        if (homeSection) {
+            note.append("；首页已插入 CMS 数据区「").append(siteIa.safeHomeSectionHeading()).append("」");
+        }
+        note.append('\n');
+        sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE, note.toString());
+
+        return plan.withPages(List.copyOf(pages))
+                .appendHistory("SITE_IA: " + siteIa.menuItems().size() + " 栏目 / +"
+                        + addedTitles.size() + " 栏目页")
+                .withState(STATE_DESIGNING);
+    }
+
+    /**
+     * 首页 CMS 数据区插桩（确定性，不调模型）
+     *
+     * <p>上传的首页是保真搬运的静态 HTML，后台发文不会出现在首页。此处按 AI 给出的文案，
+     * 在页脚前插入一个 {@code data-block="article-list"} 数据区——转化段的语义映射会把它接成
+     * {@code tw:article-list} 组件（{@code <@articleListTag>} 驱动），后台内容随即可见。
+     * <b>只插入不重写</b>：首页原有视觉与内容逐字节保留。</p>
+     *
+     * @return 数据区是否已就位（含幂等命中：已有插桩直接返回 true）
+     */
+    static boolean injectHomeDataSection(Path designDir, SiteIa siteIa) {
+        return injectHomeDataSectionAt(designDir.resolve("index.html"), siteIa);
+    }
+
+    /**
+     * 首页 CMS 数据区插桩（指定首页设计稿文件绝对路径）
+     *
+     * <p>与 {@link #injectHomeDataSection(Path, SiteIa)} 同逻辑，区别只在首页文件由调用方
+     * 按 pageKey=index 的实际路径给出——导入保真场景首页是 {@code design/<上传文件名>.html}，
+     * 不是 {@code design/index.html}。</p>
+     */
+    static boolean injectHomeDataSectionAt(Path indexFile, SiteIa siteIa) {
+        if (!Files.exists(indexFile)) {
+            return false;
+        }
+        try {
+            Document doc = Jsoup.parse(Files.readString(indexFile, StandardCharsets.UTF_8));
+            if (doc.selectFirst("section[data-fastcms-home-data]") != null) {
+                return true;
+            }
+            StringBuilder section = new StringBuilder();
+            section.append("<section class=\"fastcms-home-articles\" data-fastcms-home-data=\"1\"")
+                    .append(" data-block=\"article-list\">\n")
+                    .append("  <div class=\"container\">\n")
+                    .append("    <h2 class=\"fastcms-home-articles__title\">")
+                    .append(escapeHtml(siteIa.safeHomeSectionHeading())).append("</h2>\n");
+            if (StringUtils.hasText(siteIa.homeSectionIntro())) {
+                section.append("    <p class=\"fastcms-home-articles__intro\">")
+                        .append(escapeHtml(siteIa.homeSectionIntro())).append("</p>\n");
+            }
+            section.append("  </div>\n</section>");
+            Element footer = doc.selectFirst("body > footer");
+            if (footer == null) {
+                footer = doc.selectFirst("footer");
+            }
+            if (footer != null) {
+                // footer 被 section[data-block=footer] 等包装器裹住时，插到最外层 footer 包装器之前——
+                // 否则数据区会被 pickFooterSection 归入 footer 区块（footer 区块不走语义映射，退化成静态 HTML）
+                Element target = footer;
+                while (target.parent() != null && target.parent() != doc.body()) {
+                    Element parent = target.parent();
+                    boolean footerWrapper = "section".equals(parent.tagName())
+                            && ("footer".equals(parent.id())
+                                || parent.attr("data-block").toLowerCase(Locale.ROOT).contains("footer"));
+                    if (footerWrapper) {
+                        target = parent;
+                    } else {
+                        break;
+                    }
+                }
+                target.before(section.toString());
+            } else {
+                doc.body().append(section.toString());
+            }
+            Files.writeString(indexFile, doc.outerHtml(), StandardCharsets.UTF_8);
+            return true;
+        } catch (Exception e) {
+            log.warn("首页数据区插桩失败（首页保持纯保真，不影响其他页面）: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 首页设计稿相对 workDir 的路径（{@code design/<文件名>.html}）
+     *
+     * <p>取 plan 中 pageKey=index 页面的实际路径；plan 缺失时兜底 {@code design/index.html}
+     * （与 {@link #designPreviewUrl} 同口径，禁止各处硬拼 index.html）。</p>
+     */
+    static String homeHtmlPath(DesignPlan plan) {
+        if (plan != null && plan.pages() != null) {
+            String entry = plan.pages().stream()
+                    .filter(p -> "index".equals(p.pageKey()))
+                    .map(PageState::html)
+                    .filter(h -> h != null && !h.isBlank())
+                    .findFirst().orElse(null);
+            if (entry != null) {
+                return entry;
+            }
+        }
+        return "design/index.html";
+    }
+
+    /** 读 workDir 下的相对路径文件（缺失/读取失败返回 null，不抛） */
+    private static String readWorkFile(Path workDir, String relativePath) {
+        Path file = workDir.resolve(relativePath);
+        if (!Files.exists(file)) {
+            return null;
+        }
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** 读 design 目录下的文件（缺失/读取失败返回 null，不抛） */
+    private static String readDesignFile(Path designDir, String fileName) {
+        Path file = designDir.resolve(fileName);
+        if (!Files.exists(file)) {
+            return null;
+        }
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** 上传源名（import-meta.json；缺失返回 null，提示词侧按"未命名"处理） */
+    private static String sourceNameOf(Path designDir) {
+        String raw = readDesignFile(designDir, "import-meta.json");
+        if (raw == null) {
+            return null;
+        }
+        try {
+            JsonNode node = JSON_MAPPER.readTree(raw).get("sourceName");
+            return node != null && node.isTextual() ? node.asString() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 数据区文案转义（AI 文案进 HTML 前必须转义，避免引号/尖括号破坏结构） */
+    private static String escapeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\"", "&quot;");
+    }
 
     /**
      * DESIGNING：设计未完成页（done 页跳过 = 断点续传；placeholder 页重试 = 降级页有机会翻盘）
@@ -402,9 +648,32 @@ public class MockupOrchestrator {
             }
         }
         // 导入保真页豁免审计：其契约合规由 ingest 归一化保证，
-        // A2/A4 等 AI 设计稿规则对保真页是误判——曾把导入首页判不合格重置重设计，毁掉导入内容
+        // A2/A4 等 AI 设计稿规则对保真页是误判——曾把导入首页判不合格重置重设计，毁掉导入内容。
+        // 导入会话另以保真首页为锚点：A2 继承调色板 + A4 基准签名（子页继承原站视觉是预期）
+        Set<String> imported = importedPages(plan);
+        Path importAnchor = null;
+        if (imported != null && !imported.isEmpty()) {
+            importAnchor = allPages.stream()
+                    .map(DesignPagePlanner.PagePlan::name)
+                    .filter(imported::contains)
+                    .findFirst()
+                    .map(name -> workDir.resolve("design").resolve(name + ".html"))
+                    .orElse(null);
+        }
         List<MockupAuditor.AuditIssue> issues = MockupAuditor.audit(
-                workDir, allPages, placeholders, importedPages(plan), isMobileAdaptive(session));
+                workDir, allPages, placeholders, imported, isMobileAdaptive(session), importAnchor);
+
+        // A4 确定性移植（导入会话）：子页 nav/footer 与保真首页签名不一致时，直接把首页的
+        // nav/footer 标记替换进子页（纯代码零模型调用）再复审。AI 整页重画凑签名实测
+        // 修正轮永不收敛（签名是结构级逐项比对，重画必漂移），每轮白烧一整波并行设计
+        // （e2e 实证 2 轮修正 ~26min 后轮次耗尽软放行——移植后 A4 直接清零）。
+        if (imported != null && !imported.isEmpty() && importAnchor != null
+                && issues.stream().anyMatch(i -> "A4".equals(i.code()))) {
+            if (transplantAnchorNavFooter(session, workDir, importAnchor, issues, sse)) {
+                issues = MockupAuditor.audit(
+                        workDir, allPages, placeholders, imported, isMobileAdaptive(session), importAnchor);
+            }
+        }
 
         if (issues.isEmpty()) {
             plan = plan.withPendingIssues(List.of()).appendHistory("AUDIT_PASS");
@@ -469,6 +738,92 @@ public class MockupOrchestrator {
         persistPlan(workDir, plan);
         enterAwaitingConfirm(session, plan, instructions, sse);
         return null;
+    }
+
+    /**
+     * A4 确定性移植（导入会话专用）：把保真首页的 nav/footer 标记原样替换进 A4 问题子页
+     *
+     * <p>替换后子页 nav/footer 与首页<b>逐字节同构</b>，A4 复审必然通过；首页是 ingest
+     * 保真原稿，其 nav/footer 就是用户上传站的原始结构——子页与其一致正是"整站一致"的
+     * 语义（转化段 import 模式本就会把 nav/footer 强制保真 + 注入上传站 CSS，此移植与
+     * 下游行为同向）。</p>
+     *
+     * <p>设计稿预览侧子页 nav 可能暂时无样式（子页自有 style 不含首页 nav 的类名）——
+     * 中间产物外观瑕疵，最终模板由布局注入的上传站 CSS 统一渲染，一致性反而更强。</p>
+     *
+     * @param importAnchor 保真首页设计稿绝对路径
+     * @param issues       本轮审计问题（取 A4 项的问题页名单）
+     * @return 是否有文件被修改（调用方据此复审）
+     */
+    private boolean transplantAnchorNavFooter(AiTemplateSession session, Path workDir, Path importAnchor,
+                                              List<MockupAuditor.AuditIssue> issues, DesignSseSink sse) {
+        Set<String> targetPages = new LinkedHashSet<>();
+        for (MockupAuditor.AuditIssue issue : issues) {
+            if (!"A4".equals(issue.code())) {
+                continue;
+            }
+            for (String name : issue.page().split("、")) {
+                if (StringUtils.hasText(name)) {
+                    targetPages.add(name.trim());
+                }
+            }
+        }
+        String anchorName = importAnchor.getFileName().toString().replaceFirst("\\.html$", "");
+        targetPages.remove(anchorName);
+        if (targetPages.isEmpty()) {
+            return false;
+        }
+        try {
+            Document anchorDoc = Jsoup.parse(Files.readString(importAnchor, StandardCharsets.UTF_8));
+            Element anchorNav = anchorDoc.selectFirst("nav");
+            Element anchorFooter = anchorDoc.selectFirst("#footer, footer");
+            if (anchorNav == null && anchorFooter == null) {
+                return false;
+            }
+            List<String> patched = new ArrayList<>();
+            for (String pageName : targetPages) {
+                Path pageFile = workDir.resolve("design").resolve(pageName + ".html");
+                if (!Files.exists(pageFile)) {
+                    continue;
+                }
+                Document doc = Jsoup.parse(Files.readString(pageFile, StandardCharsets.UTF_8));
+                boolean changed = false;
+                if (anchorNav != null) {
+                    Element nav = doc.selectFirst("nav");
+                    if (nav != null) {
+                        nav.before(anchorNav.outerHtml());
+                        nav.remove();
+                    } else {
+                        doc.body().prepend(anchorNav.outerHtml());
+                    }
+                    changed = true;
+                }
+                if (anchorFooter != null) {
+                    Element footer = doc.selectFirst("#footer, footer");
+                    if (footer != null) {
+                        footer.before(anchorFooter.outerHtml());
+                        footer.remove();
+                    } else {
+                        doc.body().append(anchorFooter.outerHtml());
+                    }
+                    changed = true;
+                }
+                if (changed) {
+                    Files.writeString(pageFile, doc.outerHtml(), StandardCharsets.UTF_8);
+                    importService.registerFile(session, workDir, sse, "design/" + pageName + ".html");
+                    patched.add(pageName);
+                }
+            }
+            if (patched.isEmpty()) {
+                return false;
+            }
+            sse.send(AiTemplateConstants.SSE_EVENT_MESSAGE,
+                    "已将 " + patched.size() + " 个子页的导航/页脚统一为导入首页结构（确定性移植，无需重画）");
+            return true;
+        } catch (Exception e) {
+            log.warn("A4 确定性移植失败（回退 AI 修正轮路径）: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -649,17 +1004,7 @@ public class MockupOrchestrator {
      * fastcms-landing 页 name=fastcms-landing、pageKey=index），硬拼 index.html 会 404。</p>
      */
     private static String designPreviewUrl(AiTemplateSession session, DesignPlan plan) {
-        String entry = null;
-        if (plan != null && plan.pages() != null) {
-            entry = plan.pages().stream()
-                    .filter(p -> "index".equals(p.pageKey()))
-                    .map(PageState::html)
-                    .filter(h -> h != null && !h.isBlank())
-                    .findFirst().orElse(null);
-        }
-        if (entry == null) {
-            entry = "design/index.html";
-        }
+        String entry = homeHtmlPath(plan);
         return "/ai/template/preview/" + session.getSessionId() + "/"
                 + session.getTemplateName() + "/" + entry;
     }
@@ -796,10 +1141,45 @@ public class MockupOrchestrator {
      * 导入会话页面规划：从 plan.json pages 恢复（ingest 由 PageKeyResolver 推导 pageKey，
      * plan.json 自包含；description 无对应来源，传 null 供转化段只作切分/装配依据）
      */
-    private static List<DesignPagePlanner.PagePlan> importPagePlans(DesignPlan plan) {
+    /**
+     * 导入会话页面规划：{@code plan.pages()} 快照 + 站点结构梳理的栏目内容定位
+     *
+     * <p>页名/标题/页 key 来自 plan.json（ingest 归一化 + ANALYZING 站点推导）；description
+     * 额外取自 {@code design/site-ia.json}（AI 为每个栏目写的"这一页该呈现什么"）——该字段会
+     * 拼进设计提示词，栏目页才不是照首页套壳，而是按栏目语义出内容。缺失（多页 zip 导入 /
+     * 站点分析降级）时为 null，与旧行为一致。</p>
+     */
+    private static List<DesignPagePlanner.PagePlan> importPagePlans(Path workDir, DesignPlan plan) {
+        Map<String, String> descriptions = siteIaDescriptions(workDir);
         return plan.pages().stream()
-                .map(p -> new DesignPagePlanner.PagePlan(p.name(), p.title(), null, p.pageKey()))
+                .map(p -> new DesignPagePlanner.PagePlan(p.name(), p.title(),
+                        descriptions.get(p.name()), p.pageKey()))
                 .toList();
+    }
+
+    /** site-ia.json 的「设计页名 → 内容定位」映射（缺文件/解析失败返回空表，不抛） */
+    static Map<String, String> siteIaDescriptions(Path workDir) {
+        String raw = readDesignFile(workDir.resolve("design"), "site-ia.json");
+        if (raw == null) {
+            return Map.of();
+        }
+        try {
+            JsonNode pagesNode = JSON_MAPPER.readTree(raw).get("pages");
+            if (pagesNode == null || !pagesNode.isArray()) {
+                return Map.of();
+            }
+            Map<String, String> map = new LinkedHashMap<>();
+            for (JsonNode item : pagesNode) {
+                JsonNode slug = item.get("slug");
+                JsonNode desc = item.get("description");
+                if (slug != null && slug.isTextual() && desc != null && desc.isTextual()) {
+                    map.put(slug.asString(), desc.asString());
+                }
+            }
+            return map;
+        } catch (Exception e) {
+            return Map.of();
+        }
     }
 
     /** 移动端适配（与会话口径一致：null 视为 true） */

@@ -89,6 +89,20 @@ public class AiTemplatePreviewRenderer {
     }
 
     /**
+     * 菜单是否已配置
+     *
+     * <p>未配置时预览导航区为空（{@code AiTemplatePreviewMockSupport} 不再回退硬编码默认栏目），
+     * 预览控制器据此向渲染结果注入"让 AI 规划导航菜单"引导条——无菜单本身是需要用户决策的
+     * 信息架构状态，不应由预览层静默编造。</p>
+     *
+     * @param workDir 模板根目录
+     */
+    public boolean hasMenuConfig(Path workDir) {
+        return AiTemplatePreviewMockSupport.hasMenuConfig(
+                AiTemplatePreviewMockSupport.loadPreviewDataConfig(workDir));
+    }
+
+    /**
      * 渲染校验：对给定模板文件逐个走完整渲染管线，返回失败文件的错误清单
      *
      * <p>调整型会话 AI 写盘后调用，把错误反馈给模型自动修复。

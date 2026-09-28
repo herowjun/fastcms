@@ -96,11 +96,19 @@
                 <div ref="tabPanesRef" class="tab-panes">
                     <!-- 手动编辑视图：内联预览 | 代码编辑（可收起）两列（文件树已上提左侧面板） -->
                     <div v-show="currentView === 'edit'" class="edit-columns">
-                        <div class="edit-col-preview">
-                            <!-- 内联预览（中列）：预览已保存内容，保存成功后自动刷新 -->
-                            <TemplatePreviewPanel v-model:entry="manualPreview.entry"
+                        <div class="edit-col-preview" :class="{ collapsed: previewCollapsed }">
+                            <!-- 收起态竖条（与代码列/左列收起交互同构）：展开按钮 + 竖排「预览」标签 -->
+                            <div v-if="previewCollapsed" class="preview-side-bar">
+                                <el-button size="small" text title="展开预览" @click="previewCollapsed = false">
+                                    <el-icon :size="14"><ele-DArrowRight /></el-icon>
+                                </el-button>
+                                <span class="collapsed-label">预览</span>
+                            </div>
+                            <!-- 内联预览（中列）：预览已保存内容，保存成功后自动刷新（v-show 保活 iframe） -->
+                            <TemplatePreviewPanel ref="manualPreviewRef" v-show="!previewCollapsed" v-model:entry="manualPreview.entry"
                                                   :page-options="manualPreviewOptions" :url="manualPreviewUrl"
                                                   :empty-tip="manualPreviewTip" v-model:viewport="manualViewport"
+                                                  collapsible @collapse="previewCollapsed = true"
                                                   @refresh="refreshManualPreview" />
                         </div>
                         <div class="edit-col-mid" :class="{ collapsed: midCollapsed, 'editor-fullscreen': editorFullscreen }">
@@ -209,6 +217,8 @@ const aiApi = AiTemplateApi();
 const currentView = ref<'edit' | 'ai'>('ai');
 // 代码编辑列收起状态（收起后预览列吃满剩余空间）
 const midCollapsed = ref(false);
+// 预览列收起状态（收起后代码列吃满剩余空间；与代码列收起交互同构）
+const previewCollapsed = ref(false);
 // 左列收起态：对象卡片与文件树整体收为 38px 竖条（与代码列收起交互同构），展开恢复 280px
 const panelCollapsed = ref(false);
 /**
@@ -299,6 +309,45 @@ const { preview: manualPreview, previewPageOptions: manualPreviewOptions, aiPrev
     getTreeNodes: () => (currentObject.value.kind === 'session' ? tree.sessionData : tree.data) as any[],
     getSessionTreeNodes: () => tree.sessionData as any[]
 });
+
+/** 手动编辑 tab 的预览面板 ref（缺口引导需按 iframe 来源校验消息，见 onManualPreviewMessage） */
+const manualPreviewRef = ref();
+
+/** 切到 AI tab 并等一帧后执行（两 tab 同容器 v-show 保活，切过去工作台即可用） */
+const switchToAiForGuide = (run: () => void) => {
+    currentView.value = 'ai';
+    nextTick(run);
+};
+
+/**
+ * 手动编辑 tab 预览的缺口引导消息处理
+ *
+ * 该 tab 没有 AI 对话面板：收到引导动作后切到 AI tab，再把动作转交工作台执行——
+ * 「生成页面」走标准 chat 流，AI 的思考与生成过程在对话面板可见。
+ * 「删除条目」作用域固定 template：本 tab 预览的就是正式模板目录（不是会话工作目录）。
+ */
+const onManualPreviewMessage = (e: MessageEvent) => {
+    const frame = manualPreviewRef.value?.frameEl?.();
+    if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return;
+    const data = e.data as any;
+    if (!data || typeof data.type !== 'string') return;
+    if (data.type === 'ai:plan-menu') {
+        switchToAiForGuide(() => aiWorkbenchRef.value?.requestPlanMenu?.());
+        return;
+    }
+    if (data.type !== 'ai:missing-page') return;
+    const payload = {
+        ref: String(data.ref || ''),
+        name: String(data.name || ''),
+        expectedFile: String(data.expectedFile || ''),
+        kindLabel: String(data.kindLabel || '栏目')
+    };
+    if (data.action === 'remove') {
+        aiWorkbenchRef.value?.requestRemovePreviewItem?.(payload, 'template');
+        return;
+    }
+    switchToAiForGuide(() => aiWorkbenchRef.value?.requestGenerateMissingPage?.(payload));
+};
 
 /**
  * 上传目标地址（按当前工作对象分流）：
@@ -1012,6 +1061,8 @@ onMounted(() => {
     }
     window.addEventListener('resize', updateEditorHeight);
     window.addEventListener('beforeunload', onBeforeUnload);
+    // 手动编辑 tab 预览的缺口引导消息桥（缺页面引导页 / 菜单未配置引导条）
+    window.addEventListener('message', onManualPreviewMessage);
     // Ctrl/Cmd + S 快捷保存
     window.addEventListener('keydown', onSaveShortcut);
     // 窄屏默认收起代码编辑列（预览占主屏，与 AI 工作台对话列同一交互）
@@ -1095,6 +1146,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('keydown', onSaveShortcut);
     window.removeEventListener('resize', updateEditorHeight);
+    window.removeEventListener('message', onManualPreviewMessage);
     if (narrowMq?.addEventListener) narrowMq.removeEventListener('change', onNarrowMqChange);
     if (editorHeightObserver) {
         editorHeightObserver.disconnect();
@@ -1439,6 +1491,52 @@ onActivated(() => {
     flex: 1 1 0;
     min-width: 260px;
     min-height: 0;
+
+    // 收起态竖条：展开按钮 + 竖排「预览」标签（与代码列收起交互同构）
+    .preview-side-bar {
+        display: none;
+    }
+
+    &.collapsed {
+        flex: 0 0 38px;
+        min-width: 0;
+        max-width: 38px;
+
+        .preview-side-bar {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            padding: 10px 0 12px;
+            gap: 12px;
+            border: 1px solid var(--el-border-color-lighter);
+            border-radius: 6px;
+            background: var(--el-bg-color);
+
+            .el-button {
+                width: 100%;
+                padding: 4px 0;
+            }
+
+            .collapsed-label {
+                writing-mode: vertical-rl;
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--el-color-primary);
+                letter-spacing: 3px;
+            }
+        }
+    }
+}
+
+// 预览列收起时，代码编辑列吃满剩余空间（相邻兄弟选择器；
+// :not(.collapsed) 保证两列同时收起时代码列仍是 38px 竖条——
+// 否则本规则特异性（3 类）会压过 .edit-col-mid.collapsed（2 类）；
+// 编辑器全屏为 fixed 覆盖层不受 flex 影响）
+.edit-col-preview.collapsed + .edit-col-mid:not(.collapsed) {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 // 窄屏：主体两列与编辑两列退回堆叠（进入窄屏时左面板与中列默认收起，预览占主屏）
@@ -1483,6 +1581,31 @@ onActivated(() => {
 
     .edit-col-preview {
         min-height: 420px;
+    }
+
+    // 窄屏收起态：预览 38px 竖条退化为整行横向展开条（与左列一致，竖排标签转横排）
+    .edit-col-preview.collapsed {
+        flex-basis: auto;
+        max-width: none;
+        min-height: 0;
+
+        .preview-side-bar {
+            flex-direction: row;
+            width: 100%;
+            height: auto;
+            padding: 6px 10px;
+            gap: 8px;
+
+            .el-button {
+                width: auto;
+                padding: 4px 8px;
+            }
+
+            .collapsed-label {
+                writing-mode: horizontal-tb;
+                letter-spacing: 1px;
+            }
+        }
     }
 }
 

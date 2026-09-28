@@ -24,13 +24,16 @@ import com.fastcms.ai.skill.SkillDescriptor;
 import com.fastcms.ai.skill.SkillRegistry;
 import com.fastcms.ai.tool.AiToolCallbackProvider;
 import com.fastcms.entity.AiModelConfig;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -84,15 +87,21 @@ public class AgentChatExecutor {
     private final AiToolCallbackProvider toolCallbackProvider;
     private final SkillRegistry skillRegistry;
     private final AiQuotaChecker quotaChecker;
+    /**
+     * 工具调用管理器（容器 bean，见 FastcmsAiAutoConfiguration）：
+     * 带幽灵工具兜底——模型拼错工具名时回流纠错提示，不抛异常崩掉整轮流式任务
+     */
+    private final ToolCallingManager toolCallingManager;
 
     public AgentChatExecutor(IAiAgentService agentService, IAiModelConfigService modelConfigService,
                              AiToolCallbackProvider toolCallbackProvider, SkillRegistry skillRegistry,
-                             AiQuotaChecker quotaChecker) {
+                             AiQuotaChecker quotaChecker, ToolCallingManager toolCallingManager) {
         this.agentService = agentService;
         this.modelConfigService = modelConfigService;
         this.toolCallbackProvider = toolCallbackProvider;
         this.skillRegistry = skillRegistry;
         this.quotaChecker = quotaChecker;
+        this.toolCallingManager = toolCallingManager;
     }
 
     /**
@@ -161,7 +170,7 @@ public class AgentChatExecutor {
         ToolCallback[] whitelistedTools = buildTools(profile, injectSkills);
 
         return new Prepared(profile, modelConfig, chatModel, whitelistedTools, runtimeOptions,
-                injectSkills ? buildSkillManifest(profile) : "");
+                injectSkills ? buildSkillManifest(profile) : "", toolCallingManager);
     }
 
     /**
@@ -270,18 +279,22 @@ public class AgentChatExecutor {
         private final ToolCallback[] whitelistedTools;
         private final OpenAiChatOptions runtimeOptions;
         private final String skillManifest;
+        /** 带幽灵工具兜底的 ToolCallingManager（装配时由 AgentChatExecutor 注入） */
+        private final ToolCallingManager toolCallingManager;
 
         /** 懒构建的默认 ChatClient（无附加工具，chat 型场景直接使用） */
         private volatile ChatClient chatClient;
 
         private Prepared(AgentProfile profile, AiModelConfig modelConfig, ChatModel chatModel,
-                         ToolCallback[] whitelistedTools, OpenAiChatOptions runtimeOptions, String skillManifest) {
+                         ToolCallback[] whitelistedTools, OpenAiChatOptions runtimeOptions, String skillManifest,
+                         ToolCallingManager toolCallingManager) {
             this.profile = profile;
             this.modelConfig = modelConfig;
             this.chatModel = chatModel;
             this.whitelistedTools = whitelistedTools;
             this.runtimeOptions = runtimeOptions;
             this.skillManifest = skillManifest;
+            this.toolCallingManager = toolCallingManager;
         }
 
         public AgentProfile getProfile() { return profile; }
@@ -307,7 +320,7 @@ public class AgentChatExecutor {
             if (result == null) {
                 synchronized (this) {
                     if (chatClient == null) {
-                        chatClient = ChatClient.builder(chatModel).defaultTools(whitelistedTools).build();
+                        chatClient = buildChatClient(whitelistedTools);
                     }
                     result = chatClient;
                 }
@@ -326,7 +339,26 @@ public class AgentChatExecutor {
             ToolCallback[] merged = new ToolCallback[whitelistedTools.length + additionalTools.length];
             System.arraycopy(whitelistedTools, 0, merged, 0, whitelistedTools.length);
             System.arraycopy(additionalTools, 0, merged, whitelistedTools.length, additionalTools.length);
-            return ChatClient.builder(chatModel).defaultTools(merged).build();
+            return buildChatClient(merged);
+        }
+
+        /**
+         * 统一 ChatClient 构建入口：显式挂载带幽灵工具兜底的 {@link ToolCallingManager}。
+         *
+         * <p><b>为什么不能直接用 {@code ChatClient.builder(chatModel)}</b>：1 参重载会内部
+         * new 一个默认 {@code DefaultToolCallingManager}（无请求外工具名兜底），容器里
+         * {@code FastcmsAiAutoConfiguration#toolCallingManager} 的幽灵兜底配置被完全绕过；
+         * 模型一旦拼错工具名（实测：把 search_template_files 输出成单数
+         * search_template_file），整个数分钟的流式任务直接崩掉。
+         * 5 参重载中第 2~4 参传 {@code ObservationRegistry.NOOP} + null convention，
+         * 与 1 参重载的内部默认值严格一致（见 DefaultChatClientBuilder 字节码），
+         * 唯一差别是第 5 参提供了自定义 ToolCallingAdvisor.Builder。</p>
+         */
+        private ChatClient buildChatClient(ToolCallback[] tools) {
+            return ChatClient.builder(chatModel, ObservationRegistry.NOOP, null, null,
+                            ToolCallingAdvisor.builder().toolCallingManager(toolCallingManager))
+                    .defaultTools(tools)
+                    .build();
         }
 
         public OpenAiChatOptions getRuntimeOptions() { return runtimeOptions; }

@@ -220,6 +220,8 @@ public class FastcmsAiProperties {
          *   max-format-rounds: 3      # 设计格式校验轮上限
          *   design-max-tokens: 24000  # 单页设计稿输出上限（防大输出失控）
          *   section-confidence-threshold: 0.7   # 组件映射置信阈值（低于→custom_macro）
+         *   design-concurrency: 3     # 设计段页级并行度（≤1 串行；模型服务需支持并发）
+         *   mapping-concurrency: 3    # 转化段映射批次并行度（≤1 串行）
          * </pre>
          */
         public static class Design {
@@ -250,6 +252,20 @@ public class FastcmsAiProperties {
              * 组件映射置信阈值：AI 映射 confidence 低于该值强制 custom_macro（宁可自定义宏，不可错配组件）
              */
             private double sectionConfidenceThreshold = 0.7;
+
+            /**
+             * 设计段页级并行度：多页设计互相独立（站点结构定稿后），并行调用模型可把
+             * 设计阶段耗时从「页数×单页时长」压到「页数/并行度×单页时长」。
+             * ≤1 走原串行路径。前提：模型服务支持并发请求（OpenAI 兼容服务普遍支持）。
+             * 默认 3（实测远程 Qwen 服务 3 并发无排队）。
+             */
+            private int designConcurrency = 3;
+
+            /**
+             * 转化段组件映射批次并行度：映射批次互相独立（每批 ≤5 个区块摘要独立问模型）。
+             * ≤1 走原串行路径。默认 3。
+             */
+            private int mappingConcurrency = 3;
 
             public boolean isEnabled() {
                 return enabled;
@@ -289,6 +305,22 @@ public class FastcmsAiProperties {
 
             public void setSectionConfidenceThreshold(double sectionConfidenceThreshold) {
                 this.sectionConfidenceThreshold = sectionConfidenceThreshold;
+            }
+
+            public int getDesignConcurrency() {
+                return designConcurrency;
+            }
+
+            public void setDesignConcurrency(int designConcurrency) {
+                this.designConcurrency = designConcurrency;
+            }
+
+            public int getMappingConcurrency() {
+                return mappingConcurrency;
+            }
+
+            public void setMappingConcurrency(int mappingConcurrency) {
+                this.mappingConcurrency = mappingConcurrency;
             }
         }
     }
