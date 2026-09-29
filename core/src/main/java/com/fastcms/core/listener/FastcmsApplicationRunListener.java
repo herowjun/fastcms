@@ -98,6 +98,7 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
         DirUtils.injectUploadDir(getUploadDir());
         DirUtils.injectPluginDir(getPluginDir());
         DirUtils.injectTemplateDir(getTemplateDir());
+        DirUtils.injectTemplateBackupDir(getTemplateBackupDir());
         DirUtils.injectLuceneDir(getLuceneDir());
     }
 
@@ -242,6 +243,22 @@ public class FastcmsApplicationRunListener implements SpringApplicationRunListen
 
     String getLuceneDir() {
         return workDir.getAbsolutePath() + File.separator + dirNames[1] + File.separator;
+    }
+
+    /**
+     * 模板备份目录固定在用户主目录下的 fastcms 数据目录（~/fastcms/template-backup），
+     * 与 templates/ 平级：卸载模板的默认行为是把模板目录整体移动到这里。
+     *
+     * <p>必须是 templates/ 的<b>兄弟目录</b>而不是子目录 —— {@code DefaultTemplateService.initialize()}
+     * 会把模板根目录下的每个子目录都当成模板扫出来并注册，放进 templates/ 里会凭空多出一个"备份模板"。</p>
+     */
+    String getTemplateBackupDir() {
+        String backupDir = fastcmsHome() + File.separator + "template-backup" + File.separator;
+        File dir = new File(backupDir);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return backupDir;
     }
 
     private String fastcmsHome() {

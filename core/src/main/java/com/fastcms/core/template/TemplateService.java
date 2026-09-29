@@ -79,10 +79,22 @@ public interface TemplateService {
 
     /**
      * 卸载模板
-     * @param templateId
+     *
+     * <p>两种模式：</p>
+     * <ul>
+     *   <li>{@code permanent=false}（默认，安全）：把模板目录整体<b>移动到备份目录</b>，
+     *       数据库记录原样保留，事后把备份目录拷回模板根目录即可恢复；</li>
+     *   <li>{@code permanent=true}（彻底删除）：直接删除模板目录<b>不备份</b>，
+     *       并调用 {@link TemplateDataCleaner} 清理该模板的数据库残余记录（不可恢复）。</li>
+     * </ul>
+     *
+     * @param templateId      模板id
+     * @param permanent       true=彻底删除（不备份 + 清理数据库残余）；false=移动到备份目录
+     * @param overwriteBackup 仅 permanent=false 时有意义：备份目录已存在同名备份时是否覆盖
+     * @throws TemplateBackupExistsException permanent=false 且已存在同名备份且未允许覆盖
      * @throws Exception
      */
-    void unInstall(String templateId) throws Exception;
+    void unInstall(String templateId, boolean permanent, boolean overwriteBackup) throws Exception;
 
     /**
      * 获取当前使用模板对应的文件目录树
@@ -169,10 +181,9 @@ public interface TemplateService {
     }
 
     interface TemplateI18n {
-        String CMS_TEMPLATE_DEV_NOT_ALLOW_INSTALL = "fastcms.cms.template.dev.not.allow.install";
-        String CMS_TEMPLATE_DEV_NOT_ALLOW_UNINSTALL = "fastcms.cms.template.dev.not.allow.uninstall";
         String CMS_TEMPLATE_FILE_ZIP_INSTALL = "fastcms.cms.template.file.zip.install";
         String CMS_TEMPLATE_USING_IS_NOT_ALLOW_UNINSTALL = "fastcms.cms.template.using.is.not.allow.uninstall";
+        String CMS_TEMPLATE_BACKUP_EXISTS = "fastcms.cms.template.backup.exists";
         String CMS_TEMPLATE_FILE_NOT_EXIST = "fastcms.cms.template.file.not.exist";
         String CMS_TEMPLATE_NOT_EXIST = "fastcms.cms.template.not.exist";
         String CMS_TEMPLATE_DEFAULT_NOT_EXIST = "fastcms.cms.template.default.not.exist";

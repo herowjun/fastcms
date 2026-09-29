@@ -216,9 +216,7 @@ public interface PluginManagerService {
 	}
 
 	interface PluginI18n {
-		String PLUGIN_DEV_NOT_ALLOW_INSTALL = "fastcms.plugin.dev.not.allow.install";
 		String PLUGIN_UPLOAD_FILE_TYPE_NOT_ALLOW = "fastcms.plugin.upload.file.type.not.allow";
-		String PLUGIN_DEV_NOT_ALLOW_UNINSTALL = "fastcms.plugin.dev.not.allow.uninstall";
 	}
 
 }

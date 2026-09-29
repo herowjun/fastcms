@@ -22,14 +22,15 @@ import com.fastcms.cms.service.IMenuService;
 import com.fastcms.common.auth.ActionTypes;
 import com.fastcms.common.auth.Secured;
 import com.fastcms.common.constants.FastcmsConstants;
+import com.fastcms.common.exception.I18nFastcmsException;
 import com.fastcms.common.model.RestResult;
 import com.fastcms.common.model.RestResultUtils;
 import com.fastcms.common.utils.DirUtils;
 import com.fastcms.common.utils.FileUtils;
 import com.fastcms.core.template.Template;
+import com.fastcms.core.template.TemplateBackupExistsException;
 import com.fastcms.core.template.TemplateService;
 import com.fastcms.service.IConfigService;
-import com.fastcms.utils.ApplicationUtils;
 import com.fastcms.utils.I18nUtils;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,10 +112,6 @@ public class TemplateController {
     @Secured(name = RESOURCE_NAME_TEMPLATE_INSTALL, resource = "templates:install", action = ActionTypes.WRITE)
 	public Object install(@RequestParam("file") MultipartFile file) {
 
-        if (ApplicationUtils.isDevelopment()) {
-            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_DEV_NOT_ALLOW_INSTALL));
-        }
-
         String fileName = file.getOriginalFilename();
         String suffixName = fileName.substring(fileName.lastIndexOf("."));
         //检查文件格式是否合法
@@ -136,24 +133,53 @@ public class TemplateController {
 
     /**
      * 卸载模板
-     * @param templateId    模板id
+     *
+     * <p>两种模式：{@code permanent=false}（默认）把模板目录移动到备份目录并保留数据库记录；
+     * {@code permanent=true} 彻底删除目录不备份并清理数据库残余记录。</p>
+     *
+     * <p>移动到备份目录时若已存在同名备份，返回业务码 {@link TemplateBackupExistsException#CODE}
+     * （而非 500），前端据此弹「是否覆盖」的二次确认，用户确认后带 {@code overwriteBackup=true} 重发。</p>
+     *
+     * @param templateId      模板id
+     * @param permanent       true=彻底删除（不备份 + 清理数据库残余）
+     * @param overwriteBackup 备份目录已存在同名备份时是否覆盖（仅 permanent=false 时有意义）
      * @return
      */
     @PostMapping("unInstall/{templateId}")
     @Secured(name = RESOURCE_NAME_TEMPLATE_UNINSTALL, resource = "templates:unInstall", action = ActionTypes.WRITE)
-	public Object unInstall(@PathVariable("templateId") String templateId) {
-
-        if (ApplicationUtils.isDevelopment()) {
-            return RestResultUtils.failed(I18nUtils.getMessage(CMS_TEMPLATE_DEV_NOT_ALLOW_UNINSTALL));
-        }
+	public Object unInstall(@PathVariable("templateId") String templateId,
+                            @RequestParam(value = "permanent", required = false, defaultValue = "false") boolean permanent,
+                            @RequestParam(value = "overwriteBackup", required = false, defaultValue = "false") boolean overwriteBackup) {
 
         try {
-            templateService.unInstall(templateId);
+            templateService.unInstall(templateId, permanent, overwriteBackup);
             return RestResultUtils.success();
+        } catch (TemplateBackupExistsException e) {
+            // 独立业务码，前端凭它区分"需要二次确认覆盖"与普通失败
+            return RestResultUtils.failedWithMsg(TemplateBackupExistsException.CODE, resolveI18nMessage(e));
         } catch (Exception e) {
-            return RestResultUtils.failed(e.getMessage());
+            return RestResultUtils.failed(resolveI18nMessage(e));
         }
 
+    }
+
+    /**
+     * 取异常的可读消息。
+     *
+     * <p>{@code I18nFastcmsException} 只存 i18nKey 不调用 {@code super(msg)}，
+     * 所以 {@code getMessage()} 恒为 null —— 必须按 key 去资源文件里取，否则前端拿到空错误提示。
+     * 非 i18n 异常仍回落到 {@code getMessage()}。</p>
+     */
+    private String resolveI18nMessage(Exception e) {
+        if (e instanceof I18nFastcmsException) {
+            I18nFastcmsException i18nException = (I18nFastcmsException) e;
+            String template = I18nUtils.getMessage(i18nException.getI18nKey());
+            if (StringUtils.isNotBlank(template)) {
+                String[] params = i18nException.getParams();
+                return params == null ? template : String.format(template, (Object[]) params);
+            }
+        }
+        return e.getMessage() == null ? I18nUtils.getMessage(FASTCMS_SYSTEM_ERROR) : e.getMessage();
     }
 
     /**

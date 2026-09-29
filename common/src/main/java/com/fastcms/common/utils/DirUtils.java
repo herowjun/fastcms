@@ -25,6 +25,11 @@ public abstract class DirUtils {
     static String templateDir;
 
     /**
+     * 模板备份目录（卸载模板时默认把模板目录整体移动到这里）目录以 "/" 结尾
+     */
+    static String templateBackupDir;
+
+    /**
      * lucene目录
      */
     static String luceneDir;
@@ -41,6 +46,10 @@ public abstract class DirUtils {
         DirUtils.templateDir = templateDir;
     }
 
+    public static void injectTemplateBackupDir(String templateBackupDir) {
+        DirUtils.templateBackupDir = templateBackupDir;
+    }
+
     public static void injectLuceneDir(String luceneDir) {
         DirUtils.luceneDir = luceneDir;
     }
@@ -55,6 +64,10 @@ public abstract class DirUtils {
 
     public static String getTemplateDir() {
         return templateDir;
+    }
+
+    public static String getTemplateBackupDir() {
+        return templateBackupDir;
     }
 
     public static String getLuceneDir() {

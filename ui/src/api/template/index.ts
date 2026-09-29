@@ -25,11 +25,16 @@ export function TemplateApi() {
 
 		/**
 		 * 卸载模板
+		 * @param templateId      模板id
+		 * @param permanent       true=彻底删除（不生成备份 + 清理数据库残余记录）；false=移动到备份目录
+		 * @param overwriteBackup 备份目录已存在同名备份时是否覆盖（仅 permanent=false 时有意义）
+		 * @returns 若已存在同名备份且未允许覆盖，返回 code=409，前端据此二次确认
 		 */
-		unInstallTemplate(templateId: string) {
+		unInstallTemplate(templateId: string, permanent = false, overwriteBackup = false) {
 			return request({
 				url: '/admin/template/unInstall/' + templateId,
-				method: 'post'
+				method: 'post',
+				params: { permanent, overwriteBackup }
 			});
 		},
 
