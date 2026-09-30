@@ -80,7 +80,9 @@ import java.util.regex.Pattern;
  * └── static/css/
  *     ├── pack-{packId}.css   ← 组件包地基（每包一份，多包并存按序引入）
  *     ├── tokens.css          ← TokenEngine 按主色+风格预设生成
- *     └── site.css            ← 内容页正文排版（h2/p/img 等富文本元素）
+ *     ├── site.css            ← 内容页正文排版（h2/p/img 等富文本元素）
+ *     └── design.css          ← 导入型：设计稿内嵌 &lt;style&gt; 自定义样式
+ *                                （workDir/design/*.html 合并去重，重渲染自动再生）
  * </pre>
  *
  * <p>组件升级 → 存量 _pagespec.json 重渲染即继承新组件，这是"弹药补充"闭环的落地点。</p>
@@ -99,6 +101,23 @@ public class PageSpecRenderer {
      * 组件包地基资产路径（provider 约定）
      */
     private static final String ASSET_PACK_CSS = "static/pack.css";
+
+    /**
+     * 自定义样式文件名（模板内 static/css/ 下）：导入型会话设计稿
+     * （workDir/design/*.html）内嵌 &lt;style&gt; 的合并产物
+     */
+    public static final String CUSTOM_CSS_FILE = "design.css";
+
+    /**
+     * 导入型设计稿目录（会话工作目录下）
+     */
+    public static final String DESIGN_DIR = "design";
+
+    /**
+     * 设计稿 HTML 内嵌 &lt;style&gt; 块提取（捕获块内容，DOTALL 跨行）
+     */
+    private static final Pattern STYLE_BLOCK_PATTERN = Pattern.compile("<style[^>]*>(.*?)</style>",
+            Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
     /**
      * 内容页正文骨架的包资产路径前缀（provider 约定：pages/{pageKey}.ftl）
@@ -195,7 +214,7 @@ public class PageSpecRenderer {
 
         LinkedHashSet<String> pageKeys = collectPageKeys(spec);
         LayoutZones zones = extractLayoutZones(spec, pageKeys);
-        RenderPlan plan = buildRenderPlan(spec, pageKeys, zones);
+        RenderPlan plan = buildRenderPlan(spec, targetDir, pageKeys, zones);
 
         writeStaticAssets(spec, plan, targetDir, written);
         writeComponentSources(spec, plan, targetDir, written);
@@ -213,7 +232,7 @@ public class PageSpecRenderer {
     /**
      * 构建渲染计划：收集 spec 用到的全部组件包（地基包置首），生成 CSS 文件名清单
      */
-    private RenderPlan buildRenderPlan(PageSpec spec, LinkedHashSet<String> pageKeys,
+    private RenderPlan buildRenderPlan(PageSpec spec, Path targetDir, LinkedHashSet<String> pageKeys,
                                         LayoutZones zones) {
         LinkedHashSet<SectionComponentProvider> used = new LinkedHashSet<>();
         // 地基包置首：foundation 与 spec.foundation 匹配的包；无匹配时取第一个注册包
@@ -255,6 +274,12 @@ public class PageSpecRenderer {
         }
         if (cssFiles.isEmpty()) {
             throw new IllegalStateException("组件包缺少地基资产: " + ASSET_PACK_CSS);
+        }
+        // 导入型会话：设计稿内嵌自定义样式随渲染落盘（static/css/design.css），
+        // 与 pack/tokens/site 同序引入——设计稿的视觉样式（hero/网格/页脚等自定义类）
+        // 不再丢失；无 design/ 目录（自由生成型）时不产生该文件，行为与旧版一致
+        if (Files.isDirectory(targetDir.resolve(DESIGN_DIR))) {
+            cssFiles.add("static/css/" + CUSTOM_CSS_FILE);
         }
         return new RenderPlan(pageKeys, zones, used, cssFiles);
     }
@@ -1037,6 +1062,67 @@ public class PageSpecRenderer {
 
         write(cssDir.resolve("site.css"), SITE_CSS.getBytes(StandardCharsets.UTF_8),
                 "static/css/site.css", written);
+
+        // 导入型会话：设计稿自定义样式落盘（static/css/design.css）
+        if (plan.cssFiles().contains("static/css/" + CUSTOM_CSS_FILE)) {
+            String customCss = mergeDesignStyles(targetDir);
+            if (!customCss.isEmpty()) {
+                write(cssDir.resolve(CUSTOM_CSS_FILE), customCss.getBytes(StandardCharsets.UTF_8),
+                        "static/css/" + CUSTOM_CSS_FILE, written);
+            }
+        }
+    }
+
+    /**
+     * 合并导入型会话设计稿（workDir/design/*.html）的内嵌 &lt;style&gt; 自定义样式
+     *
+     * <p>各页设计稿的 style 块按文件名稳定排序拼接，以「设计稿: <file>」注释
+     * 分节（便于定位来源）；重复的完整规则块不额外去重（同值重复声明对浏览器无害，
+     * 且逐条去重易误伤——各页变量值可能本就不同）。</p>
+     *
+     * @return 合并后的 CSS 文本；design/ 目录缺失或无有效 style 块时返回空串
+     */
+    private String mergeDesignStyles(Path targetDir) {
+        Path designDir = targetDir.resolve(DESIGN_DIR);
+        if (!Files.isDirectory(designDir)) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        out.append("/* 导入型设计稿自定义样式（由 PageSpecRenderer 从 design/*.html 内嵌 <style> 自动合并，\n");
+        out.append(" * 重渲染时自动再生——如需持久调整请直接编辑本文件，但下次渲染会覆盖） */\n");
+        try (var files = Files.list(designDir)) {
+            List<Path> htmlFiles = files.filter(p -> p.getFileName().toString().endsWith(".html"))
+                    .sorted(java.util.Comparator.comparing(p -> p.getFileName().toString())).toList();
+            for (Path file : htmlFiles) {
+                String html;
+                try {
+                    html = Files.readString(file, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    log.warn("读取设计稿失败，跳过: {}", file, e.getMessage());
+                    continue;
+                }
+                Matcher matcher = STYLE_BLOCK_PATTERN.matcher(html);
+                int blocks = 0;
+                while (matcher.find()) {
+                    String css = matcher.group(1).trim();
+                    if (css.isEmpty()) {
+                        continue;
+                    }
+                    if (out.length() > 0 && css.length() > 0) {
+                        out.append("\n");
+                    }
+                    out.append("/* ===== 设计稿: ").append(file.getFileName()).append(" ===== */\n");
+                    out.append(css).append("\n");
+                    blocks++;
+                }
+                if (blocks == 0) {
+                    log.info("设计稿无内嵌 style 块，跳过: {}", file.getFileName());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("遍历设计稿目录失败: {}", e.getMessage());
+        }
+        return out.toString();
     }
 
     private void write(Path file, byte[] content, String relPath, List<String> written) throws IOException {
