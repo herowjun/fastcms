@@ -809,6 +809,8 @@ CREATE TABLE `ai_model_config` (
   `base_url` varchar(255) NOT NULL COMMENT 'OpenAI 兼容 API 端点',
   `api_key` varchar(255) DEFAULT NULL COMMENT 'API Key（Ollama 等本地调用可为空）',
   `model` varchar(64) NOT NULL COMMENT '模型名称',
+  `scene` varchar(20) NOT NULL DEFAULT 'chat' COMMENT '用途场景: chat-对话 image-生图',
+  `reasoning_effort` varchar(16) DEFAULT NULL COMMENT '思考档位: auto(跟随场景默认)/off(关闭思考)/low/medium/xhigh（NULL=auto）',
   `temperature` double DEFAULT NULL COMMENT '温度参数',
   `max_tokens` int DEFAULT NULL COMMENT '最大 tokens',
   `is_active` tinyint(1) DEFAULT '0' COMMENT '是否激活（同一时刻仅一个为 true）',
@@ -937,7 +939,12 @@ CREATE TABLE `attachment_directory` (
 -- ALTER TABLE `attachment` ADD COLUMN `directory_id` bigint NOT NULL DEFAULT 0 COMMENT '所属目录ID，0为未分类' AFTER `file_type`;
 
 -- AI 模型配置表增加用途场景（chat=对话，image=生图；同场景内仅一条激活）
+-- 已并入上方 CREATE TABLE（全新安装直接带该列）；存量库由 fastcms-0.2.0.sql 增加
 -- ALTER TABLE `ai_model_config` ADD COLUMN `scene` varchar(20) NOT NULL DEFAULT 'chat' COMMENT '用途场景: chat-对话 image-生图' AFTER `model`;
+
+-- AI 模型配置表增加思考档位（NULL=auto 跟随场景默认；推理端点不传档位时默认为最高思考档）
+-- 已并入上方 CREATE TABLE（全新安装直接带该列）；存量库由 fastcms-1.0.0.sql 增加
+-- ALTER TABLE `ai_model_config` ADD COLUMN `reasoning_effort` varchar(16) DEFAULT NULL COMMENT '思考档位: auto/off/low/medium/xhigh（NULL=auto）' AFTER `scene`;
 
 -- AI 生图任务表（文生图/修图异步任务，前端轮询状态）
 DROP TABLE IF EXISTS `ai_image_task`;

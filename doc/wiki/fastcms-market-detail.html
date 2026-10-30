@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微信支付 · 插件详情 — FastCMS 插件市场</title>
+<meta name="description" content="FastCMS 微信支付插件：支付回调、消息处理、商家转账能力，站点商业闭环接上微信收付款。">
+<style>
+:root{
+  --bg:#FAFAF7;--card:#FFFFFF;--ink:#16181D;--muted:#5D6570;--faint:#8B94A1;
+  --line:#E7E5DE;--brand:#2B6BFF;--brand-ink:#1E56E0;--brand-soft:#EDF2FF;
+  --dark:#0B101B;--on-dark:#E9EEF7;--ok:#1F9D6B;--ok-soft:#E5F5EE;
+  --warn:#C77800;--warn-soft:#FFF4E0;
+  --radius:14px;
+  --mono:"JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace;
+  --sans:"Inter","HarmonyOS Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:15px}
+a{color:var(--brand);text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;cursor:pointer;font-family:var(--sans);font-size:14px;font-weight:600;padding:10px 20px;border-radius:10px;transition:transform .15s,box-shadow .15s,background .15s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:0 4px 14px rgba(43,107,255,.28)}
+.btn-primary:hover{background:var(--brand-ink)}
+.btn-line{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+.btn-line:hover{border-color:var(--brand);color:var(--brand)}
+.btn-lg{padding:13px 28px;font-size:15px}
+.btn-sm{padding:7px 14px;font-size:13px}
+.btn-block{width:100%}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.badge-pro{background:var(--brand-soft);color:var(--brand-ink)}
+.badge-free{background:var(--ok-soft);color:var(--ok)}
+.asset-tag{display:inline-block;font-size:12px;color:var(--muted);border:1px solid var(--line);padding:2px 9px;border-radius:6px;margin:0 6px 6px 0}
+/* 导航 */
+.nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:58px}
+.logo{font-size:17px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}
+.logo-mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:14px}
+.logo small{font-weight:500;color:var(--faint);font-size:12px}
+.nav-links{display:flex;gap:22px;font-size:14px;color:var(--muted);flex:1}
+.nav-links a:hover{color:var(--brand)}
+/* 面包屑 */
+.crumb{padding:18px 0 4px;font-size:13px;color:var(--faint)}
+.crumb a{color:var(--faint)}
+.crumb a:hover{color:var(--brand)}
+/* 详情双列 */
+.detail{display:grid;grid-template-columns:1fr 340px;gap:28px;align-items:start;padding:14px 0 48px}
+.d-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.d-head h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
+.d-icon{width:52px;height:52px;border-radius:13px;background:var(--dark);color:var(--on-dark);display:grid;place-items:center;font-size:22px;flex:none}
+.d-tags{margin-top:10px}
+.d-desc{color:var(--muted);font-size:15px;margin-top:14px;max-width:640px}
+.d-sec{margin-top:34px}
+.d-sec h2{font-size:17px;font-weight:700;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.d-note{font-size:12px;color:var(--faint);margin-top:10px}
+/* 能力清单 */
+.cap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cap-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cap-item b{display:block;font-size:14px}
+.cap-item span{font-size:13px;color:var(--muted)}
+/* 兼容性 */
+.compat{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.compat td{padding:10px 16px;border-bottom:1px solid var(--line)}
+.compat tr:last-child td{border-bottom:0}
+.compat td:first-child{color:var(--muted);width:140px}
+/* 更新日志 */
+.log{position:relative;padding-left:20px}
+.log::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.log-item{position:relative;padding-bottom:16px}
+.log-item::before{content:"";position:absolute;left:-19px;top:7px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
+.log-item .v{font-family:var(--mono);font-size:13px;font-weight:700}
+.log-item .d{font-size:12px;color:var(--faint);float:right}
+.log-item p{font-size:13px;color:var(--muted);margin-top:2px}
+/* 安装步骤 */
+.steps{counter-reset:st;display:grid;gap:10px}
+.step{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 16px}
+.step::before{counter-increment:st;content:counter(st);flex:none;width:26px;height:26px;border-radius:8px;background:var(--brand-soft);color:var(--brand-ink);font-weight:700;display:grid;place-items:center;font-size:13px}
+.step b{font-size:14px;display:block}
+.step span{font-size:13px;color:var(--muted)}
+/* FAQ */
+.faq-item{border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:10px;overflow:hidden}
+.faq-item summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:14px;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.faq-item summary::after{content:"＋";color:var(--faint)}
+.faq-item[open] summary::after{content:"－"}
+.faq-item .a{padding:0 16px 14px;font-size:13.5px;color:var(--muted)}
+/* 右侧购买卡 */
+.buy-card{position:sticky;top:78px;background:var(--card);border:1.5px solid var(--brand);border-radius:var(--radius);padding:22px;box-shadow:0 10px 30px rgba(43,107,255,.10)}
+.buy-card h3{font-size:15px;font-weight:700}
+.buy-price{margin:12px 0 4px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.buy-price .num{font-size:30px;font-weight:800;color:var(--brand-ink)}
+.buy-price .per{font-size:13px;color:var(--faint)}
+.buy-price .strike{font-size:13px;color:var(--faint);text-decoration:line-through}
+.buy-opts{margin:14px 0;display:grid;gap:8px}
+.buy-opt{display:flex;align-items:center;gap:10px;border:1.5px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:13.5px;transition:border-color .15s,background .15s}
+.buy-opt input{accent-color:var(--brand)}
+.buy-opt:hover{border-color:var(--brand-glow,#9FB9FF)}
+.buy-opt.checked{border-color:var(--brand);background:var(--brand-soft)}
+.buy-opt .op{margin-left:auto;font-weight:700;font-size:13px}
+.buy-inc{margin:14px 0;padding:12px 14px;background:var(--bg);border-radius:10px;font-size:12.5px;color:var(--muted);display:grid;gap:6px}
+.buy-inc span::before{content:"✓ ";color:var(--ok);font-weight:700}
+.buy-tips{font-size:12px;color:var(--faint);text-align:center;margin-top:10px}
+/* 相关插件 */
+.related{grid-column:1/-1;margin-top:8px}
+.rel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.rel-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;transition:border-color .15s,transform .15s}
+.rel-card:hover{border-color:var(--brand);transform:translateY(-2px)}
+.rel-card b{font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.rel-card span{font-size:12.5px;color:var(--muted);display:block;margin-top:6px}
+/* 购买抽屉 */
+.mask{position:fixed;inset:0;background:rgba(11,16,27,.5);backdrop-filter:blur(2px);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.mask.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:460px;max-width:94vw;background:var(--card);z-index:101;transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(11,16,27,.18)}
+.drawer.show{transform:translateX(0)}
+.dw-head{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--line);flex:none}
+.dw-head b{font-size:16px}
+.dw-close{border:0;background:none;font-size:22px;color:var(--faint);cursor:pointer;line-height:1}
+.dw-close:hover{color:var(--ink)}
+.dw-body{flex:1;overflow-y:auto;padding:22px}
+.dw-state{display:none}
+.dw-state.on{display:block}
+/* 状态1 确认单 */
+.ord-item{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px}
+.ord-item .d-icon{width:42px;height:42px;font-size:18px;border-radius:10px}
+.ord-item b{font-size:14px;display:block}
+.ord-item span{font-size:12px;color:var(--faint)}
+.f-row{margin-top:16px}
+.f-row label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+.f-row select,.f-row input{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--sans);background:#fff}
+.f-row select:focus,.f-row input:focus{outline:0;border-color:var(--brand)}
+.f-row .hint{font-size:12px;color:var(--faint);margin-top:5px}
+.coupon-line{display:flex;gap:8px}
+.coupon-line input{flex:1}
+.coupon-ok{color:var(--ok);font-size:12.5px;margin-top:5px;display:none}
+.ord-total{margin-top:18px;border-top:1.5px dashed var(--line);padding-top:14px;display:flex;align-items:baseline;justify-content:space-between}
+.ord-total .t{font-size:13px;color:var(--muted)}
+.ord-total .v{font-size:24px;font-weight:800;color:var(--brand-ink)}
+.ord-total .save{font-size:12px;color:var(--ok);margin-left:8px}
+.dw-foot{flex:none;padding:16px 22px;border-top:1px solid var(--line);display:grid;gap:10px}
+.dw-foot .pay-line{font-size:12px;color:var(--faint);text-align:center}
+/* 状态2 支付中 */
+.pay-qr{width:190px;margin:6px auto 14px;display:grid;grid-template-columns:repeat(21,1fr);gap:0;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.pay-qr i{aspect-ratio:1;display:block}
+.pay-qr i.on{background:var(--ink)}
+.pay-amt{text-align:center;font-size:26px;font-weight:800}
+.pay-meta{text-align:center;font-size:12.5px;color:var(--faint);margin:6px 0 14px}
+.pay-timer{display:inline-block;font-family:var(--mono);font-weight:700;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:1px 8px}
+.demo-box{margin-top:16px;border:1.5px dashed var(--line);border-radius:10px;padding:12px;font-size:12px;color:var(--faint)}
+.demo-box .btn{margin-top:8px}
+/* 状态3 已支付 */
+.ok-center{text-align:center;padding-top:6px}
+.ok-ico{width:58px;height:58px;border-radius:50%;background:var(--ok-soft);color:var(--ok);font-size:28px;display:grid;place-items:center;margin:0 auto 14px}
+.ok-center h3{font-size:18px}
+.ok-center>p{font-size:13px;color:var(--muted);margin-top:6px}
+.lic-box{margin:18px 0;background:var(--dark);border-radius:12px;padding:16px;text-align:center}
+.lic-box .lab{font-size:11px;color:var(--on-dark);opacity:.6;letter-spacing:.08em}
+.lic-box code{display:block;font-family:var(--mono);font-size:15px;color:#7EA6FF;letter-spacing:.06em;margin:8px 0 12px;word-break:break-all}
+.lic-box .btn{background:rgba(255,255,255,.12);color:var(--on-dark);border:1px solid rgba(255,255,255,.2)}
+.lic-box .btn:hover{background:rgba(255,255,255,.2)}
+.inst-steps{display:grid;gap:8px;text-align:left}
+.inst-steps div{display:flex;gap:10px;font-size:13px;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 12px}
+.inst-steps b{color:var(--ink);flex:none}
+/* 状态4 超时 */
+.to-ico{width:58px;height:58px;border-radius:50%;background:var(--warn-soft);color:var(--warn);font-size:26px;display:grid;place-items:center;margin:6px auto 14px}
+/* 页脚 */
+footer{background:var(--dark);color:#97A3B8;font-size:13px;padding:28px 0}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+footer a{color:#97A3B8}
+footer a:hover{color:#fff}
+@media(max-width:960px){
+  .detail{grid-template-columns:1fr}
+  .buy-card{position:static}
+  .nav-links{display:none}
+  .cap,.rel-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){.cap,.rel-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<!-- 导航 -->
+<nav class="nav">
+  <div class="wrap">
+    <a class="logo" href="fastcms-landing-v2.html"><span class="logo-mark">F</span>FastCMS <small>插件市场</small></a>
+    <div class="nav-links">
+      <a href="fastcms-landing-v2.html#features">核心能力</a>
+      <a href="fastcms-landing-v2.html#ai">AI 建站</a>
+      <a href="fastcms-landing-v2.html#market">插件市场</a>
+      <a href="fastcms-landing-v2.html#pricing">定价</a>
+    </div>
+    <a class="btn btn-line btn-sm" href="https://gitee.com/xjd2020/fastcms" target="_blank" rel="noopener">源码下载</a>
+  </div>
+</nav>
+
+<div class="wrap">
+  <div class="crumb"><a href="fastcms-landing-v2.html#market">插件市场</a> / <a href="fastcms-landing-v2.html#market">微信生态</a> / 微信支付</div>
+
+  <div class="detail">
+    <!-- 左列：信息 -->
+    <div class="d-main">
+      <div class="d-head">
+        <div class="d-icon">¥</div>
+        <div>
+          <h1>微信支付</h1>
+          <div class="d-tags">
+            <span class="badge badge-pro">付费插件</span>
+            <span class="asset-tag">功能模块</span>
+            <span class="asset-tag">微信支付渠道</span>
+          </div>
+        </div>
+      </div>
+      <p class="d-desc">微信支付渠道插件：支付回调、消息处理、商家转账能力，站点商业闭环接上微信收付款。安装后在后台「支付网关」中配置商户参数即可启用，支持 JSAPI / H5 / 扫码（Native）三种收款场景。</p>
+
+      <div class="d-sec">
+        <h2>能力清单</h2>
+        <div class="cap">
+          <div class="cap-item"><b>支付回调处理</b><span>支付结果回调接入订单系统，自动核销订单与权益</span></div>
+          <div class="cap-item"><b>消息处理</b><span>微信消息事件接入，支持公众号侧消息通知场景</span></div>
+          <div class="cap-item"><b>商家转账</b><span>商户向用户转账能力（佣金结算 / 奖励发放）</span></div>
+          <div class="cap-item"><b>多收款场景</b><span>JSAPI / H5 / Native 扫码，适配站内与站外支付</span></div>
+        </div>
+        <p class="d-note">* 能力说明以插件上线版本为准；挂载的 Controller / 数据表可在安装后的后台「插件」页查看</p>
+      </div>
+
+      <div class="d-sec">
+        <h2>版本兼容</h2>
+        <table class="compat">
+          <tr><td>FastCMS 版本</td><td>≥ v4.0（当前基线 JDK 21 / Spring Boot 4.1）</td></tr>
+          <tr><td>安装方式</td><td>后台「插件」页上传 jar，热插拔，免重启</td></tr>
+          <tr><td>核心侵入</td><td>无——通过注册器机制挂载，主工程零改动</td></tr>
+          <tr><td>授权机制</td><td>一个授权码 = 一个站点，有效期按购买档位</td></tr>
+        </table>
+      </div>
+
+      <div class="d-sec">
+        <h2>更新日志</h2>
+        <div class="log">
+          <div class="log-item"><span class="v">v1.0</span><span class="d">即将发布</span><p>首发版本：支付回调 / 消息处理 / 商家转账 / 三种收款场景</p></div>
+        </div>
+        <p class="d-note">* 上架后此处展示真实版本记录（示例占位，仅一条首发）</p>
+      </div>
+      <div class="d-sec">
+        <h2>安装与使用</h2>
+        <div class="steps">
+          <div class="step"><div><b>上传插件 jar</b><span>后台「插件」页上传下载的 jar 包，系统自动安装并注册能力</span></div></div>
+          <div class="step"><div><b>激活授权码</b><span>在插件详情页粘贴购买获得的授权码，本地验签生效（官网不可达也不影响激活）</span></div></div>
+          <div class="step"><div><b>配置商户参数</b><span>后台「支付网关」填入微信支付商户号 / API 密钥 / 证书，即收款</span></div></div>
+        </div>
+      </div>
+
+      <div class="d-sec">
+        <h2>常见问题</h2>
+        <div class="faq-item"><summary>授权码会过期吗？</summary><div class="a">按购买档位生效（示例 1 年 / 3 年）。到期前 7 天后台会提醒续费，续费后授权码自动续期；到期未续费时仅该插件功能停用，站点本身不受影响。</div></div>
+        <div class="faq-item"><summary>一个授权码能用几个站点？</summary><div class="a">一个授权码绑定一个站点。多站点请按需购买对应数量，或在购买时选择多站点档位（以购买页选项为准）。</div></div>
+        <div class="faq-item"><summary>FastCMS 升级后还能用吗？</summary><div class="a">以本页「版本兼容」表为准。插件与核心解耦，核心升级不改动插件；插件随版本更新提供新版本 jar，授权码有效期内免费下载更新。</div></div>
+      </div>
+
+      <!-- 相关插件 -->
+      <div class="d-sec related">
+        <h2>微信生态 · 相关插件</h2>
+        <div class="rel-grid">
+          <div class="rel-card"><b>公众号分享 <span class="badge badge-pro">付费</span></b><span>文章页自动注入分享参数与模板消息卡片</span></div>
+          <div class="rel-card"><b>小程序管理 <span class="badge badge-pro">付费</span></b><span>小程序多账号信息管理与配置初始化</span></div>
+          <div class="rel-card"><b>订单佣金 <span class="badge badge-pro">付费</span></b><span>支付回调扩展点自动结算，分销体系一套配置</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右列：购买卡 -->
+    <aside class="buy-card" id="buyCard">
+      <h3>购买「微信支付」</h3>
+      <div class="buy-price">
+        <span class="num" id="priceNum">¥499</span>
+        <span class="per" id="pricePer">/ 1 年 · 每站点</span>
+        <span class="strike" id="priceStrike" style="display:none"></span>
+      </div>
+      <div class="buy-opts" id="optList">
+        <label class="buy-opt checked"><input type="radio" name="plan" value="1" data-price="499" data-per="1 年" checked> 1 年 <span class="op">¥499</span></label>
+        <label class="buy-opt"><input type="radio" name="plan" value="3" data-price="1299" data-per="3 年" data-strike="¥1497"> 3 年（省 15%） <span class="op">¥1,299</span></label>
+      </div>
+      <div class="buy-inc">
+        <span>授权码 × 1（本站点）</span>
+        <span>插件 jar 与有效期内全部更新</span>
+        <span>支持邮箱与文档中心</span>
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" id="btnOrder">立即订购</button>
+      <p class="buy-tips">* 价格为示例，以插件市场开放时为准</p>
+    </aside>
+  </div>
+</div>
+<!-- 购买抽屉：4 状态 -->
+<div class="mask" id="mask"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="订购微信支付插件">
+  <div class="dw-head"><b id="dwTitle">确认订单</b><button class="dw-close" id="dwClose" aria-label="关闭">×</button></div>
+  <div class="dw-body">
+    <!-- 状态 1：确认订单 -->
+    <div class="dw-state on" data-state="confirm">
+      <div class="ord-item">
+        <div class="d-icon">¥</div>
+        <div><b>微信支付 <span class="badge badge-pro" style="font-size:11px">付费插件</span></b><span id="ordSpec">1 年 · 每站点</span></div>
+      </div>
+      <div class="f-row">
+        <label>授权站点</label>
+        <select id="fSite">
+          <option>demo-site.com（示例站点）</option>
+          <option>myblog.example.cn</option>
+        </select>
+        <p class="hint">授权码与该站点绑定；更多站点请购买多站点档位</p>
+      </div>
+      <div class="f-row">
+        <label>优惠券码</label>
+        <div class="coupon-line"><input id="fCoupon" placeholder="选填" autocomplete="off"><button class="btn btn-line" id="btnCoupon">应用</button></div>
+        <p class="coupon-ok" id="couponOk">✓ 已抵扣 ¥50（演示码：fastcms）</p>
+      </div>
+      <div class="ord-total">
+        <span class="t">应付金额</span>
+        <span><span class="v" id="ordTotal">¥499</span><span class="save" id="ordSave"></span></span>
+      </div>
+    </div>
+    <!-- 状态 2：支付中 -->
+    <div class="dw-state" data-state="paying">
+      <p class="pay-amt" id="payAmt">¥499</p>
+      <div class="pay-qr" id="qr" aria-label="微信支付二维码（演示占位）"></div>
+      <p class="pay-meta">微信扫码支付 · 订单号 <span id="ordNo" style="font-family:var(--mono)"></span><br>剩余有效 <span class="pay-timer" id="payTimer">15:00</span>（真实环境每 2 秒自动轮询订单状态）</p>
+      <div class="demo-box">
+        演示操作（正式环境为轮询 + 回调自动跳转）：
+        <div><button class="btn btn-primary btn-sm" id="btnPaid">模拟支付成功</button>
+        <button class="btn btn-line btn-sm" id="btnTimeout">模拟超时</button></div>
+      </div>
+    </div>
+    <!-- 状态 3：已支付 -->
+    <div class="dw-state" data-state="done">
+      <div class="ok-center">
+        <div class="ok-ico">✓</div>
+        <h3>支付成功，授权码已签发</h3>
+        <p>订单 <span id="doneOrd" style="font-family:var(--mono)"></span> 已完成，请在有效期内完成安装</p>
+      </div>
+      <div class="lic-box">
+        <span class="lab">授 权 码</span>
+        <code id="licCode">—</code>
+        <button class="btn btn-sm" id="btnCopy">复制授权码</button>
+      </div>
+      <div class="inst-steps">
+        <div><b>1</b><span>后台「插件」页上传 wechat-pay-plugin.jar</span></div>
+        <div><b>2</b><span>插件详情粘贴上方授权码，本地验签激活</span></div>
+        <div><b>3</b><span>「支付网关」配置商户参数，即可收款</span></div>
+      </div>
+    </div>
+    <!-- 状态 4：超时 -->
+    <div class="dw-state" data-state="timeout">
+      <div class="ok-center">
+        <div class="to-ico">⏱</div>
+        <h3>订单已关闭</h3>
+        <p>未在规定时间内完成支付，订单已自动关闭，可重新下单</p>
+      </div>
+    </div>
+  </div>
+  <div class="dw-foot" id="dwFoot">
+    <button class="btn btn-primary btn-lg btn-block" id="btnPay">微信支付 <span id="payBtnAmt">¥499</span></button>
+    <p class="pay-line">支付即同意《授权协议》· 一个授权码 = 一个站点</p>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 FastCMS · 核心系统 LGPL-3.0 开源协议</span>
+    <span><a href="fastcms-landing-v2.html#pricing">定价说明</a> · <a href="mailto:support@xjd2020.com">商务 / 支持</a></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  /* 档位选择（同步右卡与订单） */
+  var plan = {price:499, per:"1 年"};
+  var coupon = 0;
+  document.querySelectorAll('#optList .buy-opt').forEach(function(opt){
+    var radio = opt.querySelector('input');
+    radio.addEventListener('change', function(){
+      document.querySelectorAll('#optList .buy-opt').forEach(function(o){o.classList.remove('checked');});
+      opt.classList.add('checked');
+      plan = {price:+radio.dataset.price, per:radio.dataset.per};
+      var strike = document.getElementById('priceStrike');
+      if(radio.dataset.strike){ strike.textContent = radio.dataset.strike; strike.style.display='inline'; }
+      else { strike.style.display='none'; }
+      document.getElementById('priceNum').textContent = '¥'+plan.price.toLocaleString();
+      document.getElementById('pricePer').textContent = '/ '+plan.per+' · 每站点';
+      if(drawerOpen) renderConfirm();
+    });
+  });
+  document.getElementById('btnCoupon').addEventListener('click', function(){
+    var v = document.getElementById('fCoupon').value.trim().toLowerCase();
+    coupon = (v === 'fastcms') ? 50 : 0;
+    document.getElementById('couponOk').style.display = coupon ? 'block' : 'none';
+    renderConfirm();
+  });
+  function total(){ return Math.max(0, plan.price - coupon); }
+  function renderConfirm(){
+    document.getElementById('ordSpec').textContent = plan.per+' · 每站点 · '+document.getElementById('fSite').value;
+    document.getElementById('ordTotal').textContent = '¥'+total().toLocaleString();
+    document.getElementById('ordSave').textContent = coupon ? '（已优惠 ¥'+coupon+'）' : '';
+    var pb = document.getElementById('payBtnAmt');
+    if(pb) pb.textContent = '¥'+total().toLocaleString();
+  }
+  document.getElementById('fSite').addEventListener('change', function(){ if(drawerOpen) renderConfirm(); });
+
+  /* 抽屉开合 + 状态机 */
+  var drawer = document.getElementById('drawer'), mask = document.getElementById('mask'),
+      foot = document.getElementById('dwFoot'), title = document.getElementById('dwTitle'),
+      drawerOpen = false, timerId = null, leftSec = 0;
+  function setState(s, t){
+    document.querySelectorAll('.dw-state').forEach(function(el){ el.classList.toggle('on', el.dataset.state===s); });
+    title.textContent = t;
+    if(s==='confirm'){ foot.style.display='grid'; }
+    else if(s==='paying'){ foot.style.display='none'; startTimer(); drawQR(); }
+    else if(s==='done'){ foot.style.display='grid'; }
+    else { foot.style.display='grid'; }
+  }
+  function openDrawer(){ drawerOpen=true; mask.classList.add('show'); drawer.classList.add('show'); renderConfirm(); setState('confirm','确认订单'); }
+  function closeDrawer(){ drawerOpen=false; mask.classList.remove('show'); drawer.classList.remove('show'); stopTimer(); }
+  document.getElementById('btnOrder').addEventListener('click', openDrawer);
+  document.getElementById('dwClose').addEventListener('click', closeDrawer);
+  mask.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && drawerOpen) closeDrawer(); });
+
+  /* 支付 */
+  function genOrderNo(){ return 'FC'+Date.now().toString().slice(-10)+Math.floor(Math.random()*90+10); }
+  var curOrd = genOrderNo();
+  function payNow(){
+    curOrd = genOrderNo();
+    document.getElementById('ordNo').textContent = curOrd;
+    document.getElementById('payAmt').textContent = '¥'+total().toLocaleString();
+    setState('paying','微信支付');
+  }
+  /* 倒计时 */
+  function startTimer(){ stopTimer(); leftSec = 15*60; tick(); timerId = setInterval(tick, 1000); }
+  function stopTimer(){ if(timerId){ clearInterval(timerId); timerId=null; } }
+  function tick(){
+    var m = Math.floor(leftSec/60), s = leftSec%60;
+    document.getElementById('payTimer').textContent = (m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+    if(--leftSec <= 0){ stopTimer(); setState('timeout','订单已关闭');
+      document.getElementById('btnReorder').textContent='重新下单'; }
+  }
+  /* 模拟支付成功 */
+  document.getElementById('btnPaid').addEventListener('click', function(){
+    stopTimer();
+    document.getElementById('doneOrd').textContent = curOrd;
+    var seg = function(){ return Math.random().toString(36).slice(2,6).toUpperCase(); };
+    document.getElementById('licCode').textContent = 'FC-'+seg()+seg()+seg()+seg();
+    setState('done','支付成功');
+  });
+  document.getElementById('btnTimeout').addEventListener('click', function(){ stopTimer(); leftSec=0; tick(); });
+  document.getElementById('btnCopy').addEventListener('click', function(){
+    var t = document.getElementById('licCode').textContent, b=this;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){
+      b.textContent='已复制 ✓'; setTimeout(function(){ b.textContent='复制授权码'; },1500);
+    }).catch(function(){ b.textContent=t; });
+  });
+  /* 支付成功页底按钮 → 去后台；超时页底按钮 → 重新下单 */
+  function footButton(){
+    var s = document.querySelector('.dw-state.on').dataset.state;
+    var b = document.createElement('button');
+    b.className = 'btn btn-primary btn-lg btn-block';
+    if(s==='done'){ b.textContent='去后台安装'; b.id='btnGoAdmin';
+      b.addEventListener('click', function(){ window.location.href='fastcms-landing-v2.html'; }); }
+    else if(s==='timeout'){ b.textContent='重新下单'; b.id='btnReorder';
+      b.addEventListener('click', function(){ renderConfirm(); setState('confirm','确认订单'); }); }
+    else { b.id='btnPay'; b.innerHTML='微信支付 <span id="payBtnAmt">¥'+total().toLocaleString()+'</span>';
+      b.addEventListener('click', payNow); }
+    foot.innerHTML=''; foot.appendChild(b);
+    if(s==='confirm'){ var p=document.createElement('p'); p.className='pay-line';
+      p.textContent='支付即同意《授权协议》· 一个授权码 = 一个站点'; foot.appendChild(p); }
+  }
+  /* 覆写 setState 的 footer 渲染 */
+  var _set = setState;
+  setState = function(s,t){ _set(s,t); footButton(); };
+  /* 假二维码（演示占位，正式环境为 wechat-pay 插件 Native 支付二维码） */
+  function drawQR(){
+    var box = document.getElementById('qr'); box.innerHTML='';
+    var seed = 20261015;
+    function rnd(){ seed = (seed*1103515245+12345) & 0x7fffffff; return seed/0x7fffffff; }
+    var N=21, finder=function(r,c){ return (r<7&&c<7)||(r<7&&c>=N-7)||(r>=N-7&&c<7); };
+    for(var r=0;r<N;r++) for(var c=0;c<N;c++){
+      var i=document.createElement('i');
+      var on;
+      if(finder(r,c)){ var lr=r<7?r:r-(N-7), lc=c<7?c:c-(N-7);
+        on = (lr===0||lr===6||lc===0||lc===6||(lr>=2&&lr<=4&&lc>=2&&lc<=4)); }
+      else on = rnd() > .5;
+      if(on) i.className='on';
+      box.appendChild(i);
+    }
+  }
+  renderConfirm();
+})();
+</script>
+</body>
+</html>

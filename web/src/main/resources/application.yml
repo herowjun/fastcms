@@ -60,6 +60,22 @@ fastcms:
         # max-format-rounds: 3           # 设计稿格式校验（V1~V6）轮上限
         # design-max-tokens: 24000       # 单页设计稿输出 token 上限
         # section-confidence-threshold: 0.7  # 组件映射置信阈值（低于→custom_macro）
+        # --- B4 骨架先行 + 早停三件套 ---
+        # skeleton-first: true           # 骨架先行：先出 section 清单，再以骨架为硬约束写整页 HTML
+        # reasoning-budget-chars: 40000  # 思考预算（累计思考字符数上限），≤0 不限制
+        # stall-timeout-millis: 90000    # 静止超时：90 秒无任何输出即判假死并中止本轮
+        # loop-window-chars: 400         # 循环检测窗口（思考文本尾部片段长度）
+        # loop-repeat-threshold: 3       # 窗口片段重复这么多次即判循环并中止本轮
+        # log-reasoning: true            # 思考落盘到 workDir/design-log/<page>.reasoning.txt
+      # --- B3 上下文分层：调整轮上下文注入预算（tokens） ---
+      # 调小 = 更快更省；调大 = AI 能看到更多上下文（更慢）
+      # adjust:
+      #   focused-closure-tokens: 24000  # 聚焦模式：当前页 + 依赖闭包全文注入上限
+      #   full-section-tokens: 60000     # 全量模式：全站文件注入上限
+      #   asset-full-tokens: 4000        # 单个 JS/CSS 文件全文注入阈值，超过只注入头部
+      # --- B5：生成模式。component = AI 只出 PageSpec JSON，渲染引擎确定性生成 HTML（推荐）；
+      #     html = AI 直写 HTML 的旧分批流水线（回退用） ---
+      # gen-mode: component
 
 logging:
   config: classpath:META-INF/logback/fastcms.xml

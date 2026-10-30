@@ -14,7 +14,7 @@
     <properties>
         <plugin.id>hello-world-plugin</plugin.id>
         <plugin.class>com.fastcms.hello.HelloPlugin</plugin.class>
-        <plugin.version>0.0.1</plugin.version>
+        <plugin.version>${revision}</plugin.version>
         <plugin.provider>wjun_java@163.com</plugin.provider>
         <plugin.description>hello, fastcms plugin world</plugin.description>
         <plugin.dependencies />
@@ -62,6 +62,7 @@
                             <Plugin-Id>${plugin.id}</Plugin-Id>
                             <Plugin-Class>${plugin.class}</Plugin-Class>
                             <Plugin-Version>${plugin.version}</Plugin-Version>
+                            <Plugin-Fastcms-Version>${fastcms.min.version}</Plugin-Fastcms-Version>
                             <Plugin-Provider>${plugin.provider}</Plugin-Provider>
                             <Plugin-description>${plugin.description}</Plugin-description>
                             <Plugin-Dependencies>${plugin.dependencies}</Plugin-Dependencies>

@@ -20,6 +20,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fastcms.ai.service.IAiModelConfigService;
 import com.fastcms.ai.support.AiApiKeyCipher;
+import com.fastcms.ai.support.AiReasoningSupport;
+import com.fastcms.ai.support.AiThinkingBudget;
 import com.fastcms.entity.AiModelConfig;
 import com.fastcms.mapper.AiModelConfigMapper;
 import org.slf4j.Logger;
@@ -112,6 +114,30 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
                 : IAiModelConfigService.SCENE_CHAT;
     }
 
+    /**
+     * 思考档位归一化
+     *
+     * <p>合法值：{@code auto/off/low/medium/xhigh}（另兼容 {@code high/minimal}，
+     * 运行时由 {@link AiReasoningSupport#normalize} 映射到端点实际支持的枚举）。
+     * 非法值/空值一律降级为 {@code null}（= auto，跟随场景默认）——不抛异常，
+     * 避免因为一个选填字段挡住整条配置的保存。</p>
+     */
+    static String normalizeReasoningEffort(String effort) {
+        if (effort == null || effort.isBlank()) {
+            return null;
+        }
+        String v = effort.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (v) {
+            case AiReasoningSupport.EFFORT_AUTO, AiReasoningSupport.EFFORT_OFF,
+                 AiReasoningSupport.EFFORT_LOW, AiReasoningSupport.EFFORT_MEDIUM,
+                 AiReasoningSupport.EFFORT_XHIGH, "high", "minimal" -> v;
+            default -> {
+                log.warn("AI 模型思考档位取值非法，已降级为 auto: {}", effort);
+                yield null;
+            }
+        };
+    }
+
     @Override
     public String testConnection(Long id) {
         AiModelConfig config = getById(id);
@@ -120,9 +146,10 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
         }
         try {
             // 测试连接只探测端点连通性与鉴权，不复用 MODEL_CACHE（其 callTimeout 为 10 分钟，
-            // 同步等待会长时间占用 Servlet 线程），这里单独构建 30 秒短超时的一次性模型
+            // 同步等待会长时间占用 Servlet 线程），这里单独构建 30 秒短超时的一次性模型。
+            // 思考档位取「确定性」档（关思考）：探活只需拿到一个响应，深度思考纯属浪费
             ChatModel testModel = OpenAiChatModel.builder()
-                    .options(baseOptionsBuilder(config)
+                    .options(optionsBuilder(config, AiReasoningSupport.SCENE_DETERMINISTIC)
                             .timeout(java.time.Duration.ofSeconds(30))
                             .build())
                     .build();
@@ -152,6 +179,8 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
         config.setApiKey(AiApiKeyCipher.encrypt(config.getApiKey()));
         // 场景归一化：历史数据/前端缺省视为 chat
         config.setScene(normalizeScene(config.getScene()));
+        // 思考档位归一化：非法值降级为 auto（跟随场景默认），避免把端点不认的值发给上游导致 400
+        config.setReasoningEffort(normalizeReasoningEffort(config.getReasoningEffort()));
         // 如果是新增且 active 未指定，默认 false
         if (config.getId() == null && config.getActive() == null) {
             config.setActive(false);
@@ -210,8 +239,25 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
 
     private static ChatModel doBuildChatModel(AiModelConfig config) {
         return OpenAiChatModel.builder()
-                .options(baseOptionsBuilder(config).build())
+                .options(optionsBuilder(config, AiReasoningSupport.SCENE_REASONING).build())
                 .build();
+    }
+
+    /**
+     * 构建 options 基底 + 思考档位（各调用点的推荐入口）
+     *
+     * <p>思考档位的作用：推理端点不传参数时默认是最高档（Qwen 系端点为 xhigh），
+     * 思考 token 与正文 token 同价（实测 48 tok/s），会让「简单问题」多等数分钟。
+     * 这里按场景传入默认档，配置列显式值优先。</p>
+     *
+     * @param config       模型配置
+     * @param sceneDefault 场景默认档位（{@link AiReasoningSupport#SCENE_REASONING}
+     *                     / {@link AiReasoningSupport#SCENE_DETERMINISTIC}）
+     */
+    public static OpenAiChatOptions.Builder optionsBuilder(AiModelConfig config, String sceneDefault) {
+        OpenAiChatOptions.Builder builder = baseOptionsBuilder(config);
+        AiReasoningSupport.apply(builder, config, sceneDefault);
+        return builder;
     }
 
     /**
@@ -222,6 +268,9 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
      * timeout 漏设会断流（SDK 回退 60s callTimeout，长推理必挂"Stream failed"）。
      * 因此任何 runtime 覆盖 options 都必须从本基底出发构建，保证
      * apiKey/baseUrl/timeout/customHeaders 等字段永远在场。</p>
+     *
+     * <p><b>思考档位不在本方法内装配</b>：档位与场景相关（生成要思考、分类不用），
+     * 由调用方用 {@link #optionsBuilder(AiModelConfig, String)} 传入场景默认值。</p>
      */
     public static OpenAiChatOptions.Builder baseOptionsBuilder(AiModelConfig config) {
         OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
@@ -247,6 +296,41 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
             optionsBuilder.customHeaders(customHeaders);
         }
         return optionsBuilder;
+    }
+
+    /**
+     * 构建「强制关闭思考」的 options（保留原 maxTokens / temperature）
+     *
+     * <p>用于「思考吃满预算 → 关思考重试」的兜底轮（2026-10-29 端点实测：
+     * {@code max_tokens} 是思考 + 正文共享预算，且<b>预算越大模型思考越长</b>，
+     * 所以<b>不翻倍上限</b>——翻倍只会给思考更多空间、正文照样是 0；
+     * 关思考后思考恒为 0，全部预算归正文）。</p>
+     *
+     * <p>关思考形态按端点族分流（Qwen 系走 {@code chat_template_kwargs.enable_thinking=false}，
+     * 其他端点走 {@code reasoning_effort=minimal}），见 {@link AiThinkingBudget#forceOff}。</p>
+     *
+     * <p><b>必须从 {@link #baseOptionsBuilder} 出发</b>：请求级 options 整体替换默认 options
+     * （不合并），漏设 apiKey/baseUrl/timeout 会 404 / 断流。</p>
+     *
+     * @param config 模型配置（为空时返回 null）
+     * @param origin 原 options（可空；提供 maxTokens / temperature 沿用原值）
+     * @return 关思考的 options；config 为空时返回 null
+     */
+    public static OpenAiChatOptions thinkingOffOptions(AiModelConfig config, OpenAiChatOptions origin) {
+        if (config == null) {
+            return null;
+        }
+        OpenAiChatOptions.Builder builder = baseOptionsBuilder(config);
+        if (origin != null) {
+            if (origin.getMaxTokens() != null) {
+                builder.maxTokens(origin.getMaxTokens());
+            }
+            if (origin.getTemperature() != null) {
+                builder.temperature(origin.getTemperature());
+            }
+        }
+        AiThinkingBudget.forceOff(builder, config);
+        return builder.build();
     }
 
     /**

@@ -18,11 +18,9 @@ package com.fastcms.ai.template;
 
 import com.fastcms.ai.agent.BuiltinAgents;
 import com.fastcms.ai.component.DesignDirectionLibrary;
+import com.fastcms.ai.skill.RequiredSkills;
 import com.fastcms.ai.skill.SkillRegistry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -50,17 +48,68 @@ import java.util.Map;
 @Component
 public class TemplateGenPromptBuilder {
 
-    private static final Logger log = LoggerFactory.getLogger(TemplateGenPromptBuilder.class);
-
     /**
-     * 技能注册中心：模板制作规范段（## 1~## 11）优先从插件技能
+     * 技能注册中心：模板制作规范段（## 1~## 11）从插件技能
      * {@code template-skills-plugin/template-spec} 加载（规范随插件可插拔/可升级），
-     * 技能缺失时回退内置副本 {@link #SPEC_PROMPT_BUILTIN}（两条路径提示词逐字节一致）
+     * 技能缺失时明确失败而非静默回退（见 {@link RequiredSkills}）
      */
     private final SkillRegistry skillRegistry;
 
     public TemplateGenPromptBuilder(SkillRegistry skillRegistry) {
         this.skillRegistry = skillRegistry;
+    }
+
+    // ==================== CSS/JS 分离规范（单一来源） ====================
+
+    /**
+     * HTML / CSS / JS 分离的规范条款（2026-10-29）
+     *
+     * <p><b>为什么强调</b>：内联 CSS/JS 会把 HTML 撑大 → ①每轮对话都要把整页塞进
+     * 提示词（prefill 成本）；②改一行 CSS 也要在巨大 HTML 里定位补丁片段；
+     * ③与补丁协议相冲突（补丁要在原文唯一定位，文件越大越脆弱）。
+     * 实测 AI 经常违反「只写在提示词里」的规范，所以除了提示词，
+     * 还有 {@code TemplateComplianceChecker} 的确定性抽取兜底。</p>
+     *
+     * <p><b>措辞原则</b>（2026-10-29 用户澄清）：<b>不是禁止内联</b>——人工快速调整模板时
+     * 在 HTML 里写少量 CSS/JS 是合理写法。因此这里说「默认分开写」而不是「严禁内联」，
+     * 并明确给出「少量内联可以接受」的例外，避免 AI 把用户的合法写法也当成违规。</p>
+     *
+     * <p><b>用法</b>：生成型（规划轮/用户提示词/单文件轮）与修改型（微调/调整/锚点/审计）
+     * <b>共用同一段文本</b>，避免各轮各写一套导致口径漂移。</p>
+     */
+    private static final String ASSET_SEPARATION_RULE = """
+            **CSS/JS 分离（默认分开写）**：
+            - 默认把样式写入 `static/css/*.css` 文件、脚本写入 `static/js/*.js` 文件，
+              HTML 通过引用引入：`<link rel="stylesheet" href="${ctx()}/css/base.css">`（放 head 里）
+              与 `<script src="${ctx()}/js/main.js"></script>`（放 body 末尾）；
+            - 这样做的收益是后续修改能精准定位到单个文件——内联在 HTML 里的大段代码
+              会让每次修改都要重新通读整个页面；
+            - **但不是禁止内联**：少量、与结构强绑定的代码可以留在 HTML 里，例如
+              几行关键样式、DOM 就绪后的初始化、页面级的小交互脚本；
+              只有「成百上千行的大段 CSS/JS」才需要拆出去；
+            - 判断标准是体量：内联块超过约 2000 字符或 60 行就该拆到独立文件。
+            """;
+
+    /**
+     * 单文件生成轮用的分离约束（更短，针对具体目标文件）
+     *
+     * @param targetPath 目标文件相对路径
+     */
+    private static String assetSeparationRuleFor(String targetPath) {
+        String name = targetPath.contains("/")
+                ? targetPath.substring(targetPath.lastIndexOf('/') + 1)
+                : targetPath;
+        if (name.endsWith(".css") || name.endsWith(".js")) {
+            // 目标本身就是独立资源文件：只需提醒不要把内容写回 HTML
+            return "本文件是独立的样式/脚本文件——**CSS/JS 分离：内容写在这里**；"
+                    + "HTML 页面里用 <link rel=\"stylesheet\"> / <script src> 引用它即可，"
+                    + "（少量与结构强绑定的代码留在 HTML 里也没问题，不必把本文件内容复制回去）。";
+        }
+        return "本文件是 HTML——**CSS/JS 分离：默认大段样式与脚本拆到独立文件**："
+                + "样式写进 `static/css/*.css`、脚本写进 `static/js/*.js`，"
+                + "用 `<link rel=\"stylesheet\" href=\"${ctx()}/css/base.css\">` 与 "
+                + "`<script src=\"${ctx()}/js/main.js\"></script>` 引用它们；"
+                + "少量关键样式与初始化代码可以留在 HTML 里，不必强行拆分。";
     }
 
     // ==================== 深度焕新设计方向（单一来源） ====================
@@ -320,8 +369,9 @@ public class TemplateGenPromptBuilder {
      * @param mobileAdaptive 是否适配移动端（控制第 10 节移动端适配与行为准则第 3 条的强弱）
      */
     public String buildSystemPrompt(String templateName, boolean mobileAdaptive) {
-        // 规范段（## 1~## 11）：插件技能优先，缺失回退内置副本；协议段（## 12 + 行为准则）恒内置。
-        // 拼装顺序与原 BASE_SYSTEM_PROMPT 单常量逐字节一致（规范段 + 空行 + 协议段）。
+        // 规范段（## 1~## 11）来自插件技能 template-spec；协议段（## 12 + 行为准则）恒内置。
+        // 规范段缺失时明确失败（不再回退内置副本）——内置副本与插件正文会漂移，
+        // 静默回退到一份缺章节的旧规范，比直接报错更危险（见 RequiredSkills 类注释）。
         String base = loadSpecPrompt() + "\n\n" + SYSTEM_PROMPT_TAIL;
         return base
                 .replace("${templateName}", templateName)
@@ -332,17 +382,13 @@ public class TemplateGenPromptBuilder {
     /**
      * 加载模板制作规范段（系统提示词 ## 1~## 11）
      *
-     * <p>优先读插件技能 {@code template-skills-plugin/template-spec}（SKILL.md 正文，
-     * 与 {@link #SPEC_PROMPT_BUILTIN} 内容保持同步）；插件未安装或技能解析失败返回 null，
-     * 回退内置副本——保证规范段永远可用，且两条路径提示词一致。</p>
+     * <p>读插件技能 {@code template-skills-plugin/template-spec}（SKILL.md 正文）。
+     * <b>缺失时抛异常而不是回退内置副本</b>——内置副本曾长期与插件正文漂移
+     * （缺 §1.0 CSS/JS 分离、§1.1 栏目专属页），静默回退会让模型拿到残缺规范却毫无察觉。
+     * 规范随插件版本化，要改只能升级插件（见 {@code RequiredSkills}）。</p>
      */
     private String loadSpecPrompt() {
-        String skillContent = skillRegistry.loadContent(BuiltinAgents.TEMPLATE_SPEC_SKILL_ID);
-        if (StringUtils.hasText(skillContent)) {
-            return skillContent;
-        }
-        log.warn("模板制作规范技能 [{}] 未加载，系统提示词回退内置规范段", BuiltinAgents.TEMPLATE_SPEC_SKILL_ID);
-        return SPEC_PROMPT_BUILTIN;
+        return RequiredSkills.requireContent(skillRegistry, BuiltinAgents.TEMPLATE_SPEC_SKILL_ID, "模板生成系统提示词");
     }
 
     /**
@@ -391,8 +437,9 @@ public class TemplateGenPromptBuilder {
                 + "       且其所有祖先（父菜单）也应加 active 类（递归 children 时同步判断）\n"
                 + "   8.4 _layout.html 中必须包含一个递归宏（如 menuChildren）处理二级及以下菜单，子菜单 active 同样按前缀匹配\n"
                 + "   8.5 CSS 中必须定义 nav li.active > a { 颜色/下划线/背景 高亮 } 样式\n"
-                + "9. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
-                + "10. 请全程使用中文思考和回复\n";
+                + "9. " + ASSET_SEPARATION_RULE + "\n"
+                + "10. 严格按照约定的 JSON 对象格式输出（reply 字段总结生成结果，files 字段为文件数组），不要输出额外解释\n"
+                + "11. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -412,11 +459,14 @@ public class TemplateGenPromptBuilder {
                 + "2. 必须涵盖必备文件：_template.properties、_layout.html、_articlePage.html（文章分页宏，被 _layout.html include）、"
                 + "index.html、article.html、article_list.html、page.html、_preview_data.json（菜单/文章标题贴合需求主题），"
                 + "以及基础样式 static/css/base.css\n"
-                + "3. static/js 为可选目录：仅当确有交互脚本需求时才规划，脚本统一放 static/js/main.js，没有交互脚本则不要规划任何 js 文件；"
-                + "其他文件可按需补充，但文件总数控制在 10 个以内\n"
-                + "4. reply 字段简要说明整体设计思路（配色、布局、栏目结构，100 字以内）\n"
-                + "5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n"
-                + "6. 请全程使用中文思考和回复\n";
+                + "3. static/js 目录：模板有交互（轮播、汉堡菜单、表单校验、滚动动画等）时**必须**规划 JS 文件，"
+                + "统一放 static/js/main.js（交互多时可拆 main.js + 其他文件，但总数控制在 3 个以内）；"
+                + "完全没有交互则不要规划任何 js 文件；\n"
+                + "4. 其他文件可按需补充，但文件总数控制在 10 个以内\n"
+                + "5. " + ASSET_SEPARATION_RULE + "\n"
+                + "6. reply 字段简要说明整体设计思路（配色、布局、栏目结构，100 字以内）\n"
+                + "7. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n"
+                + "8. 请全程使用中文思考和回复\n";
     }
 
     /**
@@ -446,17 +496,19 @@ public class TemplateGenPromptBuilder {
                 .append("`，content 为完整文件内容，action 为 create\n")
                 .append("2. content 必须是可直接使用的完整内容，禁止省略或输出占位符（如 ... 省略 ...）\n")
                 .append("3. 控制篇幅：").append(buildSizeHint(targetPath, mobileAdaptive)).append('\n')
-                .append("4. 静态资源路径使用 ${ctx()} 前缀\n");
+                .append("4. 静态资源路径使用 ${ctx()} 前缀\n")
+                // CSS/JS 分离规范：逐文件生成时最容易把大段样式/脚本直接写进 HTML，这里逐文件点明
+                .append("5. ").append(assetSeparationRuleFor(targetPath)).append('\n');
 
         // 针对关键文件追加差异化强约束（覆盖生成型与分块单文件两条路径共用此提示词）
         String extra = buildTargetFileConstraint(targetPath, mobileAdaptive);
         if (extra != null && !extra.isBlank()) {
-            sb.append("5. ").append(extra).append('\n');
+            sb.append("6. ").append(extra).append('\n');
+            sb.append("7. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
+              .append("8. 请全程使用中文思考和回复\n");
+        } else {
             sb.append("6. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
               .append("7. 请全程使用中文思考和回复\n");
-        } else {
-            sb.append("5. 严格按照约定的 JSON 对象格式输出，不要包裹 markdown 代码块\n")
-              .append("6. 请全程使用中文思考和回复\n");
         }
 
         if (retryHint != null && !retryHint.isBlank()) {
@@ -482,7 +534,10 @@ public class TemplateGenPromptBuilder {
                     + (mobileAdaptive
                         ? "(d) 移动端汉堡按钮 `<input type=\"checkbox\" id=\"nav-toggle\">` + label + 三横线 span；"
                         : "(d) 本会话为桌面专用模板，无需移动端汉堡按钮与响应式结构；")
-                    + "(e) 不引入 Bootstrap/jQuery，不使用 data-toggle。菜单选中判断必须在 FreeMarker 层，不要只在 JS 里切";
+                    + "(e) 不引入 Bootstrap/jQuery，不使用 data-toggle。菜单选中判断必须在 FreeMarker 层，不要只在 JS 里切；"
+                    + "(f) 大段样式与脚本用引用引入（<link rel=\"stylesheet\" href=\"${ctx()}/css/base.css\"> 与 "
+                    + "<script src=\"${ctx()}/js/main.js\"></script>），**不要在本文件里内联成百上千行的大段 CSS/JS**"
+                    + "（少量关键样式与初始化代码可以保留）;";
         }
         if (name.endsWith(".css")) {
             return (mobileAdaptive
@@ -602,23 +657,42 @@ public class TemplateGenPromptBuilder {
     /**
      * 构建微调提示词（用户在已有会话中提出修改要求）
      *
+     * <p><b>2026-10-29 起走 patches 补丁通道</b>：原实现要求模型输出整文件（files.content），
+     * 改一行也要吐整个文件 → 输出 token 成本与文件大小成正比。
+     * 现改为只输出变更片段（search/replace），由 {@code FilePatchApplier} 定位替换后还原整文件。</p>
+     *
+     * <p><b>因此入参必须是文件「完整内容」而不是文件清单</b>——模型要写出 search，
+     * 必须能看到原文才能逐字摘出待替换片段。</p>
+     *
      * @param requirement 用户的微调需求
-     * @param currentFiles 当前会话已生成的文件清单（供 AI 参考上下文）
+     * @param currentFilesWithContent 当前已有文件及其完整内容（相对路径 + 内容）
      */
-    public String buildRefinePrompt(String requirement, String currentFiles) {
+    public String buildRefinePrompt(String requirement, String currentFilesWithContent) {
         return "请基于当前已有的模板文件进行微调。\n\n"
                 + "## 微调需求\n\n" + requirement + "\n\n"
-                + "## 当前已有文件（相对路径）\n\n" + currentFiles + "\n\n"
                 + "## 数据与展示的边界（重要）\n\n"
                 + "菜单、分类、标签、单页、文章标题等演示内容由 `_preview_data.json` 驱动。"
                 + "凡属于内容增删改的需求（如\"去掉XX菜单\"\"增加一个栏目\"\"更换文章标题\"），"
                 + "必须通过修改 _preview_data.json 实现（没有则新建，action=create，menus 等字段填入调整后的完整内容）；"
                 + "严禁在模板 HTML 中加入菜单名过滤、内容判断等写死逻辑，模板必须保持数据驱动。\n\n"
-                + "## 输出要求\n\n"
-                + "1. files 数组中仅输出需要修改或新增的文件，未提及的文件保持不变\n"
-                + "2. action 字段：新增文件用 create，修改文件用 modify\n"
-                + "3. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次微调内容，files 字段为变更文件数组）\n"
-                + "4. 请全程使用中文思考和回复\n";
+                + "## 当前已有文件（相对路径 + 完整内容）\n\n"
+                + currentFilesWithContent + "\n\n"
+                + "## 输出要求（本轮使用 **patches 补丁通道**）\n\n"
+                + "**CSS/JS 分离**：样式改动优先改 static/css/*.css、脚本改动优先改 static/js/*.js；\n"
+                        + "   已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n"
+                + "1. **只输出变更片段，不要重发整个文件**："
+                + "\"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]\n"
+                + "2. search 必须逐字来自上方注入的文件内容，且在该文件中**唯一出现**"
+                + "（多处出现会判歧义导致补丁被拒；必要时多带几行上下文保证唯一）\n"
+                + "3. replace 是替换后的新内容（空字符串表示删除该片段）\n"
+                + "4. 只有两种情况才用 files 通道：**新建文件**，或改动范围超过该文件 70%"
+                + "（此时补丁片段反而更长）。files 元素格式："
+                + "{\"path\":\"相对路径\",\"content\":\"完整内容\",\"action\":\"create|modify|delete\"}\n"
+                + "5. 同一个文件不要同时出现在 patches 和 files 里（二选一）\n"
+                + "6. 未提及的文件保持不变，不要输出\n"
+                + "7. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次微调内容）\n"
+                + "8. 请全程使用中文思考和回复\n"
+                + "9. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
     }
 
     /**
@@ -690,17 +764,25 @@ public class TemplateGenPromptBuilder {
                 + currentFilesWithContent + "\n\n"
                 + manifestSection
                 + toolGuideSection
-                + "## 输出要求\n\n"
-                + "1. files 数组中仅输出需要修改或新增的文件，未提及的文件保持不变\n"
-                + "2. action 字段：新增文件用 create，修改文件用 modify，删除文件用 delete\n"
-                + "3. 修改文件时必须基于上述文件内容输出修改后的完整内容，不要凭空臆造原有内容"
-                + (focused ? "（未注入的文件先用 read_template_file 查看）" : "") + "\n"
-                + "4. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次调整内容，files 字段为变更文件数组）\n"
-                + "5. 若用户要求切换/查看某个页面（如「切换到首页」「看下文章详情页」）而无需修改文件，"
+                + "## 输出要求（本轮使用 **patches 补丁通道**）\n\n"
+                + "**CSS/JS 分离**：样式改动优先改 static/css/*.css、脚本改动优先改 static/js/*.js；\n"
+                        + "   已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n"
+                + "1. 修改已有文件时**只输出变更片段**，不要重发整个文件："
+                + "\"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]\n"
+                + "2. search 必须逐字来自上方注入的文件内容，且在该文件中**唯一出现**"
+                + "（多处出现会判歧义导致补丁被拒；必要时多带几行上下文保证唯一）\n"
+                + "3. replace 是替换后的新内容（空字符串表示删除该片段）\n"
+                + "4. 只有两种情况才用 files 通道：**新建文件**，或改动范围超过该文件 70%"
+                + "（此时补丁片段反而更长）。files 元素格式："
+                + "{\"path\":\"相对路径\",\"content\":\"完整内容\",\"action\":\"create|modify|delete\"}\n"
+                + "5. 同一个文件不要同时出现在 patches 和 files 里（二选一）\n"
+                + "6. 未提及的文件保持不变，不要输出\n"
+                + "7. 严格按照约定的 JSON 对象格式输出（reply 字段说明本次调整内容）\n"
+                + "8. 若用户要求切换/查看某个页面（如「切换到首页」「看下文章详情页」）而无需修改文件，"
                 + "在 JSON 顶层额外输出 \"switchTo\": \"目标页面文件路径\"（取自上方文件清单中的可路由 HTML，"
                 + "如 index.html、article.html、page_about.html），系统会把预览切到该页面；修改文件的轮次无需该字段\n"
-                + "6. 请全程使用中文思考和回复\n"
-                + "7. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
+                + "9. 请全程使用中文思考和回复\n"
+                + "10. 控制思考时间在最短必要范围：调整方案明确后直接输出，不要反复推演\n";
     }
 
     /**
@@ -851,14 +933,29 @@ public class TemplateGenPromptBuilder {
                 .append("（残留旧 class 会与新样式冲突）\n\n")
                 .append("## 本批待改造文件（相对路径 + 完整内容）\n\n")
                 .append(filesWithContent).append("\n\n")
-                .append("## 输出要求\n\n")
-                .append("1. files 数组输出本批全部文件的 modify（完整改造后内容），一个文件都不能漏\n")
-                .append("2. **即使核对后认为某文件已完全符合规范、无需任何改动，也必须把该文件原样完整输出")
-                .append("（内容一字不改）**——不输出该文件会导致升级进度卡死\n")
-                .append("3. 严格按照约定的 JSON 对象格式输出（reply 字段简述本批改造要点，files 字段为文件数组）\n")
-                .append("4. 只使用上方 utility 类族与变量清单内的类/变量，不确定就换成熟悉的基础类\n")
-                .append("5. 请全程使用中文思考和回复\n")
-                .append("6. 控制思考时间在最短必要范围：按铁律逐条核对后直接输出\n");
+                .append("## 输出要求（**按文件类型二选一**，不要混用）\n\n")
+                .append("**A. 整页重做的文件（标题没有「注：本文件仅区块…」标记）**\n")
+                .append("   本轮要对这个文件做**整体视觉重做**——用 files 通道输出改造后的完整内容：\n")
+                .append("   \"files\": [{\"path\":\"相对路径\",\"content\":\"改造后的完整内容\",\"action\":\"modify\"}]\n")
+                .append("   （视觉重做意味着全篇样式都要变，输出全文是这类任务的固有成本，不是浪费）\n\n")
+                .append("**B. 只需局部改造的文件（标题带「注：本文件仅区块 N、M…」标记）**\n")
+                .append("   只有这些区块需要重做，其余区块已是新版、必须原样保留——用 patches 通道")
+                .append("**只输出需重做区块的变更片段**，不要重发整个文件：\n")
+                .append("   \"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]\n")
+                .append("   search 必须逐字来自上方注入的文件内容，且在该文件中**唯一出现**；")
+                .append("必要时多带几行上下文保证唯一；replace 是替换后的新内容\n\n")
+                .append("**C. 完全无需改动的文件**\n")
+                .append("   在 \"unchanged\" 数组里列出路径即可")
+                .append("（如 \"unchanged\": [\"_layout.html\"]）——不要为了占位把文件原样完整输出\n\n")
+                .append("其余规则：\n")
+                .append("1. 同一个文件不要同时出现在 files / patches / unchanged 里（只能选一个）\n")
+                .append("2. 本批目标文件（A + B + C 三类）必须覆盖全部，一个都不能漏，否则升级进度卡死\n")
+                .append("3. **CSS/JS 分离**：样式改动优先写进 static/css/*.css，脚本改动优先写进 static/js/*.js，"
+                        + "HTML 只保留引用；已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n")
+                .append("4. 严格按照约定的 JSON 对象格式输出（reply 字段简述本批改造要点）\n")
+                .append("5. 只使用上方 utility 类族与变量清单内的类/变量，不确定就换成熟悉的基础类\n")
+                .append("6. 请全程使用中文思考和回复\n")
+                .append("7. 控制思考时间在最短必要范围：按铁律逐条核对后直接输出\n");
         return sb.toString();
     }
 
@@ -984,15 +1081,25 @@ public class TemplateGenPromptBuilder {
                 .append("2. 修复必须针对审计问题本身，不要大幅重构已改造好的部分\n\n")
                 .append("## 待修复文件（相对路径 + 完整内容）\n\n")
                 .append(filesWithContent).append("\n\n")
-                .append("## 输出要求\n\n")
-                .append("1. files 数组输出全部涉事文件修复后的完整内容（action=modify）\n")
-                .append("2. 严格按照约定的 JSON 对象格式输出（reply 简述修复内容，files 为文件数组）\n")
-                .append("3. 请全程使用中文思考和回复\n");
+                .append("## 输出要求（本轮使用 **patches 补丁通道**）\n\n")
+                .append("**CSS/JS 分离**：样式改动优先改 static/css/*.css、脚本改动优先改 static/js/*.js；\n"
+                        + "   已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n")
+                .append("1. **只输出要修复的变更片段，不要重发整个文件**：")
+                .append("\"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]\n")
+                .append("2. search 必须逐字来自上方注入的文件内容，且在该文件中**唯一出现**；")
+                .append("必要时多带几行上下文保证唯一\n")
+                .append("3. replace 是替换后的新内容（空字符串表示删除该片段）\n")
+                .append("4. 同一个文件不要同时出现在 patches 和 files 里（二选一）\n")
+                .append("5. 严格按照约定的 JSON 对象格式输出（reply 简述修复内容）\n")
+                .append("6. 请全程使用中文思考和回复\n");
         return sb.toString();
     }
 
     /**
      * 构建锚点存活校验失败的修复提示（升级管线专用）
+     *
+     * <p><b>2026-10-29 起走 patches 补丁通道</b>：锚点修复只需在元素上补回 id/class，
+     * 原实现却要求模型输出修正后的完整文件 → 输出 token 与文件大小成正比。</p>
      *
      * @param missingAnchors 本次改造丢失的锚点清单
      * @param filesWithContent 改造后的文件内容（含丢失锚点的最新版本）
@@ -1008,9 +1115,17 @@ public class TemplateGenPromptBuilder {
                 .append("请在对应功能元素（轮播容器、导航、表单等）上补回这些 id/class，宏定义补回默认值，其余改造结果保持不变。\n\n")
                 .append("## 改造后的文件（需要修正的最新版本）\n\n")
                 .append(filesWithContent).append("\n\n")
-                .append("## 输出要求\n\n")
-                .append("1. files 数组输出修正后的完整文件（action=modify）\n")
-                .append("2. 严格按照约定的 JSON 对象格式输出\n");
+                .append("## 输出要求（本轮使用 **patches 补丁通道**）\n\n")
+                .append("**CSS/JS 分离**：样式改动优先改 static/css/*.css、脚本改动优先改 static/js/*.js；\n"
+                        + "   已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n")
+                .append("1. **只输出要补回锚点的变更片段，不要重发整个文件**：")
+                .append("\"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]\n")
+                .append("2. search 必须逐字来自上方注入的文件内容，且在该文件中**唯一出现**；")
+                .append("必要时多带几行上下文保证唯一\n")
+                .append("3. replace 是替换后的新内容（空字符串表示删除该片段）\n")
+                .append("4. 本轮只补锚点，**其余部分保持原样**——不要顺手重构、不要改动视觉样式\n")
+                .append("5. 同一个文件不要同时出现在 patches 和 files 里（二选一）\n")
+                .append("6. 严格按照约定的 JSON 对象格式输出（reply 简述补回了哪些锚点）\n");
         return sb.toString();
     }
 
@@ -1035,10 +1150,15 @@ public class TemplateGenPromptBuilder {
                         : "用户当前聚焦页面：" + currentFile + "，优先修复与该页面相关的错误。\n\n")
                 .append("## 当前模板文件（渲染失败的最新版本，相对路径 + 完整内容）\n\n")
                 .append(currentFilesWithContent).append("\n\n")
-                .append("## 输出要求\n\n")
-                .append("1. 只输出需要修改的文件（action=modify），基于上述内容给出修复后的完整文件\n")
-                .append("2. 修复必须消除报错本身，不要用 try/catch 或判断语句绕过/吞掉错误\n")
-                .append("3. 严格按照约定的 JSON 对象格式输出（reply 简述修复了什么，files 为修复后的文件）\n");
+                .append("## 输出要求（本轮使用 **patches 补丁通道**）\n\n")
+                .append("**CSS/JS 分离**：样式改动优先改 static/css/*.css、脚本改动优先改 static/js/*.js；\n"
+                        + "   已有文件里的少量内联 CSS/JS 保持原样即可，不要顺手拆出去\n")
+                .append("1. 只修复报错处：\"patches\": [{\"path\":\"相对路径\",\"search\":\"待替换的原文片段\",\"replace\":\"替换后的新内容\"}]，"
+                        + "不要重发整个文件\n")
+                .append("2. search 必须逐字来自上方注入的文件内容，且在该文件中唯一出现；必要时多带几行上下文保证唯一\n")
+                .append("3. replace 是替换后的新内容（空字符串表示删除该片段）\n")
+                .append("4. 修复必须消除报错本身，不要用 try/catch 或判断语句绕过/吞掉错误\n")
+                .append("5. 严格按照约定的 JSON 对象格式输出（reply 简述修复了什么）\n");
         return sb.toString();
     }
 
@@ -1051,321 +1171,6 @@ public class TemplateGenPromptBuilder {
      * 系统提示词的规范段（## 1~## 11）优先加载该技能，插件未安装或技能缺失时回退本常量，
      * 两条路径拼出的提示词逐字节一致。</p>
      */
-    private static final String SPEC_PROMPT_BUILTIN = """
-            你是一名资深的前端工程师和 fastcms 模板开发专家，精通 FreeMarker 模板引擎与响应式网页设计。
-            你的任务是：根据用户需求，生成符合 fastcms 规范的完整网站模板文件。
-
-            # fastcms 模板规范
-
-            ## 1. 目录结构
-
-            模板目录名为 `${templateName}`，整体结构如下：
-            ```
-            ${templateName}/
-            ├── _template.properties      # 模板元信息（必备）
-            ├── _layout.html              # 公共布局宏（必备）
-            ├── _articlePage.html         # 文章分页宏（必备，_layout.html 顶层 include，页面以 <@layout._articlePage/> 调用）
-            ├── index.html                # 首页（必备）
-            ├── article.html              # 文章详情页（必备）
-            ├── article_list.html         # 文章列表页（必备）
-            ├── page.html                 # 单页面（必备）
-            ├── _preview_data.json        # 预览演示数据（必备，内容贴合需求主题）
-            └── static/                   # 静态资源目录
-                ├── css/
-                │   └── base.css          # 基础样式
-                ├── js/                   # 可选——有交互脚本时才创建，无则不建此目录
-                │   └── main.js           # 交互脚本（可选——有交互脚本时才生成）
-                └── images/               # 图片资源
-            ```
-
-            ## 2. _template.properties 模板元信息
-
-            必须包含以下字段，格式为 key=value：
-            ```properties
-            template.id=www.${templateName}.com
-            template.name=${templateName}
-            template.path=/${templateName}/
-            template.version=0.0.1
-            template.i18n=${templateName}
-            template.provider=ai-generated
-            template.description=AI generated template
-            ```
-            注意：template.path 必须以 `/` 开头和结尾，pathName 会自动去除前后斜杠得到 `${templateName}`。
-
-            ## 3. _layout.html 公共布局宏
-
-            使用 FreeMarker macro 定义三个核心宏（header / body / script）+ 一个递归子菜单宏 menuChildren，
-            所有页面通过 `<#import "_layout.html" as layout>` 引入。
-            **必须同时满足响应式（汉堡菜单）与菜单选中高亮两个要求**，示例如下：
-
-            ```html
-            <#-- 辅助宏：判断某个菜单 URL 是否应高亮（前缀匹配，子菜单命中时祖先也高亮） -->
-            <#function isMenuActive url>
-              <#local cp = request.contextPath!>
-              <#local uri = (request.requestURI)!>
-              <#if url?? && uri?? && (uri?starts_with(url!) || (uri == url!))>
-                <#return true>
-              </#if>
-              <#return false>
-            </#function>
-
-            <#-- 递归宏：渲染二级及以下子菜单，active 同样按前缀匹配 -->
-            <#macro menuChildren children currentUri>
-              <#if children?? && children?size gt 0>
-                <ul class="submenu">
-                  <#list children as child>
-                    <#local childActive = (child.url?? && currentUri?starts_with(child.url!))>
-                    <li class="${'$'}{''}${'#'}{if childActive}active${'#'}{/if}">
-                      <a href="${'$'}{child.url!'#'}" target="${'$'}{child.target!"_self"}">${'$'}{child.menuName!}</a>
-                      <@menuChildren children=child.children currentUri=currentUri/>
-                    </li>
-                  </#list>
-                </ul>
-              </#if>
-            </#macro>
-
-            <#macro header title>
-            <!DOCTYPE html>
-            <html lang="zh-CN">
-            <head>
-              <meta charset="utf-8">
-              <title>${'$'}{title!""}</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
-              <meta name="keywords" content="${'$'}{seoTag("website_title")!""}">
-              <meta name="description" content="${'$'}{seoTag("website_sub_title")!""}">
-              <link href="${'$'}{ctx()}/css/base.css" rel="stylesheet">
-              <#nested/>
-            </head>
-            </#macro>
-
-            <#macro body>
-            <body>
-              <#-- body 宏开头获取当前请求路径，供菜单 active 判断使用 -->
-              <#assign cp = (request.contextPath)!>
-              <#assign currentUri = cp + (request.requestURI)!>
-              <header class="site-header">
-                <div class="container header-inner">
-                  <div class="logo"><a href="${'$'}{cp}/"><img src="${'$'}{ctx()}/images/logo.png" alt="Logo"></a></div>
-                  <#-- 移动端汉堡按钮（≤768px 显示）：用纯 CSS + label/checkbox 切换，不依赖外部框架 -->
-                  <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="菜单">
-                  <label for="nav-toggle" class="nav-toggle-label"><span></span><span></span><span></span></label>
-                  <nav class="site-nav">
-                    <ul>
-                      <#-- 首页 -->
-                      <#local homeActive = (currentUri == cp + '/') || (currentUri == cp)>
-                      <li class="${'$'}{''}${'#'}{if homeActive}active${'#'}{/if}"><a href="${'$'}{cp}/">首页</a></li>
-                      <#-- 后台管理的菜单（menuTag 数据） -->
-                      <@menuTag>
-                        <#if data?? && (data?size > 0)>
-                          <#list data as item>
-                            <#local mi_active = (item.url?? && currentUri?starts_with(item.url!))>
-                            <li class="${'$'}{''}${'#'}{if mi_active}active${'#'}{/if}">
-                              <a href="${'$'}{item.url!}" target="${'$'}{item.target!"_self"}">${'$'}{item.menuName!}</a>
-                              <@menuChildren children=item.children currentUri=currentUri/>
-                            </li>
-                          </#list>
-                        </#if>
-                      </@menuTag>
-                    </ul>
-                  </nav>
-                </div>
-              </header>
-              <main class="container main-content">
-                <#nested/>
-              </main>
-              <footer class="site-footer">
-                <div class="container">
-                  <p>Copyright © ${'$'}{.now?string("yyyy")} - Powered by Fastcms</p>
-                </div>
-              </footer>
-            </body>
-            </#macro>
-
-            <#macro script>
-              <script src="${'$'}{ctx()}/js/main.js"></script>
-              <#nested/>
-            </body>
-            </html>
-            </#macro>
-            ```
-            关键点说明：
-            - `request.contextPath/requestURI` 变量由 fastcms 框架自动注入到 FreeMarker 视图，模板可直接引用（要加 ! 默认值防 null）
-            - 顶部首页 `<li>` 和 menuTag 每一项都必须按上述 `currentUri?starts_with(item.url!)` 前缀匹配输出 `active` class，不要仅靠 JS 切换
-            - 子菜单通过递归宏 `menuChildren` 渲染，子菜单命中时父级也应是 active（前缀匹配天然保证了这一点）
-            - 移动端通过 `#nav-toggle:checked ~ .site-nav { display:block }` 之类的纯 CSS 选择器控制展开，不依赖 Bootstrap/jQuery 的 data-toggle
-            - `<#nested/>` 是宏的占位符，调用方传入的页面内容会渲染到这里（header 宏中 <head> 内、body 宏中 <main> 内、script 宏中 </body> 前）
-
-            ## 4. FreeMarker 指令清单（fastcms 自定义指令）
-
-            指令使用 `<@指令名 参数=值></@指令名>` 调用，数据通过 `${'$'}{data}` 访问：
-
-            | 指令名 | 作用 | 常用参数 | 返回数据 |
-            |---|---|---|---|
-            | articleListTag | 文章列表 | categoryId、tagId、includeTagIds、excludeTagIds、orderBy、count | data（List<Article>），每项含 id、title、summary、thumbnail、url、created、viewCount |
-            | article | 单篇文章详情 | （由 URL 路由注入） | article 对象，含 id、title、contentHtml、created、viewCount |
-            | articlePageTag | 文章分页 | （由 URL 路由注入） | data 对象：total、current、list（页码项）、prev、next、last |
-            | menuTag | 站点菜单 | （无） | data（List<Menu>），每项含 menuName、url、target、children |
-            | categoryList | 分类列表 | （无） | data（List<Category>），每项含 id、title、url |
-            | tagList | 标签列表 | （无） | data（List<Tag>），每项含 id、name、url |
-            | singlePageList | 单页列表 | （无） | data（List<SinglePage>），每项含 id、title、url |
-            | prevArticleTag | 上一篇 | articleId | data：Article |
-            | nextArticleTag | 下一篇 | articleId | data：Article |
-            | relatedArticleList | 相关文章 | articleId、count | data：List<Article> |
-            | seoTag | SEO 配置项 | key（如 "website_title"） | 直接返回字符串 |
-            | ctx | 模板路径前缀 | （无） | 返回当前模板的静态资源根路径，如 /xjd2022/ |
-            | i18n | 国际化 | key | 返回对应语言的字符串 |
-            | formatTime | 时间格式化 | value、format（如 "yyyy-MM-dd"） | <@formatTime value=(item.created)! format="yyyy-MM-dd"/> |
-            | fieldValue | 扩展字段 | （插件扩展） | 扩展字段值 |
-
-            指令使用示例：
-            ```html
-            <@articleListTag categoryId=3 orderBy="created" count=10>
-              <#if data??>
-                <#list data as item>
-                  <article>
-                    <h2><a href="${'$'}{(item.url)!}">${'$'}{(item.title)!}</a></h2>
-                    <p>${'$'}{(item.summary)!}</p>
-                    <span><@formatTime value=(item.created)! format="yyyy-MM-dd"/></span>
-                  </article>
-                </#list>
-              </#if>
-            </@articleListTag>
-            ```
-
-            ## 5. 上下文变量（页面级变量，由路由自动注入）
-
-            不同页面会自动注入不同的上下文变量：
-
-            - **index.html**: 无特殊上下文变量（用 articleListTag 主动拉取）
-            - **article.html**: 注入 `article` 对象（含 title、contentHtml、created、viewCount、thumbnail、summary）
-            - **article_list.html**: 注入 `category` 对象（含 id、title、url）和 `articleVoPage`（分页对象）
-              - articleVoPage.records: 当前页文章列表
-              - articleVoPage.size、current、total、pages
-              - 分页渲染用 `<@articlePageTag>` 指令
-            - **page.html**: 注入 `singlePage` 对象（含 id、title、contentHtml）
-
-            ## 6. 文章列表分页示例（article_list.html 关键片段）
-
-            ```html
-            <#import "_layout.html" as layout>
-            <@layout.header "${'$'}{(category.title)!}列表"></@layout.header>
-            <@layout.body>
-              <div class="page-title">${'$'}{(category.title)!}列表</div>
-              <#if articleVoPage??>
-                <#list articleVoPage.records as item>
-                  <article>
-                    <h2><a href="${'$'}{item.url!}">${'$'}{item.title!}</a></h2>
-                    <p>${'$'}{item.summary!}</p>
-                  </article>
-                </#list>
-              </#if>
-              <@layout._articlePage/>
-            </@layout.body>
-            ```
-            其中 `<@layout._articlePage/>` 会渲染分页条，分页宏定义在 `_articlePage.html` 中：
-            ```html
-            <#macro _articlePage>
-              <@articlePageTag>
-                <div class="pagelist">
-                  <a href="${'$'}{data.prev.url!}">${'$'}{data.prev.text!}</a>
-                  <#list data.list as item>
-                    <a href="${'$'}{item.url!}">${'$'}{item.text!}</a>
-                  </#list>
-                  <a href="${'$'}{data.next.url!}">${'$'}{data.next.text!}</a>
-                </div>
-              </@articlePageTag>
-            </#macro>
-            ```
-
-            ## 7. URL 路由约定（语义化长路径）
-
-            - 首页: /
-            - 文章详情: /article/{articleId}
-            - 文章分类列表: /article/category/{categoryId}
-            - 文章标签列表: /article/tag/{tagId}
-            - 单页面: /page/{pageName}
-
-            模板文件名与路由的映射关系（由 fastcms 自动处理，无需在模板中配置）：
-            - index.html → /
-            - article.html → /article/{id}
-            - article_list.html → /article/category/{id}、/article/tag/{id}
-            - page.html → /page/{name}
-
-            ## 8. 静态资源引用约定
-
-            所有静态资源（CSS、JS、图片）必须通过 `${'$'}{ctx()}` 前缀引用，它会自动解析为模板根路径：
-            ```html
-            <link href="${'$'}{ctx()}/css/base.css" rel="stylesheet">
-            <script src="${'$'}{ctx()}/js/main.js"></script>
-            <img src="${'$'}{ctx()}/images/logo.png" alt="Logo">
-            ```
-            不要硬编码路径如 `/static/css/...` 或 `/xjd2022/css/...`。
-
-            ## 9. 预览演示数据 _preview_data.json
-
-            模板目录下必须包含 `_preview_data.json`，定义模板预览时使用的演示数据（菜单、分类、标签、单页、文章标题、SEO）。
-            内容必须贴合用户需求主题：如餐饮模板用"菜品展示/门店故事/在线订座"，科技模板用"新闻动态/产品中心"。
-            格式（所有字段可选，未配置的字段使用系统默认演示数据）：
-            ```json
-            {
-              "menus": [
-                { "name": "新闻动态", "type": "article_list", "children": [
-                  { "name": "公司新闻", "type": "article_list" }
-                ]},
-                { "name": "关于我们", "type": "page", "suffix": "about" }
-              ],
-              "categories": ["科技前沿", "产品动态"],
-              "tags": ["Java", "Spring Boot"],
-              "singlePages": [{ "title": "关于我们", "suffix": "about" }, "服务条款"],
-              "articles": {
-                "titles": ["文章标题1", "文章标题2"],
-                "summaries": ["摘要1", "摘要2"],
-                "suffixes": ["news", ""]
-              },
-              "seo": { "website_title": "站点标题" }
-            }
-            ```
-
-            字段规则：
-            - menus：最多 8 项，最多两级（children 每层最多 6 项），每项含 name、type、可选 suffix、可选 children
-            - type 只能取：index、article_list、article、page；省略时默认 article_list
-            - suffix 对应模板文件 {type}_{suffix}.html（如 "about" 对应 page_about.html，"about_h5" 对应 page_about_h5.html）；
-              配置了 suffix 时必须同时生成对应的模板文件
-            - 禁止在 JSON 中写任何 url 字段，预览链接由系统按 type + suffix 自动解析
-            - categories/tags/singlePages 数组元素可以是字符串（无 suffix）或 { "title": ..., "suffix": ... } 对象
-            - articles 的 titles/summaries/suffixes 是平行数组，最多 12 项；summaries/suffixes 可省略
-            - seo 的 key 与 seoTag 指令一致（website_title、website_sub_title、website_seo、public_website_domain）
-
-            ## 10. 移动端响应式适配
-
-            ${mobileAdaptiveSection}
-
-            ## 11. 菜单选中高亮（强制，方案 A：模板层通过 request 对比）
-
-            菜单选中状态必须由 **FreeMarker 模板渲染时静态输出 active class**，不能只依靠前端 JS 切换
-            （否则新打开页面时 JS 还没执行，菜单项看起来就没选中）。
-            具体实现：
-
-            1. **当前请求路径来源**：fastcms 框架已通过 `FastcmsTemplateViewResolver` 向 FreeMarker 视图注入
-               `request`（类型 `HttpServletRequest`），模板里可用 `${request.requestURI}` 与 `${request.contextPath}` 获取路径，
-               **均要加 ! 默认值**：`<#assign cp = request.contextPath!>`、`<#assign currentUri = cp + (request.requestURI)!>`。
-               预览模式下（AI 模板预览路由）同样注入了 request，因此 active 判断在预览/正式环境都生效。
-            2. **首页高亮规则**：当 `currentUri == cp + '/' || currentUri == cp` 时首页 `<li>` 加 `class="active"`
-            3. **菜单高亮规则（前缀匹配）**：对 menuTag 遍历的每一项 `item`，当
-               `item.url?? && currentUri?starts_with(item.url!)` 时该 `<li>` 加 `class="active"`；
-               前缀匹配的好处是：进入 `/article/123` 时父菜单 `/article/category/3`（如果指向同前缀）也会高亮
-            4. **子菜单递归**：必须在 _layout.html 中定义递归宏 `<#macro menuChildren children currentUri>`，
-               二级及以下菜单同样按前缀匹配输出 active；子菜单命中时其父级因前缀包含关系天然也是 active
-            5. **高亮样式**：CSS 中必须定义：
-               ```css
-               .site-nav li.active > a { color: [主色]; border-bottom: 2px solid [主色]; font-weight: 600; }
-               .site-nav li.active > .submenu { display:block; } /* 桌面端下拉菜单 */
-               ```
-            6. **注意**：`item.url` 可能包含 contextPath（由 menuTag 数据源决定），对比时不要重复拼接；
-               若出现路径多次加前缀的情况，可在 body 宏开头先把 item.url 去掉重复前缀（如 `<#local itemUrl = (item.url?starts_with(cp+cp))?then(item.url?substring(cp?length), item.url)>`），
-               推荐保持默认：`currentUri = cp + requestURI`、`item.url` 直接用，两者口径一致。
-            """;
-
     /**
      * 系统提示词协议段：## 12 响应格式（严格 JSON）+ 行为准则
      *
@@ -1415,6 +1220,16 @@ public class TemplateGenPromptBuilder {
                 - `create`: 新建文件
                 - `modify`: 修改已有文件
                 - `delete`: 删除文件（content 可为空）
+            - **patches**: 补丁数组（可选，**仅在任务指令要求"用 patches 通道"时使用**，否则不要输出此字段）
+              - **path**: 文件相对路径（只能是已存在的文件）
+              - **search**: 待替换的原文片段（**必须在该文件中唯一出现**，多处匹配会被系统拒绝）
+              - **replace**: 替换后的新内容（空字符串表示删除该片段）
+
+            ### 两种输出通道（以任务指令为准）
+            - **files 通道（整文件）**：新建文件、生成模板、批量改造等整体重写场景。files 里的 content 必须是可直接使用的完整内容。
+            - **patches 通道（增量片段）**：修改已有文件且改动局部时的推荐方式。改一行只输出一个补丁片段，
+              不必重发整个文件，响应更快、也不易触发输出截断。系统会把补丁精确替换回原文件。
+            - 两种通道不要用于同一个文件；本轮用哪个通道由任务指令中的明确要求决定。
 
             ### 重要约束
             1. **只输出 JSON 对象本身**，不要包裹在 markdown 代码块中，不要添加任何前后文字解释
@@ -1423,6 +1238,7 @@ public class TemplateGenPromptBuilder {
             4. 微调场景下，files 中只输出需要变动的文件，未提及的文件不要重复输出
             5. 不要输出占位符内容（如 `... 省略 ...`），每个文件的 content 必须是可直接使用的完整内容
             6. reply 保持简洁（一般不超过 200 字），详细内容放在文件里
+            7. 使用 patches 通道时，search 片段必须逐字来自文件真实内容（不可臆造），且在该文件中唯一
 
             # 你的行为准则
 
@@ -1432,7 +1248,10 @@ public class TemplateGenPromptBuilder {
             4. **菜单选中（硬约束）**：严格按照"第 11 节 菜单选中高亮（方案 A）"实现，在 _layout.html 的 FreeMarker 层
                用 request.contextPath + request.requestURI 对比 item.url 输出 active class，不能只在 JS 里切换；子菜单递归宏必须定义
             5. **可访问性**：HTML 语义化，alt 属性完整，aria 属性适当使用；汉堡按钮要加 aria-label
-            6. **性能优先**：CSS 放头部、JS 放尾部，避免内联样式；汉堡菜单尽量用纯 CSS（checkbox/label + :checked），不引入额外 JS 依赖
+            6. **性能优先 + CSS/JS 分离**：CSS 放头部、JS 放尾部；大段样式写在 static/css/*.css、大段脚本写在 static/js/*.js，
+               HTML 用 <link rel="stylesheet"> 与 <script src> 引用它们，**不要把成百上千行的大段 CSS/JS 内联进 HTML**；
+               少量与结构强绑定的关键样式或初始化代码可以留在 HTML 里，不必强行拆分；
+               汉堡菜单尽量用纯 CSS（checkbox/label + :checked），不引入额外 JS 依赖
             7. **不硬编码内容**：动态内容（菜单、文章列表、文章详情）必须用指令渲染，不要写死文章标题
             8. **风格统一**：配色、字体、间距遵循视觉一致性，参考现代化网站设计
             9. **语言要求**：全程使用中文。思考推理过程（reasoning）必须使用中文，reply 回复也必须是中文

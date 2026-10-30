@@ -20,12 +20,20 @@ import com.fastcms.ai.agent.AgentChatExecutor;
 import com.fastcms.ai.agent.BuiltinAgents;
 import com.fastcms.ai.audit.AiQuotaExceededException;
 import com.fastcms.ai.audit.AiUsageRecorder;
+import com.fastcms.ai.service.impl.AiModelConfigServiceImpl;
+import com.fastcms.ai.support.AiThinkingBudget;
+import com.fastcms.ai.support.AiThinkingBudget.RoundDiagnostics;
 import com.fastcms.ai.support.ReasoningStreamAccumulator;
 import com.fastcms.ai.support.ReplyStreamExtractor;
 import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -72,6 +80,161 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
      * 同时防止前端对 reasoning 增量的无界累积
      */
     private static final long REASONING_RUNAWAY_MAX_CHARS = 256L * 1024;
+
+    /**
+     * 一轮文章类模型调用的结果
+     */
+    private static final class ArticleCallResult {
+        /** 正文累计 */
+        String content = "";
+        /** 思考累计 */
+        String reasoning = "";
+        /** 端点上报的用量（最后一个 chunk 携带） */
+        Usage usage;
+        /** 本轮诊断（finish_reason / 思考量） */
+        final RoundDiagnostics diagnostics = new RoundDiagnostics();
+        /** 是否发生了「关思考重试」 */
+        boolean retriedWithThinkingOff;
+    }
+
+    /**
+     * 文章类场景的单轮流式调用（**带思考看护**）
+     *
+     * <p>2026-10-29 端点实测：`max_tokens` 是思考 + 正文共享预算，且<b>预算越大模型思考越长</b>。
+     * 于是「思考吃满 → 正文 0 字符」是真实故障（实测 512 预算 + 推理档 → 正文 0、思考 2067 字符）。
+     * 本方法统一处理四件事：</p>
+     * <ol>
+     *   <li><b>显式传 runtimeOptions</b>：过去文章生成/续写用
+     *       {@code createPrompt(system, user)}（两参重载）→ 请求级 options 缺失 →
+     *       智能体 profile 配的 temperature/maxTokens <b>不生效</b>，思考档位也落到
+     *       ChatModel 默认值。改为传 {@code prepared.getRuntimeOptions()}。</li>
+     *   <li><b>注入思考预算约束</b>（{@link AiThinkingBudget#applyBudgetHint}）：
+     *       实测思考量 -25%，且能让正文从 0 变成有产出。</li>
+     *   <li><b>采集 finish_reason 与真实思考量</b>，供判定「思考吃满」。</li>
+     *   <li><b>思考吃满 → 关思考重试一次</b>（保留原上限，<b>不翻倍</b>——
+     *       翻倍只会给思考更多空间，正文照样是 0）。</li>
+     * </ol>
+     *
+     * @param prepared      智能体装配结果（含模型配置与 runtime options）
+     * @param systemPrompt  系统提示词
+     * @param userPrompt    用户提示词
+     * @param emitter       SSE 通道（用于推送 reasoning / 正文增量）
+     * @param clientGone    客户端断开标记（断开后不再消费模型流）
+     * @param reasoningSink 思考增量消费者（event 名, 增量）
+     * @param contentSink   正文增量消费者
+     * @return 本轮结果（含正文、思考、用量、诊断）
+     */
+    private ArticleCallResult callArticleModel(AgentChatExecutor.Prepared prepared,
+                                               String systemPrompt, String userPrompt,
+                                               SseEmitter emitter, AtomicBoolean clientGone,
+                                               java.util.function.BiConsumer<String, String> reasoningSink,
+                                               java.util.function.Consumer<String> contentSink) {
+        ArticleCallResult result = new ArticleCallResult();
+        OpenAiChatOptions options = prepared.getRuntimeOptions();
+        List<Message> messages = AiThinkingBudget.applyBudgetHint(
+                List.of(new SystemMessage(systemPrompt), new UserMessage(userPrompt)), options);
+
+        runArticleStream(prepared, messages, options, emitter, clientGone, reasoningSink, contentSink, result);
+
+        // 思考吃满预算 → 关思考重试（保留原上限，不翻倍）
+        if (!StringUtils.hasText(result.content) && result.diagnostics.thinkingFlooded()) {
+            log.warn("思考吃满预算，关闭思考重试: scene={}, finishReason={}, 思考字符={}",
+                    prepared.getProfile() == null ? "?" : prepared.getProfile().getAgentId(),
+                    result.diagnostics.finishReason, result.diagnostics.reasoningChars);
+            OpenAiChatOptions offOptions = buildThinkingOffOptions(prepared, options);
+            if (offOptions != null) {
+                ArticleCallResult retry = new ArticleCallResult();
+                runArticleStream(prepared, messages, offOptions, emitter, clientGone,
+                        reasoningSink, contentSink, retry);
+                retry.retriedWithThinkingOff = true;
+                return retry;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 构建「强制关闭思考」的 options（保留原 maxTokens / temperature）
+     *
+     * <p>关思考形态按端点族分流（Qwen 系走 {@code chat_template_kwargs.enable_thinking=false}，
+     * 其他端点走 {@code reasoning_effort=minimal}）。</p>
+     */
+    private OpenAiChatOptions buildThinkingOffOptions(AgentChatExecutor.Prepared prepared,
+                                                      OpenAiChatOptions origin) {
+        if (prepared == null) {
+            return null;
+        }
+        return AiModelConfigServiceImpl.thinkingOffOptions(prepared.getModelConfig(), origin);
+    }
+
+    /**
+     * 执行一轮流式调用并把增量喂给消费者
+     */
+    private void runArticleStream(AgentChatExecutor.Prepared prepared, List<Message> messages,
+                                  OpenAiChatOptions options, SseEmitter emitter, AtomicBoolean clientGone,
+                                  java.util.function.BiConsumer<String, String> reasoningSink,
+                                  java.util.function.Consumer<String> contentSink,
+                                  ArticleCallResult result) {
+        ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
+        StringBuilder reasoningBuf = new StringBuilder();
+        StringBuilder contentBuf = new StringBuilder();
+        long[] reasoningTotal = {0L};
+
+        prepared.getChatClient().prompt(new Prompt(messages, options))
+                .stream()
+                .chatResponse()
+                .doOnNext(resp -> {
+                    if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null
+                            && resp.getMetadata().getUsage().getTotalTokens() != null) {
+                        result.usage = resp.getMetadata().getUsage();
+                    }
+                    // finish_reason（流式最后一个 chunk 携带；端点返回大写 LENGTH）
+                    if (resp.getResult() != null && resp.getResult().getMetadata() != null) {
+                        String fr = resp.getResult().getMetadata().getFinishReason();
+                        if (fr != null && !fr.isBlank()) {
+                            result.diagnostics.finishReason = fr;
+                        }
+                    }
+                    if (resp.getResult() == null || resp.getResult().getOutput() == null) {
+                        return;
+                    }
+                    org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
+                    Object reasoning = output.getMetadata() == null
+                            ? null : output.getMetadata().get("reasoningContent");
+                    if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
+                        String delta = reasoningAcc.feed(String.valueOf(reasoning));
+                        if (delta != null && !delta.isEmpty()) {
+                            reasoningSink.accept("reasoning", delta);
+                            reasoningBuf.append(delta);
+                            reasoningTotal[0] += delta.length();
+                            result.diagnostics.reasoningChars += delta.length();
+                        }
+                        // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
+                        // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
+                        if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
+                            throw new RuntimeException("思考过程超出安全上限（"
+                                    + (REASONING_RUNAWAY_MAX_CHARS / 1024)
+                                    + "KB），模型疑似陷入思考循环，已主动中断，请重试");
+                        }
+                    }
+                    String chunk = output.getText();
+                    // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
+                    // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
+                    if (chunk != null && !chunk.isEmpty()) {
+                        contentBuf.append(chunk);
+                        contentSink.accept(chunk);
+                    }
+                })
+                // 客户端断开后立即停止消费模型流（断开由 sendEvent 推送失败感知），不再白烧上游 token
+                .takeWhile(resp -> !clientGone.get())
+                .blockLast();
+
+        result.content = contentBuf.toString();
+        result.reasoning = reasoningBuf.toString();
+        // 正文长度回填诊断：三信号判定要求「正文长度 == 0」，
+        // 不回填会把「正文被截断但已产出内容」误判成「思考吃满」→ 错误触发关思考重试
+        result.diagnostics.contentLength = contentBuf.length();
+    }
 
     /**
      * SSE 流式调用的专用线程池（避免阻塞 Servlet 容器线程）。
@@ -170,56 +333,22 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             StringBuilder responseBuffer = new StringBuilder();
             ReplyStreamExtractor replyExtractor = new ReplyStreamExtractor();
             StringBuilder reasoningBuf = new StringBuilder();
-            // 思考流归一累积器（单轮私有）：累积/增量/重复帧/重启链统一差分（见类注释），
-            // reasoningBuf 只作落库镜像（差分追加），不再做 setLength+append 全量替换
-            ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
-            // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
-            long[] reasoningTotal = {0L};
 
-            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
-                    .stream()
-                    .chatResponse()
-                    .doOnNext(resp -> {
-                        if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null
-                                && resp.getMetadata().getUsage().getTotalTokens() != null) {
-                            lastUsage[0] = resp.getMetadata().getUsage();
+            // 带思考看护的单轮调用：显式 runtimeOptions + 思考预算约束 + 思考吃满关思考重试
+            ArticleCallResult callResult = callArticleModel(prepared, systemPrompt, userPrompt.toString(),
+                    emitter, clientGone,
+                    (event, delta) -> sendEvent(emitter, event, delta, clientGone),
+                    chunk -> {
+                        responseBuffer.append(chunk);
+                        String replyDelta = replyExtractor.feed(chunk);
+                        if (replyDelta != null && !replyDelta.isEmpty()) {
+                            sendEvent(emitter, "message", replyDelta, clientGone);
                         }
-                        if (resp.getResult() == null || resp.getResult().getOutput() == null) {
-                            return;
-                        }
-                        org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
-                        // 推理模型思考过程（累积器归一后推送真实增量）
-                        Object reasoning = output.getMetadata() == null
-                                ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
-                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && !delta.isEmpty()) {
-                                sendEvent(emitter, "reasoning", delta, clientGone);
-                                reasoningBuf.append(delta);
-                                reasoningTotal[0] += delta.length();
-                            }
-                            // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
-                            // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
-                            if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
-                                throw new RuntimeException("思考过程超出安全上限（"
-                                        + (REASONING_RUNAWAY_MAX_CHARS / 1024)
-                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试");
-                            }
-                        }
-                        String chunk = output.getText();
-                        // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
-                        // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
-                        if (chunk != null && !chunk.isEmpty()) {
-                            responseBuffer.append(chunk);
-                            String replyDelta = replyExtractor.feed(chunk);
-                            if (replyDelta != null && !replyDelta.isEmpty()) {
-                                sendEvent(emitter, "message", replyDelta, clientGone);
-                            }
-                        }
-                    })
-                    // 客户端断开后立即停止消费模型流（断开由 sendEvent 推送失败感知），不再白烧上游 token
-                    .takeWhile(resp -> !clientGone.get())
-                    .blockLast();
+                    });
+            if (callResult.usage != null) {
+                lastUsage[0] = callResult.usage;
+            }
+            reasoningBuf.append(callResult.reasoning);
 
             if (clientGone.get()) {
                 errorMessage[0] = "客户端已断开，生成已中止";
@@ -350,52 +479,19 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
 
             StringBuilder rewritten = new StringBuilder();
             StringBuilder reasoningBuf = new StringBuilder();
-            // 思考流归一累积器（单轮私有）：累积/增量/重复帧/重启链统一差分（见类注释），
-            // reasoningBuf 只作落库镜像（差分追加），不再做 setLength+append 全量替换
-            ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
-            // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
-            long[] reasoningTotal = {0L};
-            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
-                    .stream()
-                    .chatResponse()
-                    .doOnNext(resp -> {
-                        if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null
-                                && resp.getMetadata().getUsage().getTotalTokens() != null) {
-                            lastUsage[0] = resp.getMetadata().getUsage();
-                        }
-                        if (resp.getResult() == null || resp.getResult().getOutput() == null) {
-                            return;
-                        }
-                        org.springframework.ai.chat.messages.AssistantMessage output = resp.getResult().getOutput();
-                        Object reasoning = output.getMetadata() == null
-                                ? null : output.getMetadata().get("reasoningContent");
-                        if (reasoning != null && !String.valueOf(reasoning).isEmpty()) {
-                            String delta = reasoningAcc.feed(String.valueOf(reasoning));
-                            if (delta != null && !delta.isEmpty()) {
-                                sendEvent(emitter, "reasoning", delta, clientGone);
-                                reasoningBuf.append(delta);
-                                reasoningTotal[0] += delta.length();
-                            }
-                            // 思考失控保险丝：累计思考超阈值视为模型陷入思考循环（正文零输出、
-                            // 持续空转烧 token），主动中断流；异常经各场景 catch 统一转 error 事件透出
-                            if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
-                                throw new RuntimeException("思考过程超出安全上限（"
-                                        + (REASONING_RUNAWAY_MAX_CHARS / 1024)
-                                        + "KB），模型疑似陷入思考循环，已主动中断，请重试");
-                            }
-                        }
-                        // 直接流式推送改写文本增量
-                        String chunk = output.getText();
-                        // 判空用 isEmpty 而非 hasText：纯空白 delta（独立空格/换行 token）
-                        // 是合法数据，hasText 会吞掉导致正文空格/换行丢失
-                        if (chunk != null && !chunk.isEmpty()) {
-                            rewritten.append(chunk);
-                            sendEvent(emitter, "message", chunk, clientGone);
-                        }
-                    })
-                    // 客户端断开后立即停止消费模型流，不再白烧上游 token
-                    .takeWhile(resp -> !clientGone.get())
-                    .blockLast();
+
+            // 带思考看护的单轮调用（与全文生成同口径）
+            ArticleCallResult callResult = callArticleModel(prepared, systemPrompt, userPrompt.toString(),
+                    emitter, clientGone,
+                    (event, delta) -> sendEvent(emitter, event, delta, clientGone),
+                    chunk -> {
+                        rewritten.append(chunk);
+                        sendEvent(emitter, "message", chunk, clientGone);
+                    });
+            if (callResult.usage != null) {
+                lastUsage[0] = callResult.usage;
+            }
+            reasoningBuf.append(callResult.reasoning);
 
             if (clientGone.get()) {
                 errorMessage[0] = "客户端已断开，生成已中止";
@@ -497,7 +593,13 @@ public class AiArticleGenServiceImpl implements IAiArticleGenService {
             ReasoningStreamAccumulator reasoningAcc = new ReasoningStreamAccumulator();
             // 单轮真实累计思考字符数（失控保险丝判定，见 REASONING_RUNAWAY_MAX_CHARS）
             long[] reasoningTotal = {0L};
-            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString()))
+            // 字段候选生成是枚举式任务（答案空间有限）→ 思考档位走「确定性」档（关思考）；
+            // 文章生成/续写走 prepare() 的默认「推理档」（低）
+            org.springframework.ai.openai.OpenAiChatOptions fieldOptions =
+                    com.fastcms.ai.service.impl.AiModelConfigServiceImpl.optionsBuilder(
+                            prepared.getModelConfig(),
+                            com.fastcms.ai.support.AiReasoningSupport.SCENE_DETERMINISTIC).build();
+            prepared.getChatClient().prompt(prepared.createPrompt(systemPrompt, userPrompt.toString(), fieldOptions))
                     .stream()
                     .chatResponse()
                     .doOnNext(resp -> {

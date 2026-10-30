@@ -950,8 +950,12 @@ public class MockupConverter {
         if (prevError != null) {
             user.append("\n【上一轮输出错误，必须修正】").append(prevError).append('\n');
         }
+        // 组件映射是分类任务（区块 → 组件库候选），答案空间有限，不需要深度思考：
+        // 思考档位走「确定性」档（Qwen 系端点 = chat_template_kwargs 关思考）。
+        // 过去这里没传任何思考参数，端点默认 xhigh（全力思考），实测是纯浪费
         OpenAiChatOptions options = com.fastcms.ai.service.impl.AiModelConfigServiceImpl
-                .baseOptionsBuilder(prepared.getModelConfig())
+                .optionsBuilder(prepared.getModelConfig(),
+                        com.fastcms.ai.support.AiReasoningSupport.SCENE_DETERMINISTIC)
                 .maxTokens(MAPPING_MAX_TOKENS)
                 .build();
         Prompt prompt = new Prompt(List.of(

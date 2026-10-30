@@ -73,9 +73,14 @@ public class SiteAnalyzer {
             你是网站信息架构分析师。用户上传了一个网站的首页 HTML——它是这个站点的**样式与结构基准**，
             其余页面将由你按 fastcms 模板规范推导创建。你的任务是把这份 HTML 读透，产出一份整站页面清单。
 
+            【输入形态】可能是首页 HTML 全文，也可能是从 HTML 中抽取的结构摘要
+            （含【文档元信息】【导航菜单项】【页面标题层级】【站内链接清单】【正文文字节选】五段）。
+            若是结构摘要，直接按各段内容分析即可，无需在原文里再找标签。
+
             【分析步骤】
             1. 先读懂站点：什么行业/什么产品、面向谁、核心主张与调性
-            2. **重点提取顶部导航栏**：在 <nav>/<header> 里找到主导航，逐项读出菜单文案与链接
+            2. **重点提取顶部导航栏**：逐项读出菜单文案与链接
+               （输入为 HTML 全文时在 <nav>/<header> 里找；输入为结构摘要时用【导航菜单项】段）
             3. 剔除不属于栏目的项：品牌 logo、语言切换、登录/注册/购物车、以及纯 CTA 按钮（如"免费试用"）
             4. 结合页面正文内容，判断每个栏目在 fastcms 里应建成什么页型
             5. 为每个栏目写清楚"这一页应该呈现什么内容"
@@ -190,15 +195,32 @@ public class SiteAnalyzer {
         }
     }
 
-    /** 用户提示词：上传源 + 首页 HTML 全文（超限截断并显式声明，避免模型误判被截断处为文档结尾） */
+    /**
+     * 用户提示词：上传源 + 首页<b>结构摘要</b>（抽取失败时回退到截断后的全文）
+     *
+     * <p>站点分析真正需要的只有「元信息 + 导航 + 标题层级 + 链接清单」，
+     * 正文/样式/脚本对归纳栏目几乎没有贡献，却占满上下文（B3 上下文分层）。
+     * 摘要抽不出东西时（极简页面/畸形 HTML）回退全文，宁可多花 token 也不能丢信息。</p>
+     */
     private static String buildUserPrompt(String sourceName, String homeHtml) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【上传来源】").append(sourceName == null ? "（未命名）" : sourceName).append('\n');
+
+        String summary = SiteStructureExtractor.extract(homeHtml);
+        if (summary.length() >= SiteStructureExtractor.MIN_USEFUL_LENGTH) {
+            sb.append("【首页结构摘要】（已抽取站点结构，未包含样式、脚本与图片）\n");
+            sb.append(summary).append('\n');
+            sb.append("\n请按分析步骤产出 JSON。导航菜单项是栏目划分的首要依据；"
+                    + "若导航缺失，请依据标题层级与链接清单归纳 3~5 个合理栏目。");
+            return sb.toString();
+        }
+
+        // 回退：结构摘要过短 → 仍喂截断后的全文（保信息优先）
         String html = homeHtml;
         boolean truncated = html.length() > MAX_HTML_CHARS;
         if (truncated) {
             html = html.substring(0, MAX_HTML_CHARS);
         }
-        StringBuilder sb = new StringBuilder();
-        sb.append("【上传来源】").append(sourceName == null ? "（未命名）" : sourceName).append('\n');
         sb.append("【首页 HTML").append(truncated ? "（内容较长，已截断尾部）" : "").append("】\n");
         sb.append("```html\n").append(html).append("\n```\n");
         sb.append("\n请按分析步骤产出 JSON。");
@@ -211,8 +233,12 @@ public class SiteAnalyzer {
      * <p>不覆盖 maxTokens——沿用基底配置，避免设定值超出模型上限导致请求被拒。</p>
      */
     private static OpenAiChatOptions buildOptions(AgentChatExecutor.Prepared prepared) {
+        // 站点结构归纳是收敛型任务（答案空间 = 菜单/页面清单），不需要深度思考：
+        // 思考档位走「确定性」档（Qwen 系端点 = chat_template_kwargs 关思考）。
+        // 过去这里没传任何思考参数，端点默认 xhigh（全力思考），实测是纯浪费
         OpenAiChatOptions.Builder builder =
-                AiModelConfigServiceImpl.baseOptionsBuilder(prepared.getModelConfig());
+                AiModelConfigServiceImpl.optionsBuilder(prepared.getModelConfig(),
+                        com.fastcms.ai.support.AiReasoningSupport.SCENE_DETERMINISTIC);
         builder.temperature(0.2);
         AgentProfile profile = prepared.getProfile();
         if (profile != null && profile.getTemperature() != null) {

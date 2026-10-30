@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>插件市场 — FastCMS</title>
+<meta name="description" content="FastCMS 插件市场：统一资产容器，一个插件 jar 同时携带技能、组件与功能模块。AI 增强 / 微信生态 / 内容变现 / 内容增强 / 基础设施五大分类，在线安装卸载，免重启。">
+<link rel="stylesheet" href="css/site.css">
+<link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+<!-- ===== 导航（三页共用） ===== -->
+<nav class="nav" id="nav">
+  <div class="wrap">
+    <a class="logo" href="index.html"><span class="logo-mark">F</span>FastCMS <small>AI 原生 CMS</small></a>
+    <div class="nav-links">
+      <a href="index.html#features">核心能力</a>
+      <a href="index.html#ai">AI 建站</a>
+      <a href="plugins.html" class="active">插件市场</a>
+      <a href="index.html#pricing">定价</a>
+      <a href="index.html#stack">技术架构</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-line btn-sm" href="https://gitee.com/xjd2020/fastcms" target="_blank" rel="noopener" style="border-color:rgba(255,255,255,.25);color:var(--on-dark);background:transparent">源码下载</a>
+      <a class="btn btn-primary btn-sm" href="index.html#cta">免费开始使用</a>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="菜单"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+<!-- ===== 页头 ===== -->
+<div class="page-head">
+  <div class="wrap">
+    <div class="ph-top">
+      <div>
+        <h1>插件市场</h1>
+        <p class="ph-sub">统一资产容器：一个插件 jar 可以同时携带技能、组件与完整功能模块。在线安装、在线卸载、免重启——核心源码永久免费。</p>
+        <div class="mkt-note">* 库存来自官方插件仓库（2026-10 盘点），付费定价为示例，以插件市场开放时为准 · 点击卡片进入详情页（原型：微信支付示例）</div>
+      </div>
+      <a class="btn btn-line" href="mailto:support@xjd2020.com?subject=FastCMS 插件市场内测申请">申请市场内测</a>
+    </div>
+    <div class="mkt-search">
+      <input id="mktSearch" type="search" placeholder="搜索插件名称 / 能力关键词…" autocomplete="off">
+      <span id="mktCount"></span>
+    </div>
+  </div>
+</div>
+<section class="mkt-page">
+  <div class="wrap">
+    <div class="mkt-tabs" role="tablist">
+      <button class="tab-btn active" role="tab" data-tab="ai">AI 增强 <span class="tab-count">4</span></button>
+      <button class="tab-btn" role="tab" data-tab="wx">微信生态 <span class="tab-count">5</span></button>
+      <button class="tab-btn" role="tab" data-tab="money">内容变现 <span class="tab-count">3</span></button>
+      <button class="tab-btn" role="tab" data-tab="content">内容增强 <span class="tab-count">4</span></button>
+      <button class="tab-btn" role="tab" data-tab="infra">基础设施 <span class="tab-count">5</span></button>
+    </div>
+    <p class="tab-hint" id="tabHint">技能包与组件包：让 AI 懂你的行业与审美</p>
+    <!-- AI 增强 -->
+    <div class="mkt-panel plugin-grid active" data-panel="ai">
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">文章写作技能包</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">技能包 · 4 个技能</span>
+        <p>选题、续写、SEO 优化、润色四个写作技能，文章智能体随取随用，技能描述常驻提示词、正文按需加载。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span> <small>随开源仓库</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">模板规范技能包</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">技能包 · 建站规范</span>
+        <p>AI 建站的"规范"技能：页面结构、命名约定、组件用法，让生成的模板风格统一、可维护。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span> <small>随开源仓库</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">twx 组件包</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">组件包</span>
+        <p>为 AI 模板生成供给内容区组件，安装后自动注册进组件菜单，AI 下一次规划即可选用。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span> <small>随开源仓库</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">行业设计方向包</span><span class="badge badge-soon">规划中</span></div>
+        <span class="asset-tag">设计资产</span>
+        <p>餐饮 / 电商 / 教育 / SaaS 等行业垂直设计方向，AI 建站直接"长"出行业样子，以插件携带方向资产扩展。</p>
+        <div class="plugin-foot"><span class="price">敬请期待</span></div>
+      </a>
+    </div>
+    <!-- 微信生态 -->
+    <div class="mkt-panel plugin-grid" data-panel="wx">
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">公众号分享</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>文章页自动注入分享参数与模板消息卡片，模板指令 + 拦截器双重机制，装完即享。</p>
+        <div class="plugin-foot"><span class="price">¥199 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">公众号 OAuth2 登录</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>微信网页授权登录体系：Token 管理、用户绑定、授权扩展点，站点直接接入微信身份。</p>
+        <div class="plugin-foot"><span class="price">¥299 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">公众号扫码登录</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>PC 端扫码登录与扫码关注双流程，登录态管理内置，支持公众号内场景互跳。</p>
+        <div class="plugin-foot"><span class="price">¥299 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">微信支付</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>微信支付渠道：支付回调、消息处理、商家转账能力，站点商业闭环接上微信收付款。</p>
+        <div class="plugin-foot"><span class="price">¥499 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">小程序管理</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>小程序多账号信息管理与配置初始化，内容一套后台、多端分发。</p>
+        <div class="plugin-foot"><span class="price">¥499 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+    </div>
+    <!-- 内容变现 -->
+    <div class="mkt-panel plugin-grid" data-panel="money">
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">付费下载</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>资源按价下载，价格档位、下载行为与内置支付网关打通，内容资产直接变现。</p>
+        <div class="plugin-foot"><span class="price">¥399 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">拼团</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>拼团、拼团订单、参团用户全链路，成团任务与曝光统计内置，内容产品社交化。</p>
+        <div class="plugin-foot"><span class="price">¥499 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">订单佣金</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>订单佣金分账：支付回调扩展点自动结算，分销 / 联盟体系一套配置跑通。</p>
+        <div class="plugin-foot"><span class="price">¥499 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+    </div>
+    <!-- 内容增强 -->
+    <div class="mkt-panel plugin-grid" data-panel="content">
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">文章扩展字段</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>为文章追加自定义结构化字段与工具链，产品参数、行业数据按需建模，模板直接取用。</p>
+        <div class="plugin-foot"><span class="price">¥199 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">智能 HTML 生成</span><span class="badge badge-pro">付费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>文章 / 栏目 / 首页 / 单页四类页面的结构化 HTML 生成服务，配合静态化规则批量产出。</p>
+        <div class="plugin-foot"><span class="price">¥199 <small>/ 站点 / 年（示例）</small></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">评论系统</span><span class="badge badge-soon">即将上架</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>前台评论、敏感词过滤、管理员回复，带 UGC 数据表与后台审核页，装完自动挂载到文章详情页。</p>
+        <div class="plugin-foot"><span class="price">敬请期待</span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">表单与线索收集</span><span class="badge badge-soon">即将上架</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>可视化拖拽表单、提交数据导出、邮箱 / 企业微信通知，把内容站变成获客入口。</p>
+        <div class="plugin-foot"><span class="price">敬请期待</span></div>
+      </a>
+    </div>
+    <!-- 基础设施 -->
+    <div class="mkt-panel plugin-grid" data-panel="infra">
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">多站点管理</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>站点信息、栏目与菜单配置统一管理，一套系统多站点独立运营。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">阿里云 OSS</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>对象存储文件服务器：上传、CDN 加速、配置页开箱即用。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">手机号登录</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>手机短信验证码登录注册，对接站点统一登录体系。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">OAuth2 服务器</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>内置 OAuth2 授权服务器与客户管理，为你的站点生态提供统一身份。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span></span></div>
+      </a>
+      <a class="plugin" href="plugin-detail.html">
+        <div class="plugin-head"><span class="plugin-name">URL 白名单</span><span class="badge badge-free">免费</span></div>
+        <span class="asset-tag">功能模块</span>
+        <p>按 URL 规则精细化放行，安全策略与业务场景各取所需。</p>
+        <div class="plugin-foot"><span class="price"><span class="free">¥0</span></span></div>
+      </a>
+    </div>
+    <div class="mkt-more">＋ 官方插件持续扩充中，欢迎提交你的插件需求 <a href="mailto:support@xjd2020.com?subject=FastCMS 插件需求" style="color:var(--brand);font-weight:600">→</a></div>
+  </div>
+</section>
+<!-- ===== 页脚（三页共用） ===== -->
+<footer id="docs">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="logo" href="index.html"><span class="logo-mark">F</span>FastCMS</a>
+        <p>插件化、AI 原生的 Java 内容管理系统。对话即建站，装插件即扩展。</p>
+      </div>
+      <div class="foot-col">
+        <h5>产品</h5>
+        <a href="index.html#features">核心能力</a>
+        <a href="index.html#ai">AI 建站</a>
+        <a href="plugins.html">插件市场</a>
+        <a href="index.html#pricing">定价</a>
+        <a href="index.html#stack">技术架构</a>
+      </div>
+      <div class="foot-col">
+        <h5>资源</h5>
+        <a href="http://doc.xiaojudeng.net.cn" target="_blank" rel="noopener">文档中心</a>
+        <a href="https://www.bilibili.com/video/BV12G4y167vi/" target="_blank" rel="noopener">视频教程（B 站）</a>
+        <a href="https://gitee.com/xjd2020/fastcms" target="_blank" rel="noopener">Gitee 仓库</a>
+        <a href="https://github.com/herowjun/fastcms" target="_blank" rel="noopener">GitHub 仓库</a>
+      </div>
+      <div class="foot-col">
+        <h5>交流</h5>
+        <a href="mailto:support@xjd2020.com">商务 / 支持邮件</a>
+        <a href="https://gitee.com/xjd2020/fastcms/issues" target="_blank" rel="noopener">反馈 Issue</a>
+        <a href="index.html#cta">加微信群（备注 fastcms）</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 FastCMS · 核心系统 LGPL-3.0 开源协议</span>
+      <span>由广州小橘灯信息科技维护</span>
+    </div>
+  </div>
+</footer>
+<script src="js/site.js"></script>
+<script src="js/market.js"></script>
+</body>
+</html>

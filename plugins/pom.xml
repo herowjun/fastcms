@@ -18,6 +18,12 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
         <maven-assembly-plugin.version>3.1.1</maven-assembly-plugin.version>
+        <!--
+          插件声明的 fastcms 最低兼容版本（写入 manifest 的 Plugin-Fastcms-Version 键）。
+          主程序启动时比对：低于此值则拒绝加载该插件，避免「插件比主程序新、调用了不存在的能力」。
+          语义是「插件要求的 fastcms 主程序版本 >= 此值」，故填 fastcms 当前发布版本。
+        -->
+        <fastcms.min.version>1.0.0</fastcms.min.version>
     </properties>
 
     <modules>
@@ -25,6 +31,7 @@
         <module>twplus-components-plugin</module>
         <module>article-skills-plugin</module>
         <module>template-skills-plugin</module>
+        <module>design-skills-plugin</module>
         <module>ai-subscription-plugin</module>
     </modules>
 

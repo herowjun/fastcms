@@ -65,7 +65,7 @@ public class TemplateComplianceChecker {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** 校验项总数（summary 播报"通过 N 项"的分母） */
-    private static final int TOTAL_CHECKS = 9;
+    private static final int TOTAL_CHECKS = 10;
 
     /** 基础页清单（规范必备，目录根下） */
     private static final List<String> BASE_PAGES = List.of(
@@ -176,6 +176,8 @@ public class TemplateComplianceChecker {
         }
         checkStaticStructure(workDir, issues);
         checkEmptyJsDir(workDir, issues);
+        // 检查 10：HTML 内联 CSS/JS 分离（ERROR；readOnly 之外的链路可确定性抽取修复）
+        checkInlineAssets(workDir, readOnly, issues, fixed);
 
         // ===== 修复阶段（readOnly 恒不修复；逐项捕获，失败降级为"待处理"播报，不抛出） =====
         if (!readOnly) {
@@ -348,6 +350,113 @@ public class TemplateComplianceChecker {
             if (stream.findAny().isEmpty()) {
                 issues.add(new ComplianceIssue("empty-js-dir", AiTemplateConstants.DIR_STATIC_JS,
                         Severity.WARNING, true, "static/js 为空目录"));
+            }
+        }
+    }
+
+    /**
+     * 检查 10：HTML 内联 CSS/JS 分离（分级：AI 产物 = ERROR，人工产物 = WARNING）
+     *
+     * <p><b>规范意图</b>：fastcms 模板推荐 HTML / CSS / JS 分文件，HTML 通过
+     * {@code <link rel="stylesheet">} 与 {@code <script src>} 引入样式与脚本。
+     * AI 经常违反（把大段 CSS 写进 {@code <style>} 块、把 JS 写进内联 {@code <script>}），
+     * 直接后果是 HTML 膨胀 → 每轮对话都要塞整页进提示词，且与补丁协议相冲突。</p>
+     *
+     * <p><b>但不是「禁止内联」</b>（2026-10-29 用户澄清）：人工快速调整模板时，
+     * 在 HTML 里写少量 CSS/JS 是合理且必要的 —— 强行分离反而增加维护成本。
+     * 因此按<b>产物来源</b>与<b>体量</b>分级：</p>
+     * <ul>
+     *     <li><b>AI 生成产物</b>（readOnly=false）：超过阈值的大段内联 → <b>确定性抽取</b>
+     *         （写成独立 CSS/JS 文件，HTML 就地改写为引用）；</li>
+     *     <li><b>人工产物 / 正式模板目录</b>（readOnly=true）：<b>只提示不改</b>，
+     *         且严重级降为 <b>WARNING</b> —— 人工写的小段 CSS/JS 是合法写法，
+     *         判 ERROR 会让「调整型会话」把人工代码当违规、触发 AI 重写抹掉它；</li>
+     *     <li><b>阈值内的小段内联</b>（任何来源）：完全放行，不检查不提示。</li>
+     * </ul>
+     *
+     * <p><b>含 FreeMarker 指令的块</b>：静态资源不经 FTL 渲染，抽出去会变成字面量而失效
+     * → 无法自动抽取，保留问题交回 AI 改写（ERROR，fixable=false）。</p>
+     *
+     * @param readOnly 调整型会话（正式模板目录）传 true：只提示播报，绝不改正式模板内容
+     */
+    private void checkInlineAssets(Path workDir, boolean readOnly,
+                                   List<ComplianceIssue> issues, List<String> fixed) {
+        List<Path> htmlFiles = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(workDir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".html"))
+                    // 排除 design/ 中间态目录：设计稿本身就是「HTML + 内联 <style>」形态
+                    // （V1~V6 校验与 MockupConverter 都依赖它），抽走会破坏设计稿本身
+                    .filter(p -> !workDir.relativize(p).toString().replace('\\', '/')
+                            .toLowerCase(Locale.ROOT).startsWith("design/"))
+                    .forEach(htmlFiles::add);
+        } catch (IOException e) {
+            log.warn("扫描 HTML 文件失败: workDir={}", workDir, e);
+            return;
+        }
+        for (Path htmlFile : htmlFiles) {
+            String rel = workDir.relativize(htmlFile).toString().replace('\\', '/');
+            String content;
+            try {
+                content = Files.readString(htmlFile, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                continue;
+            }
+            List<InlineAssetExtractor.Violation> violations =
+                    InlineAssetExtractor.detect(content, rel);
+            if (violations.isEmpty()) {
+                continue;
+            }
+            if (readOnly) {
+                // 正式模板目录（人工产物）：只提示、不改内容，且降为 WARNING
+                // —— 人工写少量 CSS/JS 是合法写法，判 ERROR 会触发 AI 重写把它抹掉
+                for (InlineAssetExtractor.Violation v : violations) {
+                    issues.add(new ComplianceIssue("inline-assets", v.file(), Severity.WARNING, false,
+                            "内联 " + v.type() + " 块 " + v.chars() + " 字符/" + v.lines()
+                                    + " 行（超过 " + InlineAssetExtractor.INLINE_MAX_CHARS + " 字符/"
+                                    + InlineAssetExtractor.INLINE_MAX_LINES + " 行阈值）；"
+                                    + "建议拆到 static/" + ("style".equals(v.type()) ? "css" : "js")
+                                    + " 以便精准修改，如需保留请忽略本提示"
+                                    + (v.extractable() ? "" : "；且" + v.reason())));
+                }
+                continue;
+            }
+            // AI 生成产物：含 FTL 指令的块无法抽取 → 先单独报出来（ERROR，交回 AI 改写）
+            for (InlineAssetExtractor.Violation v : violations) {
+                if (!v.extractable()) {
+                    issues.add(new ComplianceIssue("inline-assets", v.file(), Severity.ERROR, false,
+                            "内联 " + v.type() + " 块 " + v.chars() + " 字符/" + v.lines() + " 行"
+                                    + "，且" + v.reason()));
+                }
+            }
+            // 可抽取 → 确定性修复：写独立文件 + 就地改写 HTML 引用
+            InlineAssetExtractor.Extraction extraction =
+                    InlineAssetExtractor.extract(content, rel);
+            if (extraction.isEmpty()) {
+                continue;
+            }
+            try {
+                for (Map.Entry<String, String> entry : extraction.assetFiles().entrySet()) {
+                    Path target = workDir.resolve(entry.getKey()).normalize();
+                    if (!target.startsWith(workDir)) {
+                        continue;
+                    }
+                    Path parent = target.getParent();
+                    if (parent != null) {
+                        Files.createDirectories(parent);
+                    }
+                    Files.writeString(target, entry.getValue(),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    fixed.add(entry.getKey());
+                }
+                Files.writeString(htmlFile, extraction.rewrittenHtml(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                fixed.add(rel);
+                log.info("内联资源已分离: file={}, 抽出 {}", rel, extraction.extracted());
+            } catch (IOException e) {
+                log.warn("内联资源分离失败: file={}", rel, e);
+                issues.add(new ComplianceIssue("inline-assets", rel, Severity.ERROR, false,
+                        "内联 CSS/JS 分离失败：" + e.getMessage()));
             }
         }
     }

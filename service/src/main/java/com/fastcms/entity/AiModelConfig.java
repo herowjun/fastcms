@@ -79,6 +79,17 @@ public class AiModelConfig implements Serializable {
     private String scene;
 
     /**
+     * 思考档位：auto（跟随场景默认）/ off（关闭思考）/ low / medium / xhigh
+     *
+     * <p>推理端点的思考开关没有统一标准：不传参数时 Qwen 系端点默认
+     * <b>xhigh（全力思考）</b>，思考 token 与正文 token 同价（实测 48 tok/s），
+     * 会让单次调用多等数倍时间。留空（auto）= 由调用方按场景决定（见
+     * {@code com.fastcms.ai.support.AiReasoningSupport}）。</p>
+     */
+    @TableField("reasoning_effort")
+    private String reasoningEffort;
+
+    /**
      * 温度参数 0.0-2.0
      */
     private Double temperature;
@@ -138,6 +149,9 @@ public class AiModelConfig implements Serializable {
 
     public String getScene() { return scene; }
     public void setScene(String scene) { this.scene = scene; }
+
+    public String getReasoningEffort() { return reasoningEffort; }
+    public void setReasoningEffort(String reasoningEffort) { this.reasoningEffort = reasoningEffort; }
 
     public Double getTemperature() { return temperature; }
     public void setTemperature(Double temperature) { this.temperature = temperature; }

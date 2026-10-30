@@ -87,10 +87,12 @@ public final class DesignContractPrompt {
      * <p>技能正文首段自带"与设计契约配合使用（契约优先，本方法论补充细化）"的定位说明，
      * 此处只加标题不再重复。</p>
      *
+     * <p><b>内容为空的处理</b>：本方法只负责拼装，不负责校验——调用方
+     * （MockupDesignService）已通过 {@code RequiredSkills.requireContent} 保证非空，
+     * 缺失即明确失败。保留空值分支只是防御性编程，不构成"静默降级"路径。</p>
+     *
      * @param baseSystemPrompt   设计契约基底（prepare 产出的 getBaseSystemPrompt）
-     * @param designBriefContent design-brief 技能 L2 正文（SkillRegistry.loadContent 产出）；
-     *                           空/null（技能库未安装）时原样返回基底——契约措辞已条件化，
-     *                           不做"已注入"的虚假声明
+     * @param designBriefContent design-brief 技能 L2 正文（调用方保证非空）
      */
     public static String buildInjectedSystemPrompt(String baseSystemPrompt, String designBriefContent) {
         return buildInjectedSystemPrompt(baseSystemPrompt, designBriefContent, null);
@@ -102,10 +104,9 @@ public final class DesignContractPrompt {
      * <p><b>template-spec 注入（2026-09-25）</b>：设计稿最终要转成 fastcms 模板，AI 必须知道目标
      * 模板的目录结构（_template.properties / _layout.html / _articlePage.html / 四个必备页）与内置
      * 指令能力（articleListTag / menuTag / categoryList / tagList / singlePageList / formatTime /
-     * seoTag / ctx 等）——既避免设计出无法转化的结构，也让契约 7 的 CMS 数据区语义标记有明确落点。
-     * 技能未安装（内容空）时该段不注入，契约措辞已条件化，不做虚假声明。</p>
+     * seoTag / ctx 等）——既避免设计出无法转化的结构，也让契约 7 的 CMS 数据区语义标记有明确落点。</p>
      *
-     * @param templateSpecContent template-spec 技能 L2 正文（SkillRegistry.loadContent 产出）；空/null 不注入
+     * @param templateSpecContent template-spec 技能 L2 正文（调用方保证非空）
      */
     public static String buildInjectedSystemPrompt(String baseSystemPrompt, String designBriefContent,
                                                    String templateSpecContent) {
@@ -228,5 +229,87 @@ public final class DesignContractPrompt {
         sb.append("markdown 围栏或 ===FILE:=== 标记；仅当使用了 <img> 占位图时，才在文档之后以 ");
         sb.append("===FILE: design/assets/placeholder-<语义>.svg=== 文件块追加输出对应 SVG。");
         return sb.toString();
+    }
+
+    // ==================== 骨架先行（B4） ====================
+
+    /**
+     * 骨架轮提示词：只产出 section 清单与每段职责，不写 HTML
+     *
+     * <p><b>为什么要骨架先行</b>：整页一次性决策 = 决策空间无边界，是设计稿失控的主因
+     * （2026-09-13 文档 §2.1）。先让模型把「这一页分几段、每段放什么」想清楚，
+     * 再以骨架为硬约束写 HTML，决策空间缩小一个量级。</p>
+     *
+     * <p><b>为什么是"清单 + 整页实现"而不是"逐段产出再拼装"</b>：逐段产出需要代码拼装 HTML，
+     * 拼装结果极易过不了 V1~V6 格式校验（缺 meta/断点/导航 id 等），
+     * 反而要多跑修正轮、得不偿失。骨架约束 + 一次性整页产出，
+     * 拿到了"决策空间收缩"的主要收益，却不引入拼装风险。</p>
+     */
+    public static String buildSkeletonPrompt(String requirement,
+                                             DesignDirectionLibrary.DesignDirectionAsset direction,
+                                             DesignPagePlanner.PagePlan page,
+                                             String sitePageContext,
+                                             boolean mobileAdaptive,
+                                             String userComment) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【站点需求】\n").append(requirement == null ? "" : requirement.trim()).append('\n');
+
+        if (direction != null) {
+            sb.append("\n【设计方向：").append(direction.name()).append("】\n");
+            sb.append(direction.summary() == null ? "" : direction.summary().trim()).append('\n');
+            if (StringUtils.hasText(direction.primaryColor())) {
+                sb.append("建议主色：").append(direction.primaryColor().trim()).append('\n');
+            }
+            if (direction.doRules() != null && !direction.doRules().isEmpty()) {
+                sb.append("方向要求：\n");
+                for (String rule : direction.doRules()) {
+                    sb.append("- ").append(rule).append('\n');
+                }
+            }
+        }
+
+        sb.append("\n【全站页面清单】\n").append(sitePageContext).append('\n');
+
+        sb.append("\n【本次任务】为页面 ").append(page.name()).append(".html（").append(page.title())
+                .append("）规划页面骨架。\n");
+        if (StringUtils.hasText(page.description())) {
+            sb.append("页面定位：").append(page.description().trim()).append('\n');
+        }
+        if (mobileAdaptive) {
+            sb.append("需响应式：至少 2 个断点 + 移动端汉堡菜单\n");
+        }
+        if (StringUtils.hasText(userComment)) {
+            sb.append("\n【用户具体不满】（骨架必须针对性调整）\n").append(userComment.trim()).append('\n');
+        }
+
+        sb.append("\n【输出契约】只输出一个 JSON 对象，不要 markdown 围栏、不要解释文字：\n")
+                .append("{\n")
+                .append("  \"layout\": \"一句话描述整页版式（如：顶部导航 + 首屏主视觉 + 三栏特性 + 页脚）\",\n")
+                .append("  \"sections\": [\n")
+                .append("    {\"id\": \"hero\", \"title\": \"首屏主视觉\", \"purpose\": \"一句话说明这一段承载什么\", "
+                        + "\"content\": \"这一段要放的具体内容要点（标题/文案/按钮/图片占位）\"}\n")
+                .append("  ]\n")
+                .append("}\n")
+                .append("sections 按页面从上到下排列；通常 3~6 段。id 用小写英文短横线（如 hero/features/footer）。\n")
+                .append("只规划结构与内容，不要写任何 HTML/CSS 代码。");
+        return sb.toString();
+    }
+
+    /**
+     * 骨架约束段：把骨架清单作为硬约束拼进实现轮提示词
+     *
+     * @param skeleton 骨架 JSON（可空/空白 = 不加约束段）
+     */
+    public static String buildSkeletonConstraint(String skeleton) {
+        if (!StringUtils.hasText(skeleton)) {
+            return "";
+        }
+        return "\n【页面骨架（硬约束）】\n"
+                + "以下是本轮已确定的页面骨架，**必须严格按此结构实现**——"
+                + "section 的顺序、id、数量、每段承载的内容都要与骨架一致，不要自行增删或重排。\n"
+                + "<page-skeleton>\n"
+                + skeleton.trim()
+                + "\n</page-skeleton>\n"
+                + "骨架里没写的补充内容（如装饰性小节）一律不加——保持骨架就是页面结构的全部。\n";
     }
 }

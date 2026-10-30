@@ -22,7 +22,10 @@ import com.fastcms.ai.autoconfigure.FastcmsAiProperties;
 import com.fastcms.ai.component.DesignDirectionLibrary;
 import com.fastcms.ai.service.IAiTemplateFileService;
 import com.fastcms.ai.service.impl.AiModelConfigServiceImpl;
+import com.fastcms.ai.skill.RequiredSkills;
 import com.fastcms.ai.skill.SkillRegistry;
+import com.fastcms.ai.support.AiThinkingBudget;
+import com.fastcms.ai.support.DesignGuard;
 import com.fastcms.ai.support.ReasoningStreamAccumulator;
 import com.fastcms.ai.template.AiTemplateConstants;
 import com.fastcms.entity.AiTemplateSession;
@@ -30,6 +33,7 @@ import com.fastcms.service.IAiUsageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
@@ -96,6 +100,14 @@ public class MockupDesignService {
      */
     private static final long REASONING_RUNAWAY_MAX_CHARS = 256L * 1024;
 
+    /**
+     * 思考落盘目录（B4 早停三件套）
+     *
+     * <p>每页的完整思考过程写到 {@code workDir/design-log/<page>.reasoning.txt}，
+     * 便于事后复盘「这一轮为什么思考了这么久」。</p>
+     */
+    private static final String DESIGN_LOG_DIR = "design-log";
+
     private static final tools.jackson.databind.ObjectMapper JSON_MAPPER = new tools.jackson.databind.ObjectMapper();
 
     private final AgentChatExecutor agentChatExecutor;
@@ -103,6 +115,19 @@ public class MockupDesignService {
     private final com.fastcms.ai.audit.AiUsageRecorder usageRecorder;
     private final FastcmsAiProperties aiProperties;
     private final SkillRegistry skillRegistry;
+
+    /**
+     * 静止检测看门狗（B4 早停三件套）
+     *
+     * <p>流「卡住不吐字」时流回调根本不会被触发，只能在独立线程上判定并中止订阅。
+     * 单线程调度即可（每 5 秒轮询一次所有在途调用的空闲时长）。</p>
+     */
+    private final java.util.concurrent.ScheduledExecutorService stallWatchdog =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "fastcms-design-stall-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
 
     public MockupDesignService(AgentChatExecutor agentChatExecutor, IAiTemplateFileService fileService,
                                com.fastcms.ai.audit.AiUsageRecorder usageRecorder, FastcmsAiProperties aiProperties,
@@ -252,11 +277,13 @@ public class MockupDesignService {
         // 目录结构 + 内置 FreeMarker 指令 + CMS 数据模型）。2026-09-25 起 template-spec 一并注入——
         // AI 必须知道设计稿最终转成什么样的模板、有哪些内置指令可用，契约 7 的 CMS 数据区语义标记
         // 才有落点（否则 AI 无法判断哪些区块应声明为 article-list 等受控语义名）。
-        // 技能未安装时对应段不注入（措辞已条件化不做虚假声明）。一次设计任务装配一次，多页多轮复用
+        // 两个技能都是代码侧硬依赖（RequiredSkills）：缺失时明确失败，不静默降级——
+        // 少一段方法论/规范却照常出图，产出质量无声劣化，问题会被掩盖到无法追溯。
+        // 一次设计任务装配一次，多页多轮复用
         String designSystemPrompt = DesignContractPrompt.buildInjectedSystemPrompt(
                 prepared.getBaseSystemPrompt(),
-                skillRegistry.loadContent(BuiltinAgents.DESIGN_BRIEF_SKILL_ID),
-                skillRegistry.loadContent(BuiltinAgents.TEMPLATE_SPEC_SKILL_ID));
+                RequiredSkills.requireContent(skillRegistry, BuiltinAgents.DESIGN_BRIEF_SKILL_ID, "设计稿系统提示词"),
+                RequiredSkills.requireContent(skillRegistry, BuiltinAgents.TEMPLATE_SPEC_SKILL_ID, "设计稿系统提示词"));
         String sitePageContext = buildSitePageContext(ctx.allPages());
         // 断点续传：已落盘的设计稿文件（跨页共享的占位 SVG 等）视作在场，V5 不再要求重出。
         // 并发集合：并行路径下多 worker 同时校验（读）与落盘后登记（写），HashSet 迭代/并发写会炸
@@ -408,6 +435,15 @@ public class MockupDesignService {
         Map<String, String> accepted = null;
         int roundsUsed = 0;
 
+        // 骨架先行（B4）：先出 section 清单，再以骨架为硬约束写整页 HTML。
+        // 整页一次性决策 = 决策空间无边界，是设计稿失控的主因；骨架把决策空间缩小一个量级。
+        // 骨架轮失败（超时/不可解析）不影响出稿——直接回退到单阶段整页生成。
+        String skeleton = null;
+        if (aiProperties.getTemplate().getDesign().isSkeletonFirst()) {
+            skeleton = buildPageSkeleton(ctx, prepared, designOptions, designSystemPrompt, page,
+                    sitePageContext, sse, usageAgg, abortSignal, reasoningTag);
+        }
+
         for (int round = 1; round <= maxRounds; round++) {
             if (sse.isCancelled()) {
                 throw new DesignCancelledException();
@@ -422,9 +458,13 @@ public class MockupDesignService {
                     round == 1 ? ctx.prevAuditIssues() : null,
                     round == 1 ? null : String.join("\n", lastErrors),
                     ctx.userComment(),
-                    ctx.userReferenceHtml());
+                    ctx.userReferenceHtml())
+                    // 骨架约束只在第 1 轮注入：后续修正轮是在第 1 轮产物上修格式，
+                    // 再加约束会让提示词越滚越长
+                    + (round == 1 ? DesignContractPrompt.buildSkeletonConstraint(skeleton) : "");
             String raw = callDesignModel(prepared, designOptions, designSystemPrompt, userPrompt,
-                    sse, usageAgg, abortSignal, reasoningTag, statusBoard != null);
+                    sse, usageAgg, abortSignal, reasoningTag, statusBoard != null,
+                    ctx.workDir(), page.name());
             Map<String, String> files = parseFileBlocks(raw);
             if (files.isEmpty()) {
                 // 协议收编兜底：模型未按 ===FILE:=== 文件块输出、但直出了完整 HTML 文档
@@ -474,7 +514,216 @@ public class MockupDesignService {
         return new PageResult(page.name(), title, PageStatus.PLACEHOLDER, roundsUsed, lastErrors);
     }
 
+    // ==================== 骨架先行（B4） ====================
+
+    /**
+     * 骨架轮：产出该页的 section 清单
+     *
+     * <p>整页一次性决策 = 决策空间无边界，是设计稿失控的主因。先让模型把
+     * 「这一页分几段、每段放什么」想清楚（1~2K token），再以骨架为硬约束写 HTML，
+     * 决策空间缩小一个量级。</p>
+     *
+     * <p><b>失败不阻断出稿</b>：骨架轮超时/不可解析时返回 null，
+     * 实现轮退化为无骨架约束的整页生成（等价于改造前的行为）。</p>
+     *
+     * @return 骨架 JSON 文本（失败为 null）
+     */
+    private String buildPageSkeleton(DesignContext ctx, AgentChatExecutor.Prepared prepared,
+                                     OpenAiChatOptions designOptions, String designSystemPrompt,
+                                     DesignPagePlanner.PagePlan page, String sitePageContext,
+                                     DesignSseSink sse, AtomicLongArray usageAgg,
+                                     BooleanSupplier abortSignal, String reasoningTag) {
+        String skeletonPrompt = DesignContractPrompt.buildSkeletonPrompt(
+                ctx.requirement(), ctx.direction(), page, sitePageContext,
+                ctx.mobileAdaptive(), ctx.userComment());
+        try {
+            sse.send(AiTemplateConstants.SSE_EVENT_STATUS,
+                    "正在规划「" + page.title() + "」的页面骨架…");
+            // 骨架轮是纯结构化任务（答案空间 = section 清单）→ 走确定性档，关思考
+            OpenAiChatOptions skeletonOptions = buildSkeletonOptions(prepared, designOptions);
+            String raw = callDesignModel(prepared, skeletonOptions, designSystemPrompt, skeletonPrompt,
+                    sse, usageAgg, abortSignal, reasoningTag, true,
+                    ctx.workDir(), page.name() + "-skeleton");
+            String skeleton = parseSkeleton(raw);
+            if (skeleton == null) {
+                log.warn("骨架轮输出不可解析，回退无约束生成: sessionId={}, page={}",
+                        ctx.session().getSessionId(), page.name());
+                return null;
+            }
+            log.info("骨架就绪: sessionId={}, page={}, skeleton={} 字符",
+                    ctx.session().getSessionId(), page.name(), skeleton.length());
+            return skeleton;
+        } catch (DesignCancelledException ce) {
+            throw ce;
+        } catch (Exception e) {
+            // 骨架是增强不是必需——失败就退化成单阶段生成，不影响出稿
+            log.warn("骨架轮失败，回退无约束生成: sessionId={}, page={}, reason={}",
+                    ctx.session().getSessionId(), page.name(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 骨架轮 options：确定性档（关思考）+ 更小的输出上限
+     *
+     * <p>骨架输出只有 1~2K token，给大上限没有意义，反而给「思考吃满」留了空间。</p>
+     */
+    private OpenAiChatOptions buildSkeletonOptions(AgentChatExecutor.Prepared prepared,
+                                                   OpenAiChatOptions designOptions) {
+        OpenAiChatOptions.Builder builder = com.fastcms.ai.service.impl.AiModelConfigServiceImpl.optionsBuilder(
+                prepared.getModelConfig(),
+                com.fastcms.ai.support.AiReasoningSupport.SCENE_DETERMINISTIC);
+        builder.temperature(0.3);
+        builder.maxTokens(Math.min(4096,
+                designOptions != null && designOptions.getMaxTokens() != null
+                        ? designOptions.getMaxTokens() : 4096));
+        return builder.build();
+    }
+
+    /**
+     * 解析骨架轮输出：抽出含 sections 数组的 JSON 对象
+     *
+     * @return 骨架 JSON 文本（不可解析为 null）
+     */
+    static String parseSkeleton(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String json = extractJsonObject(raw);
+        if (json == null) {
+            return null;
+        }
+        try {
+            tools.jackson.databind.JsonNode root = JSON_MAPPER.readTree(json);
+            if (root == null || !root.isObject()) {
+                return null;
+            }
+            tools.jackson.databind.JsonNode sections = root.get("sections");
+            if (sections == null || !sections.isArray() || sections.isEmpty()) {
+                return null;
+            }
+            return json;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 从原始文本里抠出第一个 JSON 对象
+     *
+     * <p>三种形态：纯 JSON、```json 围栏、前后夹带解释文字。</p>
+     */
+    private static String extractJsonObject(String raw) {
+        String text = raw.trim();
+        int fence = text.indexOf("```");
+        if (fence >= 0) {
+            int contentStart = text.indexOf('\n', fence);
+            if (contentStart > 0) {
+                int contentEnd = text.indexOf("```", contentStart);
+                if (contentEnd > contentStart) {
+                    String block = text.substring(contentStart + 1, contentEnd).trim();
+                    if (block.startsWith("{")) {
+                        return block;
+                    }
+                }
+            }
+        }
+        if (text.startsWith("{")) {
+            int last = text.lastIndexOf('}');
+            return last > 0 ? text.substring(0, last + 1) : null;
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        return (start >= 0 && end > start) ? text.substring(start, end + 1) : null;
+    }
+
     // ==================== 模型调用（流式） ====================
+
+    /**
+     * 单轮设计调用（含思考看护）
+     *
+     * <p>2026-10-29 端点实测：{@code max_tokens} 是思考 + 正文共享预算，且<b>预算越大模型思考越长</b>。
+     * 于是「思考吃满 → 正文 0 字符」是真实故障（实测 512 预算 + 推理档 → 正文 0、思考 2067 字符）。
+     * 本方法统一处理三件事：</p>
+     * <ol>
+     *   <li><b>注入思考预算约束</b>（{@link AiThinkingBudget#applyBudgetHint}）：
+     *       实测思考量 -25%，且能让正文从 0 变成有产出。</li>
+     *   <li><b>采集 finish_reason 与真实思考量</b>，供判定「思考吃满」。</li>
+     *   <li><b>思考吃满 → 关思考重试一次</b>（保留原上限，<b>不翻倍</b>——
+     *       翻倍只会给思考更多空间，正文照样是 0）。</li>
+     * </ol>
+     *
+     * <p><b>骨架轮说明</b>：骨架轮走 {@link #buildSkeletonOptions}（确定性档 = 关思考），
+     * 天然不会思考吃满；{@link AiThinkingBudget#applyBudgetHint} 检测到已关思考也会跳过约束注入。</p>
+     *
+     * @param prepared      智能体装配结果（含模型配置）
+     * @param designOptions 本次请求的 options（骨架轮为关思考档，设计轮为推理档）
+     * @param designSystemPrompt 设计契约系统提示词
+     * @param userPrompt    用户提示词（本页设计契约）
+     * @param sse           SSE 通道
+     * @param usageAgg      token 用量聚合槽
+     * @param abortSignal   并行 fail-fast 信号
+     * @param reasoningTag  并行路径思考流页面标识（串行为 null）
+     * @param suppressFileStatus 并行路径抑制文件块级 status
+     * @param workDir       工作目录（思考落盘）
+     * @param pageName      页面名（落盘文件名）
+     * @return 完整响应文本
+     */
+    private String callDesignModel(AgentChatExecutor.Prepared prepared, OpenAiChatOptions designOptions,
+                                   String designSystemPrompt, String userPrompt, DesignSseSink sse,
+                                   AtomicLongArray usageAgg, BooleanSupplier abortSignal,
+                                   String reasoningTag, boolean suppressFileStatus,
+                                   Path workDir, String pageName) {
+        // 统一注入「思考预算约束」：实测思考量 -25%，且能让正文从 0 变成有产出。
+        // 已关思考的请求（骨架轮）自动跳过——没有思考可约束。
+        List<Message> messages = AiThinkingBudget.applyBudgetHint(
+                List.of(new SystemMessage(designSystemPrompt), new UserMessage(userPrompt)), designOptions);
+
+        DesignStreamOutcome outcome = runDesignStream(prepared, messages, designOptions, sse, usageAgg,
+                abortSignal, reasoningTag, suppressFileStatus);
+
+        // 思考吃满预算 → 关思考重试（保留原上限，不翻倍）
+        if (outcome.text().isEmpty() && outcome.diagnostics().thinkingFlooded()) {
+            log.warn("设计稿思考吃满预算，关闭思考重试: page={}, finishReason={}, 思考字符={}",
+                    pageName, outcome.diagnostics().finishReason, outcome.diagnostics().reasoningChars);
+            OpenAiChatOptions offOptions = buildThinkingOffOptions(prepared, designOptions);
+            if (offOptions != null) {
+                DesignStreamOutcome retry = runDesignStream(prepared, messages, offOptions, sse, usageAgg,
+                        abortSignal, reasoningTag, suppressFileStatus);
+                if (!retry.text().isEmpty()) {
+                    // 重试成功：落盘用重试轮的思考（关思考后无思考，等价于空）
+                    writeReasoningLog(workDir, pageName, retry.reasoning());
+                    return retry.text();
+                }
+                // 重试仍为空：落盘首轮思考（根因证据），随后按空响应抛错
+                writeReasoningLog(workDir, pageName, outcome.reasoning());
+            }
+        } else {
+            writeReasoningLog(workDir, pageName, outcome.reasoning());
+        }
+
+        if (outcome.text().isEmpty()) {
+            throw new IllegalStateException("设计模型返回空响应（思考过程可能耗尽了输出上限）");
+        }
+        return outcome.text();
+    }
+
+    /**
+     * 构建「强制关闭思考」的 options（保留原 maxTokens / temperature）
+     *
+     * <p>关思考形态按端点族分流（Qwen 系走 {@code chat_template_kwargs.enable_thinking=false}，
+     * 其他端点走 {@code reasoning_effort=minimal}）。</p>
+     *
+     * <p><b>不翻倍上限</b>：端点上「预算越大思考越长」，翻倍只会给思考更多空间、正文照样是 0。
+     * 关思考后思考恒为 0，全部预算归正文。</p>
+     */
+    private OpenAiChatOptions buildThinkingOffOptions(AgentChatExecutor.Prepared prepared,
+                                                      OpenAiChatOptions origin) {
+        if (prepared == null) {
+            return null;
+        }
+        return AiModelConfigServiceImpl.thinkingOffOptions(prepared.getModelConfig(), origin);
+    }
 
     /**
      * 单轮流式调用：reasoning 增量 + 文件块阶段状态推送，聚合完整响应文本返回
@@ -490,13 +739,14 @@ public class MockupDesignService {
      *
      * @param suppressFileStatus 并行路径置 true：文件块级"正在生成 path…"status 被聚合板取代
      *                           （多页并发的逐文件 status 是覆盖式文案，互相闪烁无信息量）
+     * @return 本轮结果（正文 + 思考 + 诊断）
      */
-    private String callDesignModel(AgentChatExecutor.Prepared prepared, OpenAiChatOptions designOptions,
-                                   String designSystemPrompt, String userPrompt, DesignSseSink sse,
-                                   AtomicLongArray usageAgg, BooleanSupplier abortSignal,
-                                   String reasoningTag, boolean suppressFileStatus) {
-        Prompt prompt = new Prompt(List.of(
-                new SystemMessage(designSystemPrompt), new UserMessage(userPrompt)), designOptions);
+    private DesignStreamOutcome runDesignStream(AgentChatExecutor.Prepared prepared,
+                                                List<Message> messages, OpenAiChatOptions designOptions,
+                                                DesignSseSink sse, AtomicLongArray usageAgg,
+                                                BooleanSupplier abortSignal,
+                                                String reasoningTag, boolean suppressFileStatus) {
+        Prompt prompt = new Prompt(messages, designOptions);
 
         StringBuilder textBuf = new StringBuilder();
         // 思考流归一累积器（单轮私有：识别重启链防缓冲平方级膨胀，见类注释）
@@ -506,8 +756,20 @@ public class MockupDesignService {
         // 文件块标记扫描游标（增量扫描，见 pushMarkerStatus）
         int[] markerScanPos = {0};
         int[] markerCount = {0};
+        // 完整思考文本（落盘用，B4 早停三件套）
+        StringBuilder reasoningLog = new StringBuilder();
+        // 早停守卫：思考预算 / 静止计时 / 重复窗口（B4）
+        DesignGuard guard = newDesignGuard();
+        // 本轮诊断（finish_reason / 思考量）——用于判定「思考吃满预算」
+        AiThinkingBudget.RoundDiagnostics diagnostics = new AiThinkingBudget.RoundDiagnostics();
 
-        prepared.getChatClient().prompt(prompt)
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subscriptionRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        reactor.core.Disposable subscription = prepared.getChatClient().prompt(prompt)
                 .stream()
                 .chatResponse()
                 .doOnNext(resp -> {
@@ -519,6 +781,8 @@ public class MockupDesignService {
                     if (abortSignal.getAsBoolean()) {
                         throw new ParallelAbortException();
                     }
+                    // 收到 chunk = 有活动，重置静止计时
+                    guard.onActivity();
                     // token 用量（OpenAI 兼容流式仅最后 chunk 携带 usage，累加聚合）
                     if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null) {
                         Usage u = resp.getMetadata().getUsage();
@@ -532,6 +796,20 @@ public class MockupDesignService {
                             if (u.getTotalTokens() != null) {
                                 usageAgg.addAndGet(2, u.getTotalTokens());
                             }
+                        }
+                        // 思考 token 计数（端点不一定上报；上报时用于「思考吃满」判定）
+                        if (u.getNativeUsage() != null) {
+                            Integer reasoningTokens = AiThinkingBudget.extractReasoningTokens(u.getNativeUsage());
+                            if (reasoningTokens != null) {
+                                diagnostics.reasoningTokens = reasoningTokens;
+                            }
+                        }
+                    }
+                    // finish_reason（流式最后一个 chunk 携带；端点返回大写 LENGTH）
+                    if (resp.getResult() != null && resp.getResult().getMetadata() != null) {
+                        String fr = resp.getResult().getMetadata().getFinishReason();
+                        if (fr != null && !fr.isBlank()) {
+                            diagnostics.finishReason = fr;
                         }
                     }
                     if (resp.getResult() == null || resp.getResult().getOutput() == null) {
@@ -555,10 +833,15 @@ public class MockupDesignService {
                                 sse.send(AiTemplateConstants.SSE_EVENT_REASONING, delta);
                             }
                             reasoningTotal[0] += delta.length();
+                            reasoningLog.append(delta);
+                            // 思考量统计（差分后的真实增量）——「思考吃满」判定的第三个信号
+                            diagnostics.reasoningChars += delta.length();
+                            // 思考预算 + 重复窗口判定（超限直接抛异常中止本轮）
+                            guard.onReasoning(delta);
                         }
                         if (reasoningTotal[0] > REASONING_RUNAWAY_MAX_CHARS) {
                             throw new IllegalStateException("设计模型思考过程失控（已输出 "
-                                    + reasoningTotal[0] + " 字符），已中止本轮调用");
+                                    + reasoningTotal[0] + "字符），已中止本轮调用");
                         }
                     }
                     // 正文增量聚合（不推 message：文件块原文不进对话流）。
@@ -572,14 +855,96 @@ public class MockupDesignService {
                         pushMarkerStatus(textBuf, markerScanPos, markerCount, sse, suppressFileStatus);
                     }
                 })
-                // 双超时兜底：OkHttp callTimeout（baseOptionsBuilder 已设 10 分钟）在流死时
-                // 会以错误信号终止 blockLast，无需在此重复设超时（与 article-writer 同口径）
-                .blockLast();
+                .subscribe(resp -> { }, err -> {
+                    failure.set(err);
+                    done.countDown();
+                }, () -> done.countDown());
+        subscriptionRef.set(subscription);
 
-        if (textBuf.length() == 0) {
-            throw new IllegalStateException("设计模型返回空响应（思考过程可能耗尽了输出上限）");
+        // 看门狗：定期查静止超时（B4）。流「卡住不吐字」时 doOnNext 根本不会被调用，
+        // 只能在独立线程上判定并 dispose 掉订阅——这正是静止计时必须外挂的原因。
+        java.util.concurrent.ScheduledFuture<?> watchdog = stallWatchdog.scheduleWithFixedDelay(() -> {
+            try {
+                guard.checkStall();
+            } catch (RuntimeException ex) {
+                failure.compareAndSet(null, ex);
+                reactor.core.Disposable running = subscriptionRef.get();
+                if (running != null) {
+                    running.dispose();
+                }
+                done.countDown();
+            }
+        }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
+
+        Throwable error;
+        try {
+            done.await();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("设计模型调用被中断", ie);
+        } finally {
+            watchdog.cancel(false);
         }
-        return textBuf.toString();
+        error = failure.get();
+
+        if (error != null) {
+            if (error instanceof DesignCancelledException) {
+                throw (DesignCancelledException) error;
+            }
+            if (error instanceof ParallelAbortException) {
+                throw (ParallelAbortException) error;
+            }
+            if (error instanceof RuntimeException) {
+                throw (RuntimeException) error;
+            }
+            throw new IllegalStateException("设计模型调用失败：" + error.getMessage(), error);
+        }
+
+        // 正文长度回填诊断：三信号判定要求「正文长度 == 0」，
+        // 不回填会把「正文被截断但已产出内容」误判成「思考吃满」→ 错误触发关思考重试
+        diagnostics.contentLength = textBuf.length();
+        return new DesignStreamOutcome(textBuf.toString(), reasoningLog.toString(), diagnostics);
+    }
+
+    /**
+     * 单轮设计流式调用的结果
+     *
+     * @param text        完整响应文本
+     * @param reasoning   完整思考文本（落盘用）
+     * @param diagnostics 本轮诊断（finish_reason / 思考量）
+     */
+    private record DesignStreamOutcome(String text, String reasoning,
+                                       AiThinkingBudget.RoundDiagnostics diagnostics) {
+    }
+
+    /**
+     * 构造早停守卫（B4）
+     */
+    private DesignGuard newDesignGuard() {
+        FastcmsAiProperties.Template.Design design = aiProperties.getTemplate().getDesign();
+        return new DesignGuard(design.getReasoningBudgetChars(), design.getStallTimeoutMillis(),
+                design.getLoopWindowChars(), design.getLoopRepeatThreshold());
+    }
+
+    /**
+     * 思考落盘（B4）：写 {@code workDir/design-log/<page>.reasoning.txt}
+     *
+     * <p>失败只记 warn——落盘是辅助能力，不能因为写盘失败影响出稿。</p>
+     */
+    private void writeReasoningLog(Path workDir, String pageName, String reasoning) {
+        if (!aiProperties.getTemplate().getDesign().isLogReasoning()
+                || workDir == null || reasoning == null || reasoning.isBlank()) {
+            return;
+        }
+        try {
+            Path dir = workDir.resolve(DESIGN_LOG_DIR);
+            Files.createDirectories(dir);
+            String safeName = pageName == null ? "unknown" : pageName.replaceAll("[^A-Za-z0-9_-]", "_");
+            Files.writeString(dir.resolve(safeName + ".reasoning.txt"), reasoning,
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("设计稿思考落盘失败: page={}", pageName, e);
+        }
     }
 
     /**
@@ -817,18 +1182,16 @@ public class MockupDesignService {
     /**
      * 设计段调用 options：从配置基底出发（apiKey/baseUrl/timeout 必须在场——runtime options
      * 不会自动合并默认 options，漏设会 404/断流），叠 design-max-tokens 输出上限。
-     * qwen3 压低思考预算与管线 buildPipelineOptions 同口径（大输出场景防预算挤占）。
+     * 思考档位走「推理档」（低）：设计稿是开放式审美决策，需要一定推理，但推理端点
+     * 默认档（Qwen 系端点为 xhigh）会让单页设计多等数倍时间。
      */
     private OpenAiChatOptions buildDesignOptions(AgentChatExecutor.Prepared prepared) {
-        OpenAiChatOptions.Builder builder = AiModelConfigServiceImpl.baseOptionsBuilder(prepared.getModelConfig());
+        OpenAiChatOptions.Builder builder = AiModelConfigServiceImpl.optionsBuilder(prepared.getModelConfig(),
+                com.fastcms.ai.support.AiReasoningSupport.SCENE_REASONING);
         builder.maxTokens(Math.max(1024, aiProperties.getTemplate().getDesign().getDesignMaxTokens()));
         AgentProfile profile = prepared.getProfile();
         if (profile.getTemperature() != null) {
             builder.temperature(profile.getTemperature());
-        }
-        String model = prepared.getModelConfig().getModel();
-        if (model != null && model.toLowerCase(Locale.ROOT).contains("qwen3")) {
-            builder.reasoningEffort("low");
         }
         return builder.build();
     }

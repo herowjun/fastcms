@@ -38,6 +38,13 @@
           <el-table-column prop="baseUrl" label="端点" min-width="220" show-overflow-tooltip />
           <el-table-column prop="temperature" label="温度" width="80" />
           <el-table-column prop="maxTokens" label="MaxTokens" width="100" />
+          <el-table-column label="思考档位" width="110">
+            <template #default="scope">
+              <el-tag size="small" :type="scope.row.reasoningEffort === 'off' ? 'info' : 'primary'">
+                {{ effortLabel(scope.row.reasoningEffort) }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="scope">
               <el-tag v-if="scope.row.active" type="success">激活</el-tag>
@@ -217,6 +224,24 @@
         </el-row>
         <el-row :gutter="20">
           <el-col :span="12">
+            <el-form-item label="思考档位" prop="reasoningEffort">
+              <el-select v-model="state.form.reasoningEffort" placeholder="自动（按场景）" clearable style="width:100%">
+                <el-option label="自动（按场景）" value="" />
+                <el-option label="关闭思考 off" value="off" />
+                <el-option label="低 low" value="low" />
+                <el-option label="中 medium" value="medium" />
+                <el-option label="高 xhigh" value="xhigh" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="档位说明">
+              <span class="scene-tip">留空=按场景自动：生成类用 low，分类/映射/修复类关思考</span>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="20">
+          <el-col :span="12">
             <el-form-item label="排序" prop="sortNum">
               <el-input-number v-model="state.form.sortNum" :min="0" style="width:100%" />
             </el-form-item>
@@ -370,6 +395,7 @@ const state = reactive({
     model: '',
     temperature: 0.7,
     maxTokens: 2048,
+    reasoningEffort: '',
     active: false,
     sortNum: 0,
     remark: '',
@@ -433,6 +459,17 @@ const providerLabels: Record<string, string> = {
 };
 
 const providerLabel = (p?: string) => providerLabels[p] || p || '自定义';
+
+// 思考档位展示文案（空=自动，跟随场景默认）
+const effortLabel = (e?: string) => {
+  const map: Record<string, string> = {
+    off: '关闭',
+    low: '低',
+    medium: '中',
+    xhigh: '高',
+  };
+  return e && map[e] ? map[e] : '自动';
+};
 
 const providerIndex = (p?: string) => {
   const i = providerOrder.indexOf(p || 'custom');
@@ -623,6 +660,7 @@ const onOpenEdit = (row: any) => {
       Object.assign(state.form, res.data, {
         scene: res.data.scene || 'chat',
         extraHeaders: res.data.extraHeaders || '',
+        reasoningEffort: res.data.reasoningEffort || '',
         apiKey: '********', // 后端已脱敏，保持占位
       });
       state.dialog.title = '编辑模型';
@@ -640,6 +678,7 @@ const onOpenEdit = (row: any) => {
       model: '',
       temperature: 0.7,
       maxTokens: 2048,
+      reasoningEffort: '',
       active: false,
       sortNum: 0,
       remark: '',

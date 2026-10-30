@@ -157,7 +157,10 @@ public class AgentChatExecutor {
         }
 
         // runtime options：从配置基底构建（请求级字段永远在场），叠加 profile 覆盖
-        OpenAiChatOptions.Builder optionsBuilder = AiModelConfigServiceImpl.baseOptionsBuilder(modelConfig);
+        // 思考档位：通用对话/文章写作走「推理档」（低）——推理端点不传参数时默认是最高档
+        // （Qwen 系端点为 xhigh），思考 token 与正文同价会让简单问题多等数分钟
+        OpenAiChatOptions.Builder optionsBuilder = AiModelConfigServiceImpl.optionsBuilder(modelConfig,
+                com.fastcms.ai.support.AiReasoningSupport.SCENE_REASONING);
         if (profile.getTemperature() != null) {
             optionsBuilder.temperature(profile.getTemperature());
         }
@@ -387,6 +390,20 @@ public class AgentChatExecutor {
         public Prompt createPrompt(String systemPrompt, String userPrompt) {
             return new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPrompt)),
                     runtimeOptions);
+        }
+
+        /**
+         * 构建 Prompt（显式携带调用方自定的 options）
+         *
+         * <p>用于<b>按场景切换思考档位</b>：同一智能体下不同子任务需要的思考深度不同
+         * （如文章写作需要「推理档」，字段候选生成是枚举式任务用「确定性档」关思考）。
+         * 注意：request 级 options 会<b>整体替换</b>默认 options（不合并），因此传入的
+         * options 必须由 {@code AiModelConfigServiceImpl.optionsBuilder(...)} 构建，
+         * 保证 model/apiKey/baseUrl/timeout 等请求级字段齐备。</p>
+         */
+        public Prompt createPrompt(String systemPrompt, String userPrompt, OpenAiChatOptions options) {
+            return new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPrompt)),
+                    options);
         }
     }
 }

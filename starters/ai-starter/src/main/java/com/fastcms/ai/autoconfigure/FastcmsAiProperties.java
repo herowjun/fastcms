@@ -149,12 +149,84 @@ public class FastcmsAiProperties {
          */
         private final Import importConfig = new Import();
 
+        /**
+         * 调整轮上下文注入预算（tokens）
+         *
+         * <p>B3 上下文分层：把原先写死在代码里的常量提到配置层，
+         * 让「上下文太大导致慢」这类问题可以直接调参缓解，不必改代码发版。</p>
+         *
+         * <pre>
+         * fastcms.ai.template.adjust:
+         *   focused-closure-tokens: 24000   # 聚焦模式：当前页 + 依赖闭包全文注入上限
+         *   full-section-tokens: 60000      # 全量模式：全站文件注入上限
+         *   asset-full-tokens: 4000         # 单个 JS/CSS 文件全文注入阈值，超过只注入头部
+         * </pre>
+         */
+        private final Adjust adjust = new Adjust();
+
         public Design getDesign() {
             return design;
         }
 
         public Import getImportConfig() {
             return importConfig;
+        }
+
+        public Adjust getAdjust() {
+            return adjust;
+        }
+
+        /**
+         * 调整轮上下文注入预算配置（B3 上下文分层）
+         */
+        public static class Adjust {
+
+            /**
+             * 聚焦模式依赖闭包的 token 预算（硬上限）
+             *
+             * <p>正常单页依赖闭包在 12~16k tokens 以内，24k 是留了余量的上限。
+             * 调小可进一步压 prefill；调大可让 AI 看到更多上下文（但会更慢）。</p>
+             */
+            private long focusedClosureTokens = 24_000L;
+
+            /**
+             * 全量注入模式的 token 预算（硬上限）
+             *
+             * <p>全量注入把整个模板目录塞进提示词，是最慢的模式。
+             * 正常应走聚焦模式（{@code fastcms.ai.adjust-inject-mode=focus}）。</p>
+             */
+            private long fullSectionTokens = 60_000L;
+
+            /**
+             * 单个 JS/CSS 文件全文注入的 token 阈值
+             *
+             * <p>超过则只注入头部（结构/签名区可见），尾部注明可用 read_template_file 按需读取。</p>
+             */
+            private long assetFullTokens = 4_000L;
+
+            public long getFocusedClosureTokens() {
+                return focusedClosureTokens;
+            }
+
+            public void setFocusedClosureTokens(long focusedClosureTokens) {
+                this.focusedClosureTokens = focusedClosureTokens;
+            }
+
+            public long getFullSectionTokens() {
+                return fullSectionTokens;
+            }
+
+            public void setFullSectionTokens(long fullSectionTokens) {
+                this.fullSectionTokens = fullSectionTokens;
+            }
+
+            public long getAssetFullTokens() {
+                return assetFullTokens;
+            }
+
+            public void setAssetFullTokens(long assetFullTokens) {
+                this.assetFullTokens = assetFullTokens;
+            }
         }
 
         /**
@@ -267,6 +339,57 @@ public class FastcmsAiProperties {
              */
             private int mappingConcurrency = 3;
 
+            /**
+             * 骨架先行开关（B4）
+             *
+             * <p>开启后每页设计拆成两阶段：① <b>骨架轮</b>只产出 section 清单与每段职责
+             * （1~2K token，关思考即可）；② <b>实现轮</b>以骨架为硬约束产出整页 HTML。
+             * 决策空间缩小一个量级，失控率显著下降。</p>
+             *
+             * <p>骨架轮失败（超时/不可解析）时自动回退到单阶段整页生成，不影响出稿。</p>
+             */
+            private boolean skeletonFirst = true;
+
+            /**
+             * 思考预算（累计思考字符数上限，B4 早停三件套）
+             *
+             * <p>思考 token 与正文 token 同价（实测 48 tok/s decode），
+             * 8192 token 纯思考 ≈ 170 秒纯等待。默认 40000 字符≈提前 3 分钟刹车。</p>
+             * ≤0 表示不限制。
+             */
+            private long reasoningBudgetChars = 40_000L;
+
+            /**
+             * 静止超时（毫秒，B4 早停三件套）
+             *
+             * <p>超过该时长没有任何增量（思考或正文）即判假死并中止本轮。默认 90 秒。</p>
+             * ≤0 表示不限制。
+             */
+            private long stallTimeoutMillis = 90_000L;
+
+            /**
+             * 循环检测窗口（字符，B4 早停三件套）
+             *
+             * <p>思考文本尾部窗口长度；窗口片段在尾部反复出现即判循环。</p>
+             * ≤0 关闭循环检测。
+             */
+            private int loopWindowChars = 400;
+
+            /**
+             * 循环检测重复次数阈值（B4 早停三件套）
+             *
+             * <p>窗口片段出现这么多次即判循环。≤1 关闭循环检测。</p>
+             */
+            private int loopRepeatThreshold = 3;
+
+            /**
+             * 思考落盘开关（B4 早停三件套）
+             *
+             * <p>开启后把每页的完整思考过程写到 {@code workDir/design-log/<page>.reasoning.txt}，
+             * 便于事后复盘「为什么这一轮思考了这么久」。</p>
+             */
+            private boolean logReasoning = true;
+
             public boolean isEnabled() {
                 return enabled;
             }
@@ -321,6 +444,54 @@ public class FastcmsAiProperties {
 
             public void setMappingConcurrency(int mappingConcurrency) {
                 this.mappingConcurrency = mappingConcurrency;
+            }
+
+            public boolean isSkeletonFirst() {
+                return skeletonFirst;
+            }
+
+            public void setSkeletonFirst(boolean skeletonFirst) {
+                this.skeletonFirst = skeletonFirst;
+            }
+
+            public long getReasoningBudgetChars() {
+                return reasoningBudgetChars;
+            }
+
+            public void setReasoningBudgetChars(long reasoningBudgetChars) {
+                this.reasoningBudgetChars = reasoningBudgetChars;
+            }
+
+            public long getStallTimeoutMillis() {
+                return stallTimeoutMillis;
+            }
+
+            public void setStallTimeoutMillis(long stallTimeoutMillis) {
+                this.stallTimeoutMillis = stallTimeoutMillis;
+            }
+
+            public int getLoopWindowChars() {
+                return loopWindowChars;
+            }
+
+            public void setLoopWindowChars(int loopWindowChars) {
+                this.loopWindowChars = loopWindowChars;
+            }
+
+            public int getLoopRepeatThreshold() {
+                return loopRepeatThreshold;
+            }
+
+            public void setLoopRepeatThreshold(int loopRepeatThreshold) {
+                this.loopRepeatThreshold = loopRepeatThreshold;
+            }
+
+            public boolean isLogReasoning() {
+                return logReasoning;
+            }
+
+            public void setLogReasoning(boolean logReasoning) {
+                this.logReasoning = logReasoning;
             }
         }
     }

@@ -66,21 +66,32 @@ public class BuiltinAgents {
     public static final String ARTICLE_SKILLS_PLUGIN_ID = "article-skills-plugin";
 
     /**
-     * 设计方法论技能 id（file 源磁盘技能 ~/fastcms/skills/design-brief）
+     * 设计技能插件 id（技能随 design-skills-plugin 插件分发）
+     */
+    public static final String DESIGN_SKILLS_PLUGIN_ID = "design-skills-plugin";
+
+    /**
+     * 设计方法论技能 id（插件源 design-skills-plugin，jar 内 skills/design-brief/SKILL.md）
      *
      * <p>消费方式：<b>全文直注</b>——template-designer 经 prepare(false) 跳过 L1 清单，
      * 由 MockupDesignService 把本技能 L2 正文直接拼入系统提示词（见
      * DesignContractPrompt#buildInjectedSystemPrompt）。设计轮技能必用，走 load_skill
      * 两段式只会徒增工具往返（思考流重启/时延），故不走自主加载。</p>
+     *
+     * <p><b>为什么必须是插件源而不是本机磁盘文件</b>：本技能是模板生成链路的硬依赖，
+     * 内容若只存在于某台机器的 {@code ~/fastcms/skills/} 目录，换机器/重新部署后凭空消失，
+     * 而调用点仍会静默降级（少一段方法论却照常出图），问题被掩盖到无法追溯。
+     * 放进插件后内容随 jar 版本化、由 deploy-plugins.bat 统一分发、缺失可被启动自检发现。</p>
      */
-    public static final String DESIGN_BRIEF_SKILL_ID = "design-brief";
+    public static final String DESIGN_BRIEF_SKILL_ID = DESIGN_SKILLS_PLUGIN_ID + "/design-brief";
 
     /**
      * 模板制作规范技能 id（插件源 template-skills-plugin，jar 内 skills/template-spec/SKILL.md）
      *
      * <p>消费方式：<b>全文直注</b>——由 TemplateGenPromptBuilder 把本技能正文拼入
-     * buildSystemPrompt 的规范段（## 1~## 11），与内置副本 SPEC_PROMPT_BUILTIN 保持同步；
-     * 技能未加载（插件未安装/解析失败）时回退内置副本，规范段永远可用。
+     * buildSystemPrompt 的规范段（## 1~## 11）。
+     * <b>技能未加载（插件未安装/解析失败）时明确失败</b>，不再回退内置副本——内置副本曾长期与
+     * 插件正文漂移（缺 §1.0 CSS/JS 分离、§1.1 栏目专属页），静默回退会让模型拿到残缺规范却毫无察觉。
      * 协议段（## 12 响应格式 + 行为准则）恒内置，不在此技能范围内。</p>
      */
     public static final String TEMPLATE_SPEC_SKILL_ID = "template-skills-plugin/template-spec";

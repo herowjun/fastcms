@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微信支付 · 插件详情 — FastCMS 插件市场</title>
+<meta name="description" content="FastCMS 微信支付插件：支付回调、消息处理、商家转账能力，站点商业闭环接上微信收付款。JSAPI / H5 / Native 扫码三种收款场景，一个授权码绑定一个站点。">
+<link rel="stylesheet" href="css/site.css">
+<link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+<!-- ===== 导航（三页共用） ===== -->
+<nav class="nav" id="nav">
+  <div class="wrap">
+    <a class="logo" href="index.html"><span class="logo-mark">F</span>FastCMS <small>AI 原生 CMS</small></a>
+    <div class="nav-links">
+      <a href="index.html#features">核心能力</a>
+      <a href="index.html#ai">AI 建站</a>
+      <a href="plugins.html" class="active">插件市场</a>
+      <a href="index.html#pricing">定价</a>
+      <a href="index.html#stack">技术架构</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-line btn-sm" href="https://gitee.com/xjd2020/fastcms" target="_blank" rel="noopener" style="border-color:rgba(255,255,255,.25);color:var(--on-dark);background:transparent">源码下载</a>
+      <a class="btn btn-primary btn-sm" href="index.html#cta">免费开始使用</a>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="菜单"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+<div class="detail-top">
+<div class="wrap">
+  <div class="crumb"><a href="plugins.html">插件市场</a> / <a href="plugins.html#wx">微信生态</a> / 微信支付</div>
+
+  <div class="detail">
+    <!-- 左列：信息 -->
+    <div class="d-main">
+      <div class="d-head">
+        <div class="d-icon">¥</div>
+        <div>
+          <h1>微信支付</h1>
+          <div class="d-tags">
+            <span class="badge badge-pro">付费插件</span>
+            <span class="asset-tag">功能模块</span>
+            <span class="asset-tag">微信支付渠道</span>
+          </div>
+        </div>
+      </div>
+      <p class="d-desc">微信支付渠道插件：支付回调、消息处理、商家转账能力，站点商业闭环接上微信收付款。安装后在后台「支付网关」中配置商户参数即可启用，支持 JSAPI / H5 / 扫码（Native）三种收款场景。</p>
+
+      <div class="d-sec">
+        <h2>能力清单</h2>
+        <div class="cap">
+          <div class="cap-item"><b>支付回调处理</b><span>支付结果回调接入订单系统，自动核销订单与权益</span></div>
+          <div class="cap-item"><b>消息处理</b><span>微信消息事件接入，支持公众号侧消息通知场景</span></div>
+          <div class="cap-item"><b>商家转账</b><span>商户向用户转账能力（佣金结算 / 奖励发放）</span></div>
+          <div class="cap-item"><b>多收款场景</b><span>JSAPI / H5 / Native 扫码，适配站内与站外支付</span></div>
+        </div>
+        <p class="d-note">* 能力说明以插件上线版本为准；挂载的 Controller / 数据表可在安装后的后台「插件」页查看</p>
+      </div>
+
+      <div class="d-sec">
+        <h2>版本兼容</h2>
+        <table class="compat">
+          <tr><td>FastCMS 版本</td><td>≥ v4.0（当前基线 JDK 21 / Spring Boot 4.1）</td></tr>
+          <tr><td>安装方式</td><td>后台「插件」页上传 jar，热插拔，免重启</td></tr>
+          <tr><td>核心侵入</td><td>无——通过注册器机制挂载，主工程零改动</td></tr>
+          <tr><td>授权机制</td><td>一个授权码 = 一个站点，有效期按购买档位</td></tr>
+        </table>
+      </div>
+
+      <div class="d-sec">
+        <h2>更新日志</h2>
+        <div class="log">
+          <div class="log-item"><span class="v">v1.0</span><span class="d">即将发布</span><p>首发版本：支付回调 / 消息处理 / 商家转账 / 三种收款场景</p></div>
+        </div>
+        <p class="d-note">* 上架后此处展示真实版本记录（示例占位，仅一条首发）</p>
+      </div>
+      <div class="d-sec">
+        <h2>安装与使用</h2>
+        <div class="steps">
+          <div class="step"><div><b>上传插件 jar</b><span>后台「插件」页上传下载的 jar 包，系统自动安装并注册能力</span></div></div>
+          <div class="step"><div><b>激活授权码</b><span>在插件详情页粘贴购买获得的授权码，本地验签生效（官网不可达也不影响激活）</span></div></div>
+          <div class="step"><div><b>配置商户参数</b><span>后台「支付网关」填入微信支付商户号 / API 密钥 / 证书，即收款</span></div></div>
+        </div>
+      </div>
+
+      <div class="d-sec">
+        <h2>常见问题</h2>
+        <div class="faq-item"><summary>授权码会过期吗？</summary><div class="a">按购买档位生效（示例 1 年 / 3 年）。到期前 7 天后台会提醒续费，续费后授权码自动续期；到期未续费时仅该插件功能停用，站点本身不受影响。</div></div>
+        <div class="faq-item"><summary>一个授权码能用几个站点？</summary><div class="a">一个授权码绑定一个站点。多站点请按需购买对应数量，或在购买时选择多站点档位（以购买页选项为准）。</div></div>
+        <div class="faq-item"><summary>FastCMS 升级后还能用吗？</summary><div class="a">以本页「版本兼容」表为准。插件与核心解耦，核心升级不改动插件；插件随版本更新提供新版本 jar，授权码有效期内免费下载更新。</div></div>
+      </div>
+
+      <!-- 相关插件 -->
+      <div class="d-sec related">
+        <h2>微信生态 · 相关插件</h2>
+        <div class="rel-grid">
+          <a class="rel-card" href="plugin-detail.html"><b>公众号分享 <span class="badge badge-pro">付费</span></b><span>文章页自动注入分享参数与模板消息卡片</span></a>
+          <a class="rel-card" href="plugin-detail.html"><b>小程序管理 <span class="badge badge-pro">付费</span></b><span>小程序多账号信息管理与配置初始化</span></a>
+          <a class="rel-card" href="plugin-detail.html"><b>订单佣金 <span class="badge badge-pro">付费</span></b><span>支付回调扩展点自动结算，分销体系一套配置</span></a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右列：购买卡 -->
+    <aside class="buy-card" id="buyCard">
+      <h3>购买「微信支付」</h3>
+      <div class="buy-price">
+        <span class="num" id="priceNum">¥499</span>
+        <span class="per" id="pricePer">/ 1 年 · 每站点</span>
+        <span class="strike" id="priceStrike" style="display:none"></span>
+      </div>
+      <div class="buy-opts" id="optList">
+        <label class="buy-opt checked"><input type="radio" name="plan" value="1" data-price="499" data-per="1 年" checked> 1 年 <span class="op">¥499</span></label>
+        <label class="buy-opt"><input type="radio" name="plan" value="3" data-price="1299" data-per="3 年" data-strike="¥1497"> 3 年（省 15%） <span class="op">¥1,299</span></label>
+      </div>
+      <div class="buy-inc">
+        <span>授权码 × 1（本站点）</span>
+        <span>插件 jar 与有效期内全部更新</span>
+        <span>支持邮箱与文档中心</span>
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" id="btnOrder">立即订购</button>
+      <p class="buy-tips">* 价格为示例，以插件市场开放时为准</p>
+    </aside>
+  </div>
+</div>
+</div>
+<!-- 购买抽屉：4 状态 -->
+<div class="mask" id="mask"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="订购微信支付插件">
+  <div class="dw-head"><b id="dwTitle">确认订单</b><button class="dw-close" id="dwClose" aria-label="关闭">×</button></div>
+  <div class="dw-body">
+    <!-- 状态 1：确认订单 -->
+    <div class="dw-state on" data-state="confirm">
+      <div class="ord-item">
+        <div class="d-icon">¥</div>
+        <div><b>微信支付 <span class="badge badge-pro" style="font-size:11px">付费插件</span></b><span id="ordSpec">1 年 · 每站点</span></div>
+      </div>
+      <div class="f-row">
+        <label>授权站点</label>
+        <select id="fSite">
+          <option>demo-site.com（示例站点）</option>
+          <option>myblog.example.cn</option>
+        </select>
+        <p class="hint">授权码与该站点绑定；更多站点请购买多站点档位</p>
+      </div>
+      <div class="f-row">
+        <label>优惠券码</label>
+        <div class="coupon-line"><input id="fCoupon" placeholder="选填" autocomplete="off"><button class="btn btn-line" id="btnCoupon">应用</button></div>
+        <p class="coupon-ok" id="couponOk">✓ 已抵扣 ¥50（演示码：fastcms）</p>
+      </div>
+      <div class="ord-total">
+        <span class="t">应付金额</span>
+        <span><span class="v" id="ordTotal">¥499</span><span class="save" id="ordSave"></span></span>
+      </div>
+    </div>
+    <!-- 状态 2：支付中 -->
+    <div class="dw-state" data-state="paying">
+      <p class="pay-amt" id="payAmt">¥499</p>
+      <div class="pay-qr" id="qr" aria-label="微信支付二维码（演示占位）"></div>
+      <p class="pay-meta">微信扫码支付 · 订单号 <span id="ordNo" style="font-family:var(--mono)"></span><br>剩余有效 <span class="pay-timer" id="payTimer">15:00</span>（真实环境每 2 秒自动轮询订单状态）</p>
+      <div class="demo-box">
+        演示操作（正式环境为轮询 + 回调自动跳转）：
+        <div><button class="btn btn-primary btn-sm" id="btnPaid">模拟支付成功</button>
+        <button class="btn btn-line btn-sm" id="btnTimeout">模拟超时</button></div>
+      </div>
+    </div>
+    <!-- 状态 3：已支付 -->
+    <div class="dw-state" data-state="done">
+      <div class="ok-center">
+        <div class="ok-ico">✓</div>
+        <h3>支付成功，授权码已签发</h3>
+        <p>订单 <span id="doneOrd" style="font-family:var(--mono)"></span> 已完成，请在有效期内完成安装</p>
+      </div>
+      <div class="lic-box">
+        <span class="lab">授 权 码</span>
+        <code id="licCode">—</code>
+        <button class="btn btn-sm" id="btnCopy">复制授权码</button>
+      </div>
+      <div class="inst-steps">
+        <div><b>1</b><span>后台「插件」页上传 wechat-pay-plugin.jar</span></div>
+        <div><b>2</b><span>插件详情粘贴上方授权码，本地验签激活</span></div>
+        <div><b>3</b><span>「支付网关」配置商户参数，即可收款</span></div>
+      </div>
+    </div>
+    <!-- 状态 4：超时 -->
+    <div class="dw-state" data-state="timeout">
+      <div class="ok-center">
+        <div class="to-ico">⏱</div>
+        <h3>订单已关闭</h3>
+        <p>未在规定时间内完成支付，订单已自动关闭，可重新下单</p>
+      </div>
+    </div>
+  </div>
+  <div class="dw-foot" id="dwFoot">
+    <button class="btn btn-primary btn-lg btn-block" id="btnPay">微信支付 <span id="payBtnAmt">¥499</span></button>
+    <p class="pay-line">支付即同意《授权协议》· 一个授权码 = 一个站点</p>
+  </div>
+</div>
+<!-- ===== 页脚（三页共用） ===== -->
+<footer id="docs">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="logo" href="index.html"><span class="logo-mark">F</span>FastCMS</a>
+        <p>插件化、AI 原生的 Java 内容管理系统。对话即建站，装插件即扩展。</p>
+      </div>
+      <div class="foot-col">
+        <h5>产品</h5>
+        <a href="index.html#features">核心能力</a>
+        <a href="index.html#ai">AI 建站</a>
+        <a href="plugins.html">插件市场</a>
+        <a href="index.html#pricing">定价</a>
+        <a href="index.html#stack">技术架构</a>
+      </div>
+      <div class="foot-col">
+        <h5>资源</h5>
+        <a href="http://doc.xiaojudeng.net.cn" target="_blank" rel="noopener">文档中心</a>
+        <a href="https://www.bilibili.com/video/BV12G4y167vi/" target="_blank" rel="noopener">视频教程（B 站）</a>
+        <a href="https://gitee.com/xjd2020/fastcms" target="_blank" rel="noopener">Gitee 仓库</a>
+        <a href="https://github.com/herowjun/fastcms" target="_blank" rel="noopener">GitHub 仓库</a>
+      </div>
+      <div class="foot-col">
+        <h5>交流</h5>
+        <a href="mailto:support@xjd2020.com">商务 / 支持邮件</a>
+        <a href="https://gitee.com/xjd2020/fastcms/issues" target="_blank" rel="noopener">反馈 Issue</a>
+        <a href="index.html#cta">加微信群（备注 fastcms）</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 FastCMS · 核心系统 LGPL-3.0 开源协议</span>
+      <span>由广州小橘灯信息科技维护</span>
+    </div>
+  </div>
+</footer>
+<script src="js/site.js"></script>
+<script src="js/detail.js"></script>
+</body>
+</html>

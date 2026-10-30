@@ -17,10 +17,14 @@
 package com.fastcms.plugin;
 
 import com.fastcms.common.utils.FastcmsInstallState;
+import com.fastcms.plugin.compat.FastcmsPluginDescriptorFinder;
+import com.fastcms.plugin.compat.PluginCompatibility;
 import com.fastcms.plugin.extension.FastcmsSpringExtensionFactory;
 import com.fastcms.plugin.register.CompoundPluginRegister;
 import org.pf4j.DefaultPluginManager;
 import org.pf4j.ExtensionFactory;
+import org.pf4j.PluginDescriptor;
+import org.pf4j.PluginDescriptorFinder;
 import org.pf4j.PluginWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +72,49 @@ public class FastcmsPluginManager extends DefaultPluginManager implements Plugin
     @Override
     protected ExtensionFactory createExtensionFactory() {
         return new FastcmsSpringExtensionFactory(this);
+    }
+
+    /**
+     * 使用 fastcms 自有描述符查找器：额外读取 {@code Plugin-Fastcms-Version} 兼容声明。
+     *
+     * <p>pf4j 默认的 {@link org.pf4j.ManifestPluginDescriptorFinder} 只填硬编码的
+     * 标准字段，无法携带任意 manifest 键。</p>
+     */
+    @Override
+    protected PluginDescriptorFinder createPluginDescriptorFinder() {
+        return new FastcmsPluginDescriptorFinder();
+    }
+
+    /**
+     * 插件有效性判定：叠加 fastcms 版本兼容检查。
+     *
+     * <p><b>为什么必须在这里拦</b>：pf4j 自带的 {@code isPluginValid} 只比对
+     * {@code systemVersion}，而它默认为 {@code "0.0.0"} → 整个校验被短路绕过
+     * （fastcms 也从未调用 {@code setSystemVersion}）。结果是<b>主程序与插件版本错配
+     * 在运行时完全无法被检测</b>——插件照常加载，只是技能正文可能比主程序期望的旧，
+     * 产出质量无声下降。</p>
+     *
+     * <p>pf4j 在 {@code loadPlugin} 与 {@code enablePlugin} 两条路径上都会调用本方法，
+     * 因此不兼容的插件在<b>加载阶段</b>就被拦下（置为 DISABLED），不会进入
+     * {@code startPlugins()}，其扩展（含 SkillProvider）也不会被注册——
+     * 杜绝「加载了但用不了」的半吊子状态。</p>
+     */
+    @Override
+    protected boolean isPluginValid(PluginWrapper pluginWrapper) {
+        PluginDescriptor descriptor = pluginWrapper.getDescriptor();
+        PluginCompatibility.Result result = PluginCompatibility.check(descriptor, PluginCompatibility.currentFastcmsVersion());
+        if (!result.compatible()) {
+            log.error("【插件版本不兼容】插件 [{}] 已被拒绝加载：{}", descriptor.getPluginId(), result.reason());
+            return false;
+        }
+        String required = PluginCompatibility.requiredVersion(descriptor);
+        if (required != null && PluginCompatibility.currentFastcmsVersion() == null) {
+            log.warn("【插件版本未校验】插件 [{}] 声明要求 fastcms >= {}，"
+                            + "但当前主程序版本无法读取（fastcms-version.txt 缺失或未过滤），"
+                            + "本次未做兼容性判定——请确认插件与主程序版本匹配",
+                    descriptor.getPluginId(), required);
+        }
+        return super.isPluginValid(pluginWrapper);
     }
 
     @Override
